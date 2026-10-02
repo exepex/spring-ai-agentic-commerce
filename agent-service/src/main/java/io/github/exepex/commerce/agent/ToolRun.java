@@ -14,8 +14,8 @@ public final class ToolRun {
 
     private final String customerEmail;
     private final AtomicInteger callsLeft;
-    /** One successful tool call and what it returned. */
-    public record ToolResult(String tool, String result) {}
+    /** One successful tool call: the tool, the arguments it was called with, and what it returned. */
+    public record ToolResult(String tool, String arguments, String result) {}
 
     private final List<ToolResult> succeeded = new ArrayList<>();
 
@@ -32,8 +32,8 @@ public final class ToolRun {
         return callsLeft.getAndDecrement() > 0;
     }
 
-    synchronized void recordSuccess(String tool, String result) {
-        succeeded.add(new ToolResult(tool, result));
+    synchronized void recordSuccess(String tool, String arguments, String result) {
+        succeeded.add(new ToolResult(tool, arguments, result));
     }
 
     public synchronized List<ToolResult> succeeded() {

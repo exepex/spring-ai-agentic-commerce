@@ -2,13 +2,14 @@ package io.github.exepex.commerce.agent;
 
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Decides, from the tool calls that succeeded in a run, whether the agent dealt with a stock-out order: it handed the
- * order to a person, or the order is cancelled and its refund paid or waiting for approval. The model's own summary is
- * not trusted for this.
+ * order to a person, or the order is cancelled and its refund paid or waiting for approval. Only calls made for that
+ * order count, and the model's own summary is not trusted for this.
  */
 final class StockOutSettlement {
 
@@ -17,7 +18,10 @@ final class StockOutSettlement {
 
     private StockOutSettlement() {}
 
-    static boolean isSettled(List<ToolRun.ToolResult> calls) {
+    static boolean isSettled(UUID orderId, List<ToolRun.ToolResult> allCalls) {
+        List<ToolRun.ToolResult> calls = allCalls.stream()
+                .filter(call -> orderId.toString().equals(json(call.arguments()).path("orderId").asString("")))
+                .toList();
         boolean escalated = calls.stream().anyMatch(call -> "escalate_to_human".equals(call.tool()));
         boolean cancelled = calls.stream().anyMatch(call -> ("cancel_order".equals(call.tool())
                 || "get_order".equals(call.tool())) && "CANCELLED".equals(json(call).path("status").asString("")));
@@ -30,8 +34,12 @@ final class StockOutSettlement {
     }
 
     private static JsonNode json(ToolRun.ToolResult call) {
+        return json(call.result());
+    }
+
+    private static JsonNode json(String text) {
         try {
-            return JSON.readTree(call.result());
+            return JSON.readTree(text == null ? "" : text);
         } catch (RuntimeException notJson) {
             return JSON.missingNode();
         }

@@ -101,7 +101,7 @@ public class OrderExceptionsAgent {
         String summary = ClaudeReply.textOf(response);
         decisions.record(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, orderId, summary,
                 "Triggered by stock-out event: " + stockOutEvent, response, Duration.between(started, Instant.now()));
-        if (!StockOutSettlement.isSettled(run.succeeded())) {
+        if (!StockOutSettlement.isSettled(orderId, run.succeeded())) {
             handToHuman(orderId, "Stock-out: the order-exceptions agent finished without cancelling and refunding this "
                     + "order or handing it over, so a person must finish it. The agent said: " + summary);
         }

@@ -59,7 +59,7 @@ final class AgentToolCallback implements ToolCallback {
         }
         // A call the MCP server refused throws here, so only successful calls are recorded.
         String result = mcpTool.call(input);
-        run.recordSuccess(definition.name(), textOf(result));
+        run.recordSuccess(definition.name(), input, textOf(result));
         return result;
     }
 
