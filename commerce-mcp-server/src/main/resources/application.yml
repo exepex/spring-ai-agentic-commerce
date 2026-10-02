@@ -1,0 +1,88 @@
+server:
+  port: 8085
+
+spring:
+  application:
+    name: commerce-mcp-server
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/commerce
+    username: commerce
+    password: commerce
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: governance
+  flyway:
+    default-schema: governance
+    schemas: governance
+  kafka:
+    bootstrap-servers: localhost:9092
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    consumer:
+      group-id: commerce-mcp-server
+      auto-offset-reset: earliest
+  http:
+    clients:
+      connect-timeout: 2s
+      read-timeout: 10s
+    serviceclient:
+      catalog:
+        base-url: http://localhost:8081
+      order:
+        base-url: http://localhost:8082
+      payment:
+        base-url: http://localhost:8083
+      shipping:
+        base-url: http://localhost:8084
+  ai:
+    mcp:
+      server:
+        name: commerce
+        version: 1.0.0
+        protocol: streamable
+        instructions: >
+          Tools for an online shop: look up products, orders, payments and shipments; propose orders for a customer
+          to confirm; cancel orders; refund payments within a limit; notify customers; escalate to a human.
+  mvc:
+    problemdetails:
+      enabled: true
+
+commerce:
+  topics:
+    order-events: order.events
+    stock-out: inventory.stock-out
+  governance:
+    # Refunds up to this amount run straight away; larger ones wait for a human to approve them.
+    refund-approval-threshold: 100.00
+    # Each agent authenticates with its own bearer token and may only call the tools listed for it.
+    agents:
+      shopping-assistant:
+        token: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:dev-shopping-assistant-token}
+        tools: search_products, find_customer_orders, get_order, track_shipment, propose_order, cancel_order, issue_refund, escalate_to_human
+        customer-scoped: true
+      order-exceptions-agent:
+        token: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:dev-order-exceptions-agent-token}
+        tools: get_order, track_shipment, cancel_order, issue_refund, notify_customer, escalate_to_human
+        customer-scoped: false
+
+management:
+  otlp:
+    metrics:
+      export:
+        # Jaeger only takes traces; without this every service fails to push metrics to it once a minute.
+        enabled: false
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}

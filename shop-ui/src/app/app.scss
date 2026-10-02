@@ -1,0 +1,65 @@
+.topbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.topbar-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.logo {
+  color: var(--brand);
+}
+
+.tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--agent);
+  background: var(--agent-soft);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+nav {
+  display: flex;
+  gap: 4px;
+}
+
+nav a {
+  padding: 6px 12px;
+  border-radius: 8px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+nav a.active {
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.persona {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

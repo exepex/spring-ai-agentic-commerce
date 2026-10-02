@@ -1,4 +1,21 @@
-# Infrastructure for running the services locally. The services themselves run with `mvn spring-boot:run`.
+# The whole demo: infrastructure, the six services, the UI and (with --profile slack) the Slack MCP server.
+# Start it with ./start-demo.sh. For development, start only the infrastructure:
+#   docker compose up -d postgres kafka jaeger
+# and run the services from your IDE or with mvn spring-boot:run.
+
+x-service: &service
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    kafka:
+      condition: service_healthy
+
+x-service-environment: &service-environment
+  SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/commerce
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -12,10 +29,123 @@ services:
       test: ["CMD-SHELL", "pg_isready -U commerce -d commerce"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   kafka:
-    # Single-node KRaft broker; the image's default configuration advertises localhost:9092.
+    # Single-node KRaft broker. Containers use kafka:29092; tools on your machine use localhost:9092.
     image: apache/kafka:4.1.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:29093,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
     ports:
       - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  jaeger:
+    # Collects OpenTelemetry traces (OTLP on 4318) and shows them at http://localhost:16686.
+    image: jaegertracing/jaeger:2.21.0
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+
+  catalog-service:
+    <<: *service
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: catalog-service } }
+    environment:
+      <<: *service-environment
+    ports:
+      - "8081:8081"
+
+  order-service:
+    <<: *service
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: order-service } }
+    environment:
+      <<: *service-environment
+      SPRING_HTTP_SERVICECLIENT_CATALOG_BASEURL: http://catalog-service:8081
+      SPRING_HTTP_SERVICECLIENT_PAYMENT_BASEURL: http://payment-service:8083
+    ports:
+      - "8082:8082"
+
+  payment-service:
+    <<: *service
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: payment-service } }
+    environment:
+      <<: *service-environment
+      AGENTIC_COMMERCE_STRIPE_SECRET_KEY: ${AGENTIC_COMMERCE_STRIPE_SECRET_KEY:-}
+    ports:
+      - "8083:8083"
+
+  shipping-service:
+    <<: *service
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: shipping-service } }
+    environment:
+      <<: *service-environment
+    ports:
+      - "8084:8084"
+
+  commerce-mcp-server:
+    <<: *service
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: commerce-mcp-server } }
+    environment:
+      <<: *service-environment
+      SPRING_HTTP_SERVICECLIENT_CATALOG_BASEURL: http://catalog-service:8081
+      SPRING_HTTP_SERVICECLIENT_ORDER_BASEURL: http://order-service:8082
+      SPRING_HTTP_SERVICECLIENT_PAYMENT_BASEURL: http://payment-service:8083
+      SPRING_HTTP_SERVICECLIENT_SHIPPING_BASEURL: http://shipping-service:8084
+      AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:-dev-shopping-assistant-token}
+      AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:-dev-order-exceptions-agent-token}
+    ports:
+      - "8085:8085"
+
+  agent-service:
+    <<: *service
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: agent-service } }
+    environment:
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+      SPRING_HTTP_SERVICECLIENT_GOVERNANCE_BASEURL: http://commerce-mcp-server:8085
+      COMMERCE_AGENTS_MCPURL: http://commerce-mcp-server:8085
+      AGENTIC_COMMERCE_ANTHROPIC_API_KEY: ${AGENTIC_COMMERCE_ANTHROPIC_API_KEY:-}
+      AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:-dev-shopping-assistant-token}
+      AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:-dev-order-exceptions-agent-token}
+      AGENTIC_COMMERCE_SLACK_MCP_URL: http://slack-mcp:3001
+      AGENTIC_COMMERCE_SLACK_MCP_API_KEY: ${AGENTIC_COMMERCE_SLACK_MCP_API_KEY:-dev-slack-mcp-key}
+      AGENTIC_COMMERCE_SLACK_CHANNEL_ID: ${AGENTIC_COMMERCE_SLACK_CHANNEL_ID:-}
+    ports:
+      - "8086:8086"
+
+  shop-ui:
+    build: { context: shop-ui }
+    restart: unless-stopped
+    depends_on:
+      - agent-service
+      - commerce-mcp-server
+    ports:
+      - "8080:80"
+
+  slack-mcp:
+    # Third-party MCP server for Slack. Its posting tool is limited to the one channel below.
+    profiles: [slack]
+    image: ghcr.io/korotovsky/slack-mcp-server:v1.3.0
+    command: ["--transport", "http"]
+    restart: unless-stopped
+    environment:
+      SLACK_MCP_XOXB_TOKEN: ${AGENTIC_COMMERCE_SLACK_BOT_TOKEN:-}
+      SLACK_MCP_ADD_MESSAGE_TOOL: ${AGENTIC_COMMERCE_SLACK_CHANNEL_ID:-}
+      SLACK_MCP_API_KEY: ${AGENTIC_COMMERCE_SLACK_MCP_API_KEY:-dev-slack-mcp-key}
+      SLACK_MCP_HOST: 0.0.0.0
+      SLACK_MCP_PORT: "3001"

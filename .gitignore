@@ -30,3 +30,11 @@ target/
 .idea/
 *.iml
 .vscode/
+
+# Local secrets
+.env
+
+# Node
+node_modules/
+dist/
+.angular/
