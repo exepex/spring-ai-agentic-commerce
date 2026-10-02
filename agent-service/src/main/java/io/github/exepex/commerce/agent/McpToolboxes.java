@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agents.AgentDefinition;
+import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -34,27 +36,30 @@ class McpToolboxes {
     private static final String SLACK = "slack";
 
     private final AgentProperties properties;
+    private final AgentDefinitions definitions;
     private final Map<String, McpSyncClient> clients = new ConcurrentHashMap<>();
 
-    McpToolboxes(AgentProperties properties) {
+    McpToolboxes(AgentProperties properties, AgentDefinitions definitions) {
         this.properties = properties;
+        this.definitions = definitions;
     }
 
     /** The shopping assistant's tools; {@code customerEmail} is always the signed-in customer's. */
     List<ToolCallback> shoppingAssistantTools() {
-        AgentProperties.Agent agent = properties.agents().shoppingAssistant();
+        AgentDefinition agent = definitions.get(AgentSwitchboard.SHOPPING_ASSISTANT);
         return toolsFrom(AgentSwitchboard.SHOPPING_ASSISTANT,
-                () -> commerceClient(AgentSwitchboard.SHOPPING_ASSISTANT, agent.token()), agent.tools(), true);
+                () -> commerceClient(AgentSwitchboard.SHOPPING_ASSISTANT), agent.commerceTools(), agent.customerScoped());
     }
 
     List<ToolCallback> orderExceptionsAgentTools() {
-        AgentProperties.Agent agent = properties.agents().orderExceptionsAgent();
+        AgentDefinition agent = definitions.get(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT);
         List<ToolCallback> tools = new ArrayList<>(
                 toolsFrom(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT,
-                        () -> commerceClient(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, agent.token()), agent.tools(), false));
-        if (properties.slack().isConfigured()) {
+                        () -> commerceClient(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT), agent.commerceTools(),
+                        agent.customerScoped()));
+        if (properties.slack().isConfigured() && !agent.slackTools().isEmpty()) {
             try {
-                tools.addAll(toolsFrom(SLACK, this::slackClient, properties.slack().tools(), false));
+                tools.addAll(toolsFrom(SLACK, this::slackClient, agent.slackTools(), false));
             } catch (RuntimeException slackDown) {
                 // Slack is a nice-to-have: without it the agent still does its job and records it in the audit trail.
                 LOGGER.warn("Slack MCP server unavailable; the agent runs without Slack", slackDown);
@@ -66,10 +71,9 @@ class McpToolboxes {
 
     /** Calls a commerce tool directly, without a model: used when an agent is switched off or fails. */
     McpSchema.CallToolResult callAsOrderExceptionsAgent(String tool, Map<String, Object> arguments) {
-        AgentProperties.Agent agent = properties.agents().orderExceptionsAgent();
         // Only used to hand work to a human: if the first attempt is lost, a second escalation beats none.
         return onLiveConnection(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT,
-                () -> commerceClient(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, agent.token()),
+                () -> commerceClient(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT),
                 client -> client.callTool(new McpSchema.CallToolRequest(tool, arguments)));
     }
 
@@ -110,8 +114,8 @@ class McpToolboxes {
                 .getToolCallbacks();
     }
 
-    private McpSyncClient commerceClient(String agentId, String token) {
-        return connect(agentId, properties.agents().mcpUrl(), token);
+    private McpSyncClient commerceClient(String agentId) {
+        return connect(agentId, properties.agents().mcpUrl(), properties.agents().tokenOf(agentId));
     }
 
     private McpSyncClient slackClient() {

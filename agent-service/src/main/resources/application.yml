@@ -34,23 +34,19 @@ spring:
 commerce:
   topics:
     stock-out: inventory.stock-out
+  # Where the agents connect and with which tokens. What each agent is (model, effort, tools, budget, prompt) is in
+  # its definition in agent-definitions/src/main/resources/agents.
   agents:
-    model: claude-opus-5-5
     mcp-url: http://localhost:8085
     shopping-assistant:
       token: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:dev-shopping-assistant-token}
-      effort: medium
-      tools: search_products, find_customer_orders, get_order, track_shipment, propose_order, cancel_order, issue_refund, escalate_to_human
     order-exceptions-agent:
       token: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:dev-order-exceptions-agent-token}
-      effort: high
-      tools: get_order, track_shipment, cancel_order, issue_refund, notify_customer, escalate_to_human
   slack:
     # The Slack MCP server and the one channel agents may post in. Leave the URL empty to run without Slack.
     mcp-url: ${AGENTIC_COMMERCE_SLACK_MCP_URL:}
     api-key: ${AGENTIC_COMMERCE_SLACK_MCP_API_KEY:dev-slack-mcp-key}
     channel-id: ${AGENTIC_COMMERCE_SLACK_CHANNEL_ID:}
-    tools: conversations_add_message
 
 management:
   otlp:

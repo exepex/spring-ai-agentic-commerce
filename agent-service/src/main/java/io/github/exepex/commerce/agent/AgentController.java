@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agents.AgentDefinition;
+import io.github.exepex.commerce.agents.AgentDefinitions;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -27,13 +29,15 @@ class AgentController {
     private final ShoppingAssistant assistant;
     private final AgentSwitchboard switchboard;
     private final AgentProperties properties;
+    private final AgentDefinitions definitions;
     private final boolean modelConfigured;
 
     AgentController(ShoppingAssistant assistant, AgentSwitchboard switchboard, AgentProperties properties,
-            Environment environment) {
+            AgentDefinitions definitions, Environment environment) {
         this.assistant = assistant;
         this.switchboard = switchboard;
         this.properties = properties;
+        this.definitions = definitions;
         this.modelConfigured = !environment.getProperty("spring.ai.anthropic.api-key", "").isBlank();
     }
 
@@ -44,17 +48,18 @@ class AgentController {
 
     @GetMapping("/api/agents")
     AgentsView agents() {
-        AgentProperties.Agents agents = properties.agents();
-        List<String> exceptionsTools = properties.slack().isConfigured()
-                ? Stream.concat(agents.orderExceptionsAgent().tools().stream(),
-                        properties.slack().tools().stream().map(tool -> "slack:" + tool)).toList()
-                : agents.orderExceptionsAgent().tools();
-        return new AgentsView(modelConfigured, properties.slack().isConfigured(), List.of(
-                new AgentView(AgentSwitchboard.SHOPPING_ASSISTANT, switchboard.isEnabled(AgentSwitchboard.SHOPPING_ASSISTANT),
-                        agents.model(), agents.shoppingAssistant().effort(), agents.shoppingAssistant().tools()),
-                new AgentView(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT,
-                        switchboard.isEnabled(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT), agents.model(),
-                        agents.orderExceptionsAgent().effort(), exceptionsTools)));
+        boolean slackConfigured = properties.slack().isConfigured();
+        return new AgentsView(modelConfigured, slackConfigured, List.of(
+                view(definitions.get(AgentSwitchboard.SHOPPING_ASSISTANT), slackConfigured),
+                view(definitions.get(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT), slackConfigured)));
+    }
+
+    private AgentView view(AgentDefinition agent, boolean slackConfigured) {
+        List<String> tools = slackConfigured
+                ? Stream.concat(agent.commerceTools().stream(), agent.slackTools().stream().map(tool -> "slack:" + tool))
+                        .toList()
+                : agent.commerceTools();
+        return new AgentView(agent.id(), switchboard.isEnabled(agent.id()), agent.model(), agent.effort(), tools);
     }
 
     @PutMapping("/api/agents/{agentId}")
