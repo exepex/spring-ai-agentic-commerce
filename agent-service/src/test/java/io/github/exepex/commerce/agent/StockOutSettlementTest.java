@@ -79,6 +79,26 @@ class StockOutSettlementTest {
     }
 
     @Test
+    void aRefundStillWaitingForApprovalCountsAsReturned() {
+        String cancelledByTheCustomer = "{\"status\": \"CANCELLED\", \"payment\": {\"status\": \"SUCCEEDED\", "
+                + "\"refundable\": 129.90}, \"refunds\": [{\"idempotencyKey\": \"refund-" + ORDER + "-cancel\", "
+                + "\"amount\": 129.90, \"status\": \"PENDING_APPROVAL\"}], \"notifications\": [{}]}";
+        assertThat(StockOutSettlement.isSettled(ORDER, List.of(call("get_order", cancelledByTheCustomer)))).isTrue();
+
+        String partlyCovered = cancelledByTheCustomer.replace("\"amount\": 129.90", "\"amount\": 100.00");
+        assertThat(StockOutSettlement.isSettled(ORDER, List.of(call("get_order", partlyCovered)))).isFalse();
+    }
+
+    @Test
+    void aFailedStockOutRefundMustBeRetriedEvenWhenNothingSeemsLeftToRefund() {
+        String failedAfterReachingTheProcessor = "{\"status\": \"CANCELLED\", \"payment\": {\"status\": \"SUCCEEDED\", "
+                + "\"refundable\": 0}, \"refunds\": [" + refundOf(STOCK_OUT_KEY, "FAILED") + "], \"notifications\": [{}]}";
+        assertThat(StockOutSettlement.isSettled(ORDER, List.of(call("get_order", failedAfterReachingTheProcessor)))).isFalse();
+        assertThat(StockOutSettlement.isSettled(ORDER, List.of(call("get_order", failedAfterReachingTheProcessor),
+                refund(STOCK_OUT_KEY, "EXECUTED")))).isTrue();
+    }
+
+    @Test
     void aCustomerWhoWasNeverToldLeavesTheOrderUnsettled() {
         assertThat(StockOutSettlement.isSettled(ORDER, List.of(
                 lookup("CANCELLED", refundOf(STOCK_OUT_KEY, "EXECUTED"), 0)))).isFalse();

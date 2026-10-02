@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -8,10 +9,10 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Decides, from the tool calls that succeeded in a run, whether the agent dealt with a stock-out order. It did when it
- * handed the order to a person, or when the order is cancelled, the stock-out's own refund (key
- * {@code refund-<order id>-stockout}) is paid or waiting for approval, or nothing is left to refund, and the customer
- * was notified. Each can have
- * happened in this run or, for a replayed stock-out, an earlier one that {@code get_order} shows. Only calls made for
+ * handed the order to a person, or when the order is cancelled, its money is settled, and the customer was notified.
+ * The money is settled when the stock-out's own refund (key {@code refund-<order id>-stockout}) is paid or waiting for
+ * approval or, while that refund has not failed, when nothing is left to refund beyond the refunds already waiting for
+ * approval. Each can have happened in this run or, for a replayed stock-out, an earlier one that {@code get_order} shows. Only calls made for
  * that order count, and the model's own summary is not trusted for this.
  */
 final class StockOutSettlement {
@@ -42,18 +43,36 @@ final class StockOutSettlement {
                 || lookups.stream().flatMap(order -> order.path("refunds").valueStream())
                         .anyMatch(refund -> refundKey.equals(refund.path("idempotencyKey").asString(""))
                                 && SETTLED_REFUNDS.contains(refund.path("status").asString("")))
-                || lookups.stream().anyMatch(StockOutSettlement::fullyRefunded);
+                || lookups.stream().anyMatch(order -> !stockOutRefundFailed(order, refundKey) && nothingLeftToRefund(order));
         boolean notified = calls.stream().anyMatch(call -> "notify_customer".equals(call.tool()))
                 || lookups.stream().anyMatch(order -> !order.path("notifications").isEmpty());
         return escalated || (cancelled && refunded && notified);
     }
 
-    /** The payment was taken and all of it is already returned, for example after the customer cancelled earlier. */
-    private static boolean fullyRefunded(JsonNode order) {
+    /**
+     * A failed request may still have reached the card processor, so a payment with nothing left to refund does not
+     * show it was paid: only retrying its key settles it.
+     */
+    private static boolean stockOutRefundFailed(JsonNode order, String refundKey) {
+        return order.path("refunds").valueStream().anyMatch(refund -> refundKey.equals(refund.path("idempotencyKey").asString(""))
+                && "FAILED".equals(refund.path("status").asString("")));
+    }
+
+    /**
+     * The payment was taken and all of it is returned or waiting for approval, for example after the customer
+     * cancelled earlier.
+     */
+    private static boolean nothingLeftToRefund(JsonNode order) {
         JsonNode payment = order.path("payment");
-        return "SUCCEEDED".equals(payment.path("status").asString(""))
-                && payment.path("refundable").isNumber()
-                && payment.path("refundable").decimalValue().signum() == 0;
+        if (!"SUCCEEDED".equals(payment.path("status").asString("")) || !payment.path("refundable").isNumber()) {
+            return false;
+        }
+        BigDecimal waitingForApproval = order.path("refunds").valueStream()
+                .filter(refund -> "PENDING_APPROVAL".equals(refund.path("status").asString("")))
+                .filter(refund -> refund.path("amount").isNumber())
+                .map(refund -> refund.path("amount").decimalValue())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        return payment.path("refundable").decimalValue().subtract(waitingForApproval).signum() <= 0;
     }
 
     private static JsonNode json(ToolRun.ToolResult call) {
