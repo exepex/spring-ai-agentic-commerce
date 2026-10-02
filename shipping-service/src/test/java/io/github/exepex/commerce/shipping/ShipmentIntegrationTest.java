@@ -81,7 +81,8 @@ class ShipmentIntegrationTest {
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> assertThat(shipment(orderId))
                 .hasStatusOk()
                 .bodyJson().extractingPath("$.status").isEqualTo("SHIPPED"));
-        assertThat(shipment(orderId)).bodyJson().extractingPath("$.shippedAt").isNotNull();
+        // The time the order shipped, which the event carries, not the time the listener read it.
+        assertThat(shipment(orderId)).bodyJson().extractingPath("$.shippedAt").isEqualTo("2026-10-02T10:00:00Z");
         assertThat(shipments.findAll()).filteredOn(shipment -> shipment.getOrderId().equals(orderId)).hasSize(1);
     }
 

@@ -34,7 +34,8 @@ class OrderEventListener {
         switch (event.type()) {
             case ORDER_CONFIRMED -> shipmentFor(event);
             case ORDER_CANCELLED -> shipments.findByOrderId(event.orderId()).ifPresent(shipment -> shipment.cancel(Instant.now(clock)));
-            case ORDER_SHIPPED -> shipmentFor(event).ship(Instant.now(clock));
+            // When the order shipped, not when this listener caught up with the event.
+            case ORDER_SHIPPED -> shipmentFor(event).ship(event.occurredAt());
         }
     }
 
