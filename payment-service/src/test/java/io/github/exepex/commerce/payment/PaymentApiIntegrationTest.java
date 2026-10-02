@@ -90,6 +90,24 @@ class PaymentApiIntegrationTest {
     }
 
     @Test
+    void aRefundPendingForLongerThanTheWatchIsStillWatchedOnceItSucceeds() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "100.00", "pm_card_refundFail");
+        refund(orderId, "40.00", "refund-pending-long-" + orderId);
+        // As if the processor had kept the refund pending for two hours.
+        jdbc.update("""
+                update payments.refund set status = 'PENDING', succeeded_at = null, created_at = now() - interval '2 hours'
+                where idempotency_key = ?""", "refund-pending-long-" + orderId);
+
+        refundReconciler.reconcile();
+        refundReconciler.reconcile();
+
+        MvcTestResult payment = mockMvc.get().uri("/api/payments/{orderId}", orderId).exchange();
+        assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("FAILED");
+        assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(100.0);
+    }
+
+    @Test
     void onlyRefundsOfPaymentsTheCurrentProcessorTookAreChecked() {
         UUID orderId = UUID.randomUUID();
         charge(orderId, "100.00", "pm_card_refundFail");

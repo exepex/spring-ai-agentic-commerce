@@ -28,7 +28,7 @@ commerce:
     # Leave empty to use the built-in simulated gateway; set a Stripe test-mode key (sk_test_...) to use Stripe.
     stripe-secret-key: ${AGENTIC_COMMERCE_STRIPE_SECRET_KEY:}
     # How often refunds are checked with the card processor: pending ones until they settle, and succeeded ones for
-    # the watch period after they were made, since a succeeded refund can still fail.
+    # the watch period after they succeeded, since a succeeded refund can still fail.
     refund-check:
       interval: 1m
       watch: 1h

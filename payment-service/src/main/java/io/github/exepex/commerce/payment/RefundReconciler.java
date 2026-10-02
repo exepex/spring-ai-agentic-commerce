@@ -12,7 +12,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Asks the card processor again about refunds that can still change: pending ones until they settle, and succeeded
- * ones for {@code commerce.payments.refund-check.watch} after they were made, because a succeeded refund can still
+ * ones for {@code commerce.payments.refund-check.watch} after they succeeded, because a succeeded refund can still
  * fail. A failed refund returned no money, so its amount is taken off the payment's refunded amount. Only refunds of
  * payments the current processor took are checked: after switching between the simulator and Stripe, the other one's
  * refunds are unknown to it. The demo asks instead of receiving Stripe webhooks, so it needs no public URL.
@@ -68,7 +68,7 @@ class RefundReconciler {
                 LOGGER.warn("Refund {} of {} {} failed at the card processor; no money was returned",
                         current.getId(), current.getAmount(), payment.getCurrency());
             }
-            current.updateStatus(latest);
+            current.updateStatus(latest, Instant.now(clock));
         });
     }
 }

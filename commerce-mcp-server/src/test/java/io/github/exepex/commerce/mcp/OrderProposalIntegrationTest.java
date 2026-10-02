@@ -101,6 +101,19 @@ class OrderProposalIntegrationTest extends McpServerTestSupport {
         SERVICES.verify(2, placementsOf(proposalId).withRequestBody(matchingJsonPath("$.paymentMethod", equalTo("pm_card_visa"))));
     }
 
+    @Test
+    void aConfirmationWhoseOrderWasCancelledMeanwhileEndsAsConfirmed() {
+        String proposalId = propose();
+        SERVICES.stubFor(post("/api/orders").willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+        confirm(proposalId);
+
+        stubPlacedOrder(proposalId, "CANCELLED", 201);
+        reconciler.reconcile();
+
+        assertThat(status(proposalId)).isEqualTo("CONFIRMED");
+        assertThat((String) JsonPath.read(proposal(proposalId), "$.orderId")).isEqualTo(proposalId);
+    }
+
     private String propose() {
         return JsonPath.read(text(call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
                 "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1))))), "$.id");

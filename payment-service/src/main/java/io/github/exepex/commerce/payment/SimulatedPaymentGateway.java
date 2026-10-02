@@ -9,7 +9,8 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Stands in for Stripe when no key is configured, so the demo and the tests run without an account. It follows
  * Stripe's test-card conventions: {@code pm_card_chargeDeclined} is declined, and a refund of a charge made with
- * {@code pm_card_refundFail} first succeeds and then fails when asked about again. Every other card succeeds.
+ * {@code pm_card_refundFail} succeeds at first and is reported failed from the second time it is asked about. Every
+ * other card succeeds.
  */
 class SimulatedPaymentGateway implements PaymentGateway {
 
@@ -19,6 +20,7 @@ class SimulatedPaymentGateway implements PaymentGateway {
     private final Map<String, String> referencesByIdempotencyKey = new ConcurrentHashMap<>();
     private final Set<String> failingRefundReferences = ConcurrentHashMap.newKeySet();
     private final Set<String> chargesWhoseRefundsFail = ConcurrentHashMap.newKeySet();
+    private final Set<String> checkedFailingRefunds = ConcurrentHashMap.newKeySet();
 
     @Override
     public String name() {
@@ -48,6 +50,9 @@ class SimulatedPaymentGateway implements PaymentGateway {
 
     @Override
     public RefundStatus refundStatus(String refundReference) {
-        return failingRefundReferences.contains(refundReference) ? RefundStatus.FAILED : RefundStatus.SUCCEEDED;
+        if (!failingRefundReferences.contains(refundReference)) {
+            return RefundStatus.SUCCEEDED;
+        }
+        return checkedFailingRefunds.add(refundReference) ? RefundStatus.SUCCEEDED : RefundStatus.FAILED;
     }
 }

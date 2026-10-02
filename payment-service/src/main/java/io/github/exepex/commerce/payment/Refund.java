@@ -31,6 +31,9 @@ public class Refund {
     @Enumerated(EnumType.STRING)
     private PaymentGateway.RefundStatus status;
 
+    @Column(name = "succeeded_at")
+    private Instant succeededAt;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -47,10 +50,14 @@ public class Refund {
         this.idempotencyKey = idempotencyKey;
         this.providerReference = result.reference();
         this.status = result.status();
+        this.succeededAt = result.status() == PaymentGateway.RefundStatus.SUCCEEDED ? createdAt : null;
         this.createdAt = createdAt;
     }
 
-    void updateStatus(PaymentGateway.RefundStatus latest) {
+    void updateStatus(PaymentGateway.RefundStatus latest, Instant now) {
+        if (latest == PaymentGateway.RefundStatus.SUCCEEDED && status != PaymentGateway.RefundStatus.SUCCEEDED) {
+            succeededAt = now;
+        }
         status = latest;
     }
 
