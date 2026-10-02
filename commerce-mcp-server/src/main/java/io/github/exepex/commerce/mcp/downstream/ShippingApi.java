@@ -11,7 +11,7 @@ import org.springframework.web.service.annotation.HttpExchange;
 public interface ShippingApi {
 
     record Shipment(UUID id, UUID orderId, String trackingNumber, String status, LocalDate estimatedDelivery,
-            Instant createdAt, Instant cancelledAt) {}
+            Instant createdAt, Instant shippedAt, Instant deliveredAt, String deliveryProblem, Instant cancelledAt) {}
 
     @GetExchange("/{orderId}")
     Shipment getShipment(@PathVariable UUID orderId);

@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Creates a shipment when an order is confirmed and cancels it when the order is cancelled. Kafka may deliver an
- * event more than once, so both steps are safe to repeat.
+ * Creates a shipment when an order is confirmed, cancels it when the order is cancelled, and hands it to the carrier
+ * when the order ships. Kafka may deliver an event more than once, so every step is safe to repeat.
  */
 @Component
 class OrderEventListener {
@@ -32,18 +32,20 @@ class OrderEventListener {
     @Transactional
     void onOrderEvent(OrderEvent event) {
         switch (event.type()) {
-            case ORDER_CONFIRMED -> createShipment(event);
+            case ORDER_CONFIRMED -> shipmentFor(event);
             case ORDER_CANCELLED -> shipments.findByOrderId(event.orderId()).ifPresent(shipment -> shipment.cancel(Instant.now(clock)));
+            // When the order shipped, not when this listener caught up with the event.
+            case ORDER_SHIPPED -> shipmentFor(event).ship(event.occurredAt());
         }
     }
 
-    private void createShipment(OrderEvent event) {
-        if (shipments.findByOrderId(event.orderId()).isPresent()) {
-            return;
-        }
-        LocalDate estimatedDelivery = LocalDate.ofInstant(Instant.now(clock), ZoneOffset.UTC).plusDays(DELIVERY_DAYS);
-        shipments.save(new Shipment(event.orderId(), event.customerEmail(), newTrackingNumber(), estimatedDelivery,
-                Instant.now(clock)));
+    /** The order's shipment, created if it does not exist yet. */
+    private Shipment shipmentFor(OrderEvent event) {
+        return shipments.findByOrderId(event.orderId()).orElseGet(() -> {
+            LocalDate estimatedDelivery = LocalDate.ofInstant(Instant.now(clock), ZoneOffset.UTC).plusDays(DELIVERY_DAYS);
+            return shipments.save(new Shipment(event.orderId(), event.customerEmail(), newTrackingNumber(),
+                    estimatedDelivery, Instant.now(clock)));
+        });
     }
 
     private String newTrackingNumber() {

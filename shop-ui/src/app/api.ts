@@ -34,7 +34,16 @@ export interface OrderLine {
 export interface Order {
   id: string;
   customerEmail: string;
-  status: 'PLACED' | 'PAYMENT_PENDING' | 'CONFIRMED' | 'PAYMENT_FAILED' | 'CANCELLED';
+  status:
+    | 'PLACED'
+    | 'PAYMENT_PENDING'
+    | 'CONFIRMED'
+    | 'PAYMENT_FAILED'
+    | 'CANCELLED'
+    | 'SHIPPED'
+    | 'DELIVERED'
+    | 'DELIVERY_FAILED'
+    | 'LOST';
   total: number;
   currency: string;
   createdAt: string;
@@ -69,10 +78,19 @@ export interface Payment {
   refunds: Refund[];
 }
 
+export type CarrierOutcome = 'DELIVERED' | 'DELIVERY_FAILED' | 'LOST';
+
 export interface Shipment {
+  id: string;
+  orderId: string;
+  customerEmail: string;
   trackingNumber: string;
-  status: string;
+  status: 'PREPARING' | 'SHIPPED' | 'CANCELLED' | CarrierOutcome;
   estimatedDelivery: string;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  /** Why the carrier did not deliver the parcel. */
+  deliveryProblem: string | null;
 }
 
 export interface AuditEvent {
@@ -202,6 +220,21 @@ export class Api {
 
   shipment(orderId: string): Observable<Shipment> {
     return this.http.get<Shipment>(`${SHIPPING}/shipments/${orderId}`);
+  }
+
+  shipments(statuses: Shipment['status'][]): Observable<Shipment[]> {
+    const query = new URLSearchParams(statuses.map((status) => ['status', status]));
+    return this.http.get<Shipment[]>(`${SHIPPING}/shipments?${query}`);
+  }
+
+  /** Ships the order from the warehouse; refused once it is cancelled or its stock is short. */
+  shipOrder(orderId: string): Observable<Order> {
+    return this.http.post<Order>(`${ORDERS}/orders/${orderId}/dispatch`, {});
+  }
+
+  /** Plays the carrier: reports what happened to a shipped parcel. */
+  reportFromCarrier(orderId: string, outcome: CarrierOutcome, deliveryProblem: string): Observable<Shipment> {
+    return this.http.post<Shipment>(`${SHIPPING}/shipments/${orderId}/carrier-reports`, { outcome, deliveryProblem });
   }
 
   timeline(orderId: string): Observable<AuditEvent[]> {

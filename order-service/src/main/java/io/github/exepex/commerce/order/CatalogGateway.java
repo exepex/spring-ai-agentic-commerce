@@ -46,6 +46,17 @@ class CatalogGateway {
         }
     }
 
+    /** Takes the order's reserved stock out of the warehouse; refused when that stock is no longer there. */
+    void dispatchOrder(UUID orderId) {
+        try {
+            catalog.dispatchOrder(orderId);
+        } catch (HttpClientErrorException.Conflict conflict) {
+            throw OrderRejectedException.notShippable(catalogDetail(conflict));
+        } catch (RestClientException failure) {
+            throw new DependencyUnavailableException("catalog", failure);
+        }
+    }
+
     private static String catalogDetail(HttpClientErrorException failure) {
         ProblemDetail problem = failure.getResponseBodyAs(ProblemDetail.class);
         return problem != null && problem.getDetail() != null

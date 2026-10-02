@@ -99,6 +99,25 @@ public class CustomerOrder {
         return status == OrderStatus.CONFIRMED;
     }
 
+    /** Only a confirmed order ships: from then on it can no longer be cancelled. */
+    boolean isShippable() {
+        return status == OrderStatus.CONFIRMED;
+    }
+
+    boolean hasShipped() {
+        return status == OrderStatus.SHIPPED || status == OrderStatus.DELIVERED
+                || status == OrderStatus.DELIVERY_FAILED || status == OrderStatus.LOST;
+    }
+
+    void ship() {
+        status = OrderStatus.SHIPPED;
+    }
+
+    /** Records what the carrier reported for the shipped parcel. */
+    void recordCarrierOutcome(OrderStatus outcome) {
+        status = outcome;
+    }
+
     void cancel(String reason, Instant now) {
         status = OrderStatus.CANCELLED;
         cancellationReason = reason;

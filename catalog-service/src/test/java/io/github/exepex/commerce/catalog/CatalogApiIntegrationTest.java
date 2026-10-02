@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +24,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
-import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.testcontainers.kafka.KafkaContainer;
@@ -123,12 +123,60 @@ class CatalogApiIntegrationTest {
                 .hasStatusOk()
                 .bodyJson().extractingPath("$.onHand").isEqualTo(1);
 
-        String event = readStockOutEvent().value();
+        String event = readStockOutEventFor("RUN-SHOE-BLUE-43");
         assertThat((String) JsonPath.read(event, "$.sku")).isEqualTo("RUN-SHOE-BLUE-43");
         assertThat((Integer) JsonPath.read(event, "$.shortfall")).isEqualTo(2);
         assertThat((String) JsonPath.read(event, "$.reason")).isEqualTo("damaged in warehouse");
         assertThat((List<String>) JsonPath.read(event, "$.affectedOrderIds"))
                 .containsExactly(newestOrder.toString(), middleOrder.toString());
+    }
+
+    @Test
+    void dispatchingAnOrderTakesItsUnitsOffTheShelfOnce() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        reserve(HEADLAMP, orderId, 3);
+        int onHandBefore = JsonPath.read(product(HEADLAMP).getResponse().getContentAsString(), "$.onHand");
+        int reservedBefore = JsonPath.read(product(HEADLAMP).getResponse().getContentAsString(), "$.reserved");
+
+        assertThat(dispatch(orderId)).hasStatus(HttpStatus.NO_CONTENT);
+        assertThat(dispatch(orderId)).hasStatus(HttpStatus.NO_CONTENT);
+
+        String product = product(HEADLAMP).getResponse().getContentAsString();
+        assertThat((Integer) JsonPath.read(product, "$.onHand")).isEqualTo(onHandBefore - 3);
+        assertThat((Integer) JsonPath.read(product, "$.reserved")).isEqualTo(reservedBefore - 3);
+    }
+
+    @Test
+    void releasingAnOrderCancelledWhileItWasDispatchedPutsItsUnitsBackAndItCannotShipAnyMore() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        int onHandBefore = JsonPath.read(product(RAIN_JACKET).getResponse().getContentAsString(), "$.onHand");
+        reserve(RAIN_JACKET, orderId, 2);
+        dispatch(orderId);
+
+        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)).hasStatus(HttpStatus.NO_CONTENT);
+        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)).hasStatus(HttpStatus.NO_CONTENT);
+
+        assertThat(product(RAIN_JACKET)).bodyJson().extractingPath("$.onHand").isEqualTo(onHandBefore);
+        assertThat(dispatch(orderId)).hasStatus(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    void refusesToDispatchAnOrderAStockOutLeftUncoveredButShipsTheOlderOne() {
+        UUID olderOrder = UUID.randomUUID();
+        UUID newerOrder = UUID.randomUUID();
+        reserve(SHOE_42, olderOrder, 1);
+        reserve(SHOE_42, newerOrder, 1);
+        adjust(SHOE_42, -11, "water damage");
+
+        assertThat(dispatch(newerOrder)).hasStatus(HttpStatus.CONFLICT)
+                .bodyJson().extractingPath("$.detail").asString().contains("RUN-SHOE-BLUE-42");
+        assertThat(dispatch(olderOrder)).hasStatus(HttpStatus.NO_CONTENT);
+        assertThat(product(SHOE_42)).bodyJson().extractingPath("$.reserved").isEqualTo(1);
+    }
+
+    @Test
+    void refusesToDispatchAnOrderWithNoStockReserved() {
+        assertThat(dispatch(UUID.randomUUID())).hasStatus(HttpStatus.CONFLICT);
     }
 
     private MvcTestResult reserve(UUID productId, UUID orderId, int quantity) {
@@ -147,11 +195,16 @@ class CatalogApiIntegrationTest {
                 .exchange();
     }
 
+    private MvcTestResult dispatch(UUID orderId) {
+        return mockMvc.post().uri("/api/orders/{orderId}/dispatch", orderId).exchange();
+    }
+
     private MvcTestResult product(UUID productId) {
         return mockMvc.get().uri("/api/products/{productId}", productId).exchange();
     }
 
-    private ConsumerRecord<String, String> readStockOutEvent() {
+    /** The stock-out of one product: other tests publish stock-outs of their own products to the same topic. */
+    private String readStockOutEventFor(String sku) {
         Map<String, Object> consumerProperties = Map.of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
                 ConsumerConfig.GROUP_ID_CONFIG, "catalog-test-" + UUID.randomUUID(),
@@ -160,7 +213,15 @@ class CatalogApiIntegrationTest {
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
             consumer.subscribe(List.of("inventory.stock-out"));
-            return KafkaTestUtils.getSingleRecord(consumer, "inventory.stock-out", Duration.ofSeconds(20));
+            Instant deadline = Instant.now().plusSeconds(20);
+            while (Instant.now().isBefore(deadline)) {
+                for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofMillis(500))) {
+                    if (sku.equals(JsonPath.read(record.value(), "$.sku"))) {
+                        return record.value();
+                    }
+                }
+            }
         }
+        throw new AssertionError("No stock-out of " + sku + " was published");
     }
 }

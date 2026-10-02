@@ -43,7 +43,14 @@ class CommerceTools {
     record PaymentSummary(String status, BigDecimal paid, BigDecimal refunded, BigDecimal refundable, String currency,
             String message) {}
 
-    record ShipmentSummary(String trackingNumber, String status, LocalDate estimatedDelivery) {}
+    record ShipmentSummary(String trackingNumber, String status, LocalDate estimatedDelivery, Instant shippedAt,
+            Instant deliveredAt, String deliveryProblem) {
+
+        static ShipmentSummary of(ShippingApi.Shipment shipment) {
+            return new ShipmentSummary(shipment.trackingNumber(), shipment.status(), shipment.estimatedDelivery(),
+                    shipment.shippedAt(), shipment.deliveredAt(), shipment.deliveryProblem());
+        }
+    }
 
     record RefundSummary(UUID refundRequestId, BigDecimal amount, String status, String reason, String idempotencyKey) {}
 
@@ -135,15 +142,17 @@ class CommerceTools {
         });
     }
 
-    @McpTool(name = "track_shipment", description = "Get the tracking number, status and estimated delivery date of an order's shipment.")
+    @McpTool(name = "track_shipment", description = """
+            Get an order's shipment: its tracking number, status, estimated delivery date, when it shipped and was \
+            delivered, and what went wrong if it was not. The status is PREPARING, SHIPPED, DELIVERED, \
+            DELIVERY_FAILED, LOST or CANCELLED.""")
     ShipmentSummary trackShipment(McpTransportContext context,
             @McpToolParam(description = "The order id") String orderId,
             @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
         UUID id = ToolGuard.parseOrderId(orderId);
         return guard.run(context, "track_shipment", id, "Tracked the shipment", false, agentId -> {
             guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
-            ShippingApi.Shipment shipment = Downstream.call("shipping service", () -> shipping.getShipment(id));
-            return new ShipmentSummary(shipment.trackingNumber(), shipment.status(), shipment.estimatedDelivery());
+            return ShipmentSummary.of(Downstream.call("shipping service", () -> shipping.getShipment(id)));
         });
     }
 
@@ -159,7 +168,8 @@ class CommerceTools {
 
     @McpTool(name = "cancel_order", description = """
             Cancel an order: its stock goes back to the shelf and its shipment is cancelled. Cancelling does not \
-            refund the payment; use issue_refund for that. Cancelling an already cancelled order changes nothing.""")
+            refund the payment; use issue_refund for that. Cancelling an already cancelled order changes nothing. An \
+            order that has shipped can no longer be cancelled.""")
     OrderSummary cancelOrder(McpTransportContext context,
             @McpToolParam(description = "The order id") String orderId,
             @McpToolParam(description = "Why the order is cancelled, in a sentence") String reason,
@@ -238,8 +248,7 @@ class CommerceTools {
 
     private ShipmentSummary shipmentOf(UUID orderId) {
         try {
-            ShippingApi.Shipment shipment = Downstream.call("shipping service", () -> shipping.getShipment(orderId));
-            return new ShipmentSummary(shipment.trackingNumber(), shipment.status(), shipment.estimatedDelivery());
+            return ShipmentSummary.of(Downstream.call("shipping service", () -> shipping.getShipment(orderId)));
         } catch (DownstreamException unavailable) {
             return null;
         }

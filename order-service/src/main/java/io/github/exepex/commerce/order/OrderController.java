@@ -94,6 +94,12 @@ class OrderController {
         return found.stream().map(OrderView::of).toList();
     }
 
+    /** Ships the order from the warehouse. Shipping twice changes nothing; a cancelled order is refused. */
+    @PostMapping("/{orderId}/dispatch")
+    OrderView shipOrder(@PathVariable UUID orderId) {
+        return OrderView.of(orderService.shipOrder(orderId));
+    }
+
     @PostMapping("/{orderId}/cancellation")
     OrderView cancelOrder(@PathVariable UUID orderId, @Valid @RequestBody CancelOrderRequest request) {
         return OrderView.of(orderService.cancelOrder(orderId, request.reason()));

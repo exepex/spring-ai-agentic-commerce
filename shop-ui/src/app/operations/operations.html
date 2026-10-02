@@ -90,6 +90,40 @@
       </section>
 
       <section class="card">
+        <h2>Warehouse and carrier</h2>
+        <p class="muted small">
+          Ship paid orders, then play the carrier: deliver the parcel, or report that it could not be delivered or was lost.
+        </p>
+        @for (shipment of shipments(); track shipment.id) {
+          <div class="item">
+            <div class="spread">
+              <span class="row">
+                <span class="chip {{ shipment.status }}">{{ shipment.status }}</span>
+                <span class="small mono">{{ shipment.trackingNumber }}</span>
+                <span class="small muted">{{ shipment.customerEmail }}</span>
+              </span>
+              <a class="small" [routerLink]="['/orders', shipment.orderId]">order {{ shipment.orderId.slice(0, 8) }}</a>
+            </div>
+            <div class="row">
+              @if (shipment.status === 'PREPARING') {
+                <button class="primary" (click)="ship(shipment)" [disabled]="busy() === shipment.id">Ship</button>
+              } @else {
+                <input class="note" placeholder="What went wrong (optional)" [ngModel]="noteFor(shipment.id)" (ngModelChange)="setNote(shipment.id, $event)" />
+                <button class="primary" (click)="report(shipment, 'DELIVERED')" [disabled]="busy() === shipment.id">Delivered</button>
+                <button (click)="report(shipment, 'DELIVERY_FAILED')" [disabled]="busy() === shipment.id">Delivery failed</button>
+                <button class="danger" (click)="report(shipment, 'LOST')" [disabled]="busy() === shipment.id">Lost</button>
+              }
+            </div>
+            @if (refusalFor(shipment.id); as refusal) {
+              <div class="small error">{{ refusal }}</div>
+            }
+          </div>
+        } @empty {
+          <p class="empty">Nothing to ship or deliver.</p>
+        }
+      </section>
+
+      <section class="card">
         <h2>Activity</h2>
         <app-timeline [events]="activity()" [showOrder]="true" />
       </section>

@@ -9,13 +9,17 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
 
-/** Units of one product held for one order until the order ships or is cancelled. */
+/**
+ * Units of one product held for one order. They stay reserved until the order ships, when they leave the warehouse
+ * ({@code DISPATCHED}), or is cancelled ({@code RELEASED}).
+ */
 @Entity
 @Table(name = "stock_reservation")
 public class StockReservation {
 
     enum Status {
         RESERVED,
+        DISPATCHED,
         RELEASED
     }
 
@@ -47,6 +51,10 @@ public class StockReservation {
         this.quantity = quantity;
         this.status = Status.RESERVED;
         this.createdAt = createdAt;
+    }
+
+    void markDispatched() {
+        status = Status.DISPATCHED;
     }
 
     void markReleased() {

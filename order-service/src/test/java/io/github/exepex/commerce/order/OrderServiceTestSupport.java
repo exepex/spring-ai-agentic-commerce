@@ -55,7 +55,7 @@ abstract class OrderServiceTestSupport {
     protected MockMvcTester mockMvc;
 
     @Autowired
-    private KafkaContainer kafka;
+    protected KafkaContainer kafka;
 
     @DynamicPropertySource
     static void pointAtWireMock(DynamicPropertyRegistry registry) {

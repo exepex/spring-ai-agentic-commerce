@@ -42,12 +42,49 @@ public class StockService {
         return reservations.save(new StockReservation(orderId, productId, quantity, Instant.now(clock)));
     }
 
-    /** Gives back every unit held for the order. Releasing twice changes nothing. */
+    /**
+     * Gives back every unit held for the order. Units already dispatched go back on the shelf: that happens only when
+     * the order was cancelled while it was being shipped, so it never left. Releasing twice changes nothing.
+     */
     @Transactional
     public void releaseOrder(UUID orderId) {
-        for (StockReservation reservation : reservations.findByOrderIdAndStatus(orderId, StockReservation.Status.RESERVED)) {
-            lockProduct(reservation.getProductId()).release(reservation.getQuantity());
+        for (StockReservation reservation : reservations.findByOrderIdOrderByProductId(orderId)) {
+            if (reservation.getStatus() == StockReservation.Status.RELEASED) {
+                continue;
+            }
+            Product product = lockProduct(reservation.getProductId());
+            if (reservation.getStatus() == StockReservation.Status.RESERVED) {
+                product.release(reservation.getQuantity());
+            } else {
+                product.restock(reservation.getQuantity());
+            }
             reservation.markReleased();
+        }
+    }
+
+    /**
+     * Hands the order's reserved units to shipping: they leave both the stock on hand and the reservations, so a later
+     * stock-out never names an order that has shipped. Refused when the stock was released, or when a stock-out left
+     * the order uncovered: those units are not in the warehouse. Dispatching twice changes nothing.
+     */
+    @Transactional
+    public void dispatchOrder(UUID orderId) {
+        List<StockReservation> held = reservations.findByOrderIdOrderByProductId(orderId);
+        if (held.isEmpty()) {
+            throw DispatchRefusedException.nothingReserved(orderId);
+        }
+        if (held.stream().anyMatch(reservation -> reservation.getStatus() == StockReservation.Status.RELEASED)) {
+            throw DispatchRefusedException.released(orderId);
+        }
+        for (StockReservation reservation : held) {
+            if (reservation.getStatus() == StockReservation.Status.RESERVED) {
+                Product product = lockProduct(reservation.getProductId());
+                if (newestOrdersCovering(product).contains(orderId)) {
+                    throw DispatchRefusedException.stockShort(orderId, product.getSku());
+                }
+                product.dispatch(reservation.getQuantity());
+                reservation.markDispatched();
+            }
         }
     }
 

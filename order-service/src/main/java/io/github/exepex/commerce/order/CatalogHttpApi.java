@@ -25,4 +25,7 @@ interface CatalogHttpApi {
 
     @DeleteExchange("/orders/{orderId}/reservations")
     void releaseOrderReservations(@PathVariable UUID orderId);
+
+    @PostExchange("/orders/{orderId}/dispatch")
+    void dispatchOrder(@PathVariable UUID orderId);
 }

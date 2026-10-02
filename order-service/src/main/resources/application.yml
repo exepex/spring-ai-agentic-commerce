@@ -39,6 +39,13 @@ spring:
       properties:
         # The event is a JSON contract between services, not a Java type: leave class names out of the headers.
         spring.json.add.type.headers: false
+    consumer:
+      group-id: order-service
+      auto-offset-reset: earliest
+      value-deserializer: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+      properties:
+        spring.json.value.default.type: io.github.exepex.commerce.order.ShipmentEvent
+        spring.json.use.type.headers: false
   mvc:
     problemdetails:
       enabled: true
@@ -51,6 +58,7 @@ commerce:
     settle-after: 30s
   topics:
     order-events: order.events
+    shipment-events: shipment.events
 
 management:
   otlp:

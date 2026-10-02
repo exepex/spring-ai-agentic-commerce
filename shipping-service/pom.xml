@@ -12,7 +12,7 @@
 
     <artifactId>shipping-service</artifactId>
     <name>shipping-service</name>
-    <description>Shipments, created and cancelled from order events</description>
+    <description>Shipments from order events, and a simulated carrier that delivers them</description>
 
     <dependencies>
         <dependency>

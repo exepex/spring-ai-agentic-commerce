@@ -8,7 +8,8 @@ public record OrderEvent(UUID eventId, Type type, UUID orderId, String customerE
 
     public enum Type {
         ORDER_CONFIRMED,
-        ORDER_CANCELLED
+        ORDER_CANCELLED,
+        ORDER_SHIPPED
     }
 
     static OrderEvent of(Type type, CustomerOrder order, Instant now) {

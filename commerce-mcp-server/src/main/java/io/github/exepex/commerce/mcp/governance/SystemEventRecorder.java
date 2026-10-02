@@ -33,10 +33,27 @@ class SystemEventRecorder {
         String summary = switch (type) {
             case "ORDER_CONFIRMED" -> "Order confirmed and paid; shipping notified";
             case "ORDER_CANCELLED" -> "Order cancelled; stock released and shipment cancelled";
+            case "ORDER_SHIPPED" -> "Order shipped: its stock left the warehouse and the parcel is with the carrier";
             default -> "Order event " + type;
         };
         audit.recordSystemEvent(eventId(event), occurredAt(event), UUID.fromString(event.path("orderId").asString()),
                 "order-service", type, summary, null);
+    }
+
+    @KafkaListener(topics = "${commerce.topics.shipment-events}")
+    void onShipmentEvent(String json) {
+        JsonNode event = jsonMapper.readTree(json);
+        String type = event.path("type").asString();
+        String parcel = "Parcel " + event.path("trackingNumber").asString();
+        String problem = event.path("deliveryProblem").asString("");
+        String summary = switch (type) {
+            case "SHIPMENT_DELIVERED" -> parcel + " delivered to the customer";
+            case "SHIPMENT_DELIVERY_FAILED" -> parcel + " could not be delivered: " + problem;
+            case "SHIPMENT_LOST" -> parcel + " lost by the carrier: " + problem;
+            default -> "Shipment event " + type;
+        };
+        audit.recordSystemEvent(eventId(event), occurredAt(event), UUID.fromString(event.path("orderId").asString()),
+                "shipping-service", type, summary, null);
     }
 
     @KafkaListener(topics = "${commerce.topics.stock-out}")

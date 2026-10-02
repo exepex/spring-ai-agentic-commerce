@@ -229,7 +229,9 @@ tr.clickable:hover td {
 .chip.SUCCEEDED,
 .chip.EXECUTED,
 .chip.RESOLVED,
-.chip.PREPARING {
+.chip.PREPARING,
+.chip.SHIPPED,
+.chip.DELIVERED {
   background: var(--ok-soft);
   color: var(--ok);
 }
@@ -252,7 +254,9 @@ tr.clickable:hover td {
 .chip.DENIED,
 .chip.REJECTED,
 .chip.PAYMENT_FAILED,
-.chip.CANCELLED {
+.chip.CANCELLED,
+.chip.DELIVERY_FAILED,
+.chip.LOST {
   background: var(--bad-soft);
   color: var(--bad);
 }

@@ -25,6 +25,11 @@ spring:
       observation-enabled: true
     listener:
       observation-enabled: true
+    producer:
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      properties:
+        # The event is a JSON contract between services, not a Java type: leave class names out of the headers.
+        spring.json.add.type.headers: false
     consumer:
       group-id: shipping-service
       auto-offset-reset: earliest
@@ -39,6 +44,7 @@ spring:
 commerce:
   topics:
     order-events: order.events
+    shipment-events: shipment.events
 
 management:
   otlp:

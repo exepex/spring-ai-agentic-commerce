@@ -63,6 +63,7 @@ commerce:
   topics:
     order-events: order.events
     payment-events: payment.events
+    shipment-events: shipment.events
     stock-out: inventory.stock-out
   governance:
     # Refunds up to this amount run straight away; larger ones wait for a human to approve them.
