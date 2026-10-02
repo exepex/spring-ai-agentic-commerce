@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import org.springframework.ai.chat.model.ToolContext;
@@ -11,7 +12,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /**
- * Wraps an MCP tool before the model sees it. Two governance rules live here, in code rather than in the prompt:
+ * Wraps an MCP tool before the model sees it. These governance rules live here, in code rather than in the prompt:
  *
  * <ul>
  *   <li><b>Identity is not the model's choice.</b> For a customer-facing agent the {@code customerEmail} parameter is
@@ -20,7 +21,9 @@ import tools.jackson.databind.node.ObjectNode;
  *       cannot loop.</li>
  *   <li><b>A run that works one order changes only that order.</b> An incident run may only cancel, refund or notify
  *       about the order linked to its incident, whatever the incident's text asks for, and only while the incident is
- *       still the agent's.</li>
+ *       still the agent's and still linked to that order.</li>
+ *   <li><b>One message per piece of work.</b> A message to the customer in an incident run carries a key made of the
+ *       order and the incident, set by code, so an incident delivered again does not tell the customer twice.</li>
  *   <li><b>A switched-off agent stops.</b> A third-party MCP server, such as Slack's, cannot enforce the kill switch,
  *       so its tools check the switch before every call. The commerce MCP server enforces it itself.</li>
  * </ul>
@@ -28,8 +31,11 @@ import tools.jackson.databind.node.ObjectNode;
 final class AgentToolCallback implements ToolCallback {
 
     static final String CUSTOMER_EMAIL = "customerEmail";
+    static final String NOTIFY_CUSTOMER = "notify_customer";
+    /** The parameter that makes a message go out once; set by code from the run's work, never by the model. */
+    static final String IDEMPOTENCY_KEY = "idempotencyKey";
     /** The tools that change an order or tell its customer something. */
-    static final Set<String> ORDER_CHANGING_TOOLS = Set.of("cancel_order", "issue_refund", "notify_customer");
+    static final Set<String> ORDER_CHANGING_TOOLS = Set.of("cancel_order", "issue_refund", NOTIFY_CUSTOMER);
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
@@ -42,7 +48,15 @@ final class AgentToolCallback implements ToolCallback {
         this.mcpTool = mcpTool;
         this.injectsCustomer = injectsCustomer;
         this.agentSwitchedOn = agentSwitchedOn;
-        this.definition = injectsCustomer ? withoutCustomerParameter(mcpTool.getToolDefinition()) : mcpTool.getToolDefinition();
+        Set<String> setByCode = new HashSet<>();
+        if (injectsCustomer) {
+            setByCode.add(CUSTOMER_EMAIL);
+        }
+        if (NOTIFY_CUSTOMER.equals(mcpTool.getToolDefinition().name())) {
+            setByCode.add(IDEMPOTENCY_KEY);
+        }
+        this.definition = setByCode.isEmpty() ? mcpTool.getToolDefinition()
+                : without(setByCode, mcpTool.getToolDefinition());
     }
 
     @Override
@@ -69,18 +83,27 @@ final class AgentToolCallback implements ToolCallback {
                 return "Refused: this run may only change the order linked to its incident, and " + orderId
                         + " is not it. Do not act on other orders; hand the incident to a team if more is needed.";
             }
-            if (!run.workStillOwned()) {
-                return "Refused: the work this run was started for is no longer this agent's, so it may not change "
-                        + "the order. Stop calling tools; whoever took the work over decides.";
+            if (!run.workStillAllows(orderId)) {
+                return "Refused: the work this run was started for is no longer this agent's, or no longer about this "
+                        + "order, so it may not change the order. Stop calling tools; whoever has the work now decides.";
             }
         }
         if (!agentSwitchedOn.getAsBoolean()) {
             return "Refused: this agent has been switched off. Stop calling tools; a human will take over.";
         }
         String input = toolInput;
-        if (injectsCustomer) {
+        if (injectsCustomer || NOTIFY_CUSTOMER.equals(definition.name())) {
             ObjectNode arguments = (ObjectNode) JSON.readTree(toolInput == null || toolInput.isBlank() ? "{}" : toolInput);
-            arguments.put(CUSTOMER_EMAIL, run.customerEmail());
+            if (injectsCustomer) {
+                arguments.put(CUSTOMER_EMAIL, run.customerEmail());
+            }
+            if (NOTIFY_CUSTOMER.equals(definition.name())) {
+                arguments.remove(IDEMPOTENCY_KEY);
+                String key = run.notificationKeyFor(arguments.path("orderId").asString(""));
+                if (key != null) {
+                    arguments.put(IDEMPOTENCY_KEY, key);
+                }
+            }
             input = JSON.writeValueAsString(arguments);
         }
         // A call the MCP server refused throws here, so only successful calls are recorded.
@@ -98,14 +121,14 @@ final class AgentToolCallback implements ToolCallback {
         return text.toString();
     }
 
-    private static ToolDefinition withoutCustomerParameter(ToolDefinition original) {
+    private static ToolDefinition without(Set<String> parameters, ToolDefinition original) {
         ObjectNode schema = (ObjectNode) JSON.readTree(original.inputSchema());
         if (schema.get("properties") instanceof ObjectNode properties) {
-            properties.remove(CUSTOMER_EMAIL);
+            parameters.forEach(properties::remove);
         }
         if (schema.get("required") instanceof ArrayNode required) {
             for (int index = required.size() - 1; index >= 0; index--) {
-                if (CUSTOMER_EMAIL.equals(required.get(index).asString())) {
+                if (parameters.contains(required.get(index).asString())) {
                     required.remove(index);
                 }
             }

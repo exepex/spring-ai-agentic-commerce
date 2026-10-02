@@ -9,7 +9,9 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * The agents' kill switches are kept in the database, and the MCP server enforces them on every tool call: a
@@ -18,6 +20,9 @@ import org.springframework.http.MediaType;
 class AgentSwitchIntegrationTest extends McpServerTestSupport {
 
     private static final String OPERATOR = "ana@trailhead.example";
+
+    @Autowired
+    private JdbcClient jdbc;
 
     @AfterEach
     void switchEveryAgentBackOn() {
@@ -54,6 +59,21 @@ class AgentSwitchIntegrationTest extends McpServerTestSupport {
         String audit = rest().get().uri("/api/audit-events").retrieve().body(String.class);
         List<String> by = JsonPath.read(audit, "$[?(@.action == 'switch_off_agent')].actor");
         assertThat(by).contains(OPERATOR);
+    }
+
+    @Test
+    void twoFirstChangesOfASwitchAtOnceBothSucceedAndTheLastOneWins() throws Exception {
+        // A fresh database has no row for the switch yet: both changes try to create it.
+        jdbc.sql("delete from governance.agent_switch where agent_id = 'shopping-assistant'").update();
+
+        List<Integer> statuses = runTogether(
+                () -> switchStatus("shopping-assistant", Map.of("enabled", false, "by", OPERATOR)),
+                () -> switchStatus("shopping-assistant", Map.of("enabled", false, "by", "ben@trailhead.example")));
+        switchAgent("shopping-assistant", true, OPERATOR);
+
+        assertThat(statuses).containsExactly(200, 200);
+        assertThat(rest().get().uri("/api/agent-switches").retrieve().body(String.class))
+                .contains("\"shopping-assistant\":true");
     }
 
     @Test

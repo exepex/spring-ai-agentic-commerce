@@ -204,15 +204,22 @@ class CommerceTools {
         });
     }
 
-    @McpTool(name = "notify_customer", description = "Send the customer of an order a short message, for example to explain a cancellation and refund.")
+    @McpTool(name = "notify_customer", description = """
+            Send the customer of an order a short message, for example to explain a cancellation and refund. With an \
+            idempotency key the message is sent once: sending again with the same key sends nothing.""")
     Acknowledgement notifyCustomer(McpTransportContext context,
             @McpToolParam(description = "The order id") String orderId,
-            @McpToolParam(description = "The message, written to the customer") String message) {
+            @McpToolParam(description = "The message, written to the customer") String message,
+            @McpToolParam(description = "A key that identifies this message; reuse it only to repeat the same message",
+                    required = false) String idempotencyKey) {
         UUID id = ToolGuard.parseOrderId(orderId);
         return guard.run(context, "notify_customer", id, "Notified the customer", true, agentId -> {
             OrderApi.Order order = Downstream.call("order service", () -> orders.getOrder(id));
-            return new Acknowledgement(notifications.notifyCustomer(agentId, id, order.customerEmail(), message).getId(),
-                    "The customer was notified");
+            NotificationService.Sent sent = notifications.notifyCustomer(agentId, id, order.customerEmail(), message,
+                    idempotencyKey == null || idempotencyKey.isBlank() ? null : idempotencyKey);
+            return new Acknowledgement(sent.notification().getId(), sent.now() ? "The customer was notified"
+                    : "The customer was already told about this at " + sent.notification().getCreatedAt()
+                            + "; nothing was sent again");
         });
     }
 
