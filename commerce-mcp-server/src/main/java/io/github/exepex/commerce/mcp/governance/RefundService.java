@@ -169,14 +169,17 @@ public class RefundService {
     }
 
     /**
-     * The card processor reported an executed refund failed afterwards: the customer did not get the money. The
-     * request is marked failed and a case opened for the order, together and once, however often this is reported.
+     * The card processor reported a refund failed after accepting it: the customer did not get the money. The request
+     * is marked failed, with the processor's reason, and a case opened for the order, together and once per event
+     * however often Kafka delivers it. The request is usually executed; it is still failed when this server stopped
+     * after the payment service took the refund but before it recorded that, and then the failure is just as real.
      */
-    void recordFailedAtProcessor(UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
+    void recordFailedAtProcessor(UUID eventId, UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
         String failure = "The card processor reported the refund of " + amount + " " + currency
                 + " failed after accepting it; no money was returned.";
         transaction.executeWithoutResult(status -> {
-            if (requests.failExecuted(idempotencyKey, failure, Instant.now(clock)) == 0) {
+            if (requests.failAtProcessor(idempotencyKey, failure, Instant.now(clock)) == 0
+                    || !cases.isFirstDelivery(eventId, orderId)) {
                 return;
             }
             audit.record(orderId, AuditEvent.ActorType.SYSTEM, "payment-service", "refund_failed",

@@ -108,6 +108,34 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void aRefundStillRecordedAsFailedThatTheProcessorFailsIsRecordedAndOpensOneCase() {
+        // This server stopped after the payment service took the refund, so the request still shows FAILED.
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
+        SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(503)));
+        call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(), "amount", 39.50, "reason",
+                "item out of stock", "idempotencyKey", "refund-" + orderId));
+        assertThat(refundStatus(orderId)).isEqualTo("FAILED");
+        String refundFailed = """
+                {"eventId": "%s", "type": "REFUND_FAILED", "orderId": "%s", "idempotencyKey": "refund-%s",
+                 "amount": 39.50, "currency": "EUR", "occurredAt": "2026-10-02T10:30:00Z"}"""
+                .formatted(UUID.randomUUID(), orderId, orderId);
+
+        kafka.send("payment.events", orderId.toString(), refundFailed).join();
+        kafka.send("payment.events", orderId.toString(), refundFailed).join();
+
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
+                assertThat((List<String>) JsonPath.read(cases(orderId), "$[*].type")).containsExactly("REFUND_FAILED"));
+        await().during(Duration.ofSeconds(2)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            assertThat((List<String>) JsonPath.read(timeline(orderId), "$[?(@.action == 'refund_failed')].actor"))
+                    .containsExactly("payment-service");
+            assertThat((List<?>) JsonPath.read(outgoingFor(orderId), "$[0].unsentNotes")).isEmpty();
+        });
+        assertThat((String) JsonPath.read(rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve()
+                .body(String.class), "$[0].failure")).contains("card processor reported");
+    }
+
+    @Test
     void thePollerCarriesTheCaseToServiceNowAndFollowsItsIncident() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         handOff(orderId, "first");
