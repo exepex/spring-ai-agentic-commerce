@@ -9,7 +9,7 @@ import org.springframework.web.service.registry.ImportHttpServices;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
-@ImportHttpServices(group = "governance", types = GovernanceApi.class)
+@ImportHttpServices(group = "governance", types = {GovernanceApi.class, AgentSwitchesApi.class})
 public class AgentServiceApplication {
 
     public static void main(String[] arguments) {

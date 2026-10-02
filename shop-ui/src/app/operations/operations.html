@@ -113,7 +113,7 @@
                 <strong>{{ agent.id }}</strong>
                 <label class="switch">
                   <input type="checkbox" [checked]="agent.enabled" (change)="toggleAgent(agent.id, $any($event.target).checked)" />
-                  {{ agent.enabled ? 'On' : 'Off (kill switch)' }}
+                  {{ agent.enabled === null ? 'Unknown (MCP server unreachable)' : agent.enabled ? 'On' : 'Off (kill switch)' }}
                 </label>
               </div>
               <div class="small muted">{{ agent.model }} · effort {{ agent.effort }}</div>

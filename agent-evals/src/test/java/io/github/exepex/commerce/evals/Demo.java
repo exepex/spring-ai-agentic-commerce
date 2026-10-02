@@ -89,7 +89,8 @@ final class Demo {
     }
 
     void setAgentEnabled(String agentId, boolean enabled) {
-        api.put().uri("/agents/api/agents/{id}", agentId).body(Map.of("enabled", enabled)).retrieve().toBodilessEntity();
+        api.put().uri("/agents/api/agents/{id}", agentId).body(Map.of("enabled", enabled, "by", OPERATOR))
+                .retrieve().toBodilessEntity();
     }
 
     void setPaymentOutage(boolean active) {

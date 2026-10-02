@@ -79,7 +79,10 @@ export class Operations {
   }
 
   protected toggleAgent(agentId: string, enabled: boolean): void {
-    this.api.setAgentEnabled(agentId, enabled).subscribe((agents) => this.agents.set(agents));
+    this.api.setAgentEnabled(agentId, enabled, this.session.operator()).subscribe({
+      next: (agents) => this.agents.set(agents),
+      error: () => this.refresh(),
+    });
   }
 
   protected toggleOutage(active: boolean): void {

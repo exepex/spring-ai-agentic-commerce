@@ -32,7 +32,7 @@ Everything else an agent depends on has one home too:
 | The refund approval limit | `commerce.governance.refund-approval-threshold` in [commerce-mcp-server/src/main/resources/application.yml](commerce-mcp-server/src/main/resources/application.yml) |
 | The MCP tools and how each rule is enforced | [CommerceTools](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/tools/CommerceTools.java), [ToolGuard](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/tools/ToolGuard.java) and [AgentRegistry](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/security/AgentRegistry.java) |
 | The Slack MCP server and its channel | `commerce.slack` in [agent-service/src/main/resources/application.yml](agent-service/src/main/resources/application.yml) |
-| The kill switches | [AgentSwitchboard](agent-service/src/main/java/io/github/exepex/commerce/agent/AgentSwitchboard.java) |
+| The kill switches | Kept and enforced by [AgentSwitches](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/governance/AgentSwitches.java); agent-service reads them through [AgentSwitchboard](agent-service/src/main/java/io/github/exepex/commerce/agent/AgentSwitchboard.java) |
 
 To change an agent's model, effort, tools, budget or prompt, edit its definition file; nothing else needs to change.
 A tool listed there must exist on its MCP server. Adding a new agent also needs code in agent-service that runs it,
@@ -65,9 +65,7 @@ Do not report:
 
 - **Scenarios that need a code path that does not exist.** For example, products come only from the seed migration
   and there is no API to create them. Hand-edited database rows are out of scope too.
-- **Items already tracked.** These are the open issue
-  [#4](https://github.com/exepex/spring-ai-agentic-commerce/issues/4) (recovery from crashes, timeouts and
-  redelivery) and the trade-offs listed under "Design decisions" in the README.
+- **Trade-offs already decided.** These are listed under "Design decisions" in the README.
 - **Concerns that only apply to running several instances of a service.**
 - **Style, naming or formatting** without a functional effect.
 

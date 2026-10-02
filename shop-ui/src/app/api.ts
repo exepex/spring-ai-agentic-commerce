@@ -146,7 +146,8 @@ export interface Escalation {
 
 export interface AgentView {
   id: string;
-  enabled: boolean;
+  /** null when the switches cannot be read (the MCP server is down). */
+  enabled: boolean | null;
   model: string;
   effort: string;
   tools: string[];
@@ -244,8 +245,8 @@ export class Api {
     return this.http.get<AgentsView>(`${AGENTS}/agents`);
   }
 
-  setAgentEnabled(agentId: string, enabled: boolean): Observable<AgentsView> {
-    return this.http.put<AgentsView>(`${AGENTS}/agents/${agentId}`, { enabled });
+  setAgentEnabled(agentId: string, enabled: boolean, by: string): Observable<AgentsView> {
+    return this.http.put<AgentsView>(`${AGENTS}/agents/${agentId}`, { enabled, by });
   }
 
   chat(conversationId: string, customerEmail: string, message: string): Observable<AssistantReply> {
