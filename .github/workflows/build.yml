@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  services:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      # Integration tests start Postgres and Kafka with Testcontainers on the runner's Docker.
+      # The agent evals call a real model, so they are skipped here; run them with -Pevals.
+      - run: mvn --batch-mode --no-transfer-progress verify
+
+  shop-ui:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: shop-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: shop-ui/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build

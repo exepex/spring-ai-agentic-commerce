@@ -1,0 +1,8 @@
+{
+  "/svc/catalog": { "target": "http://localhost:8081", "pathRewrite": { "^/svc/catalog": "" } },
+  "/svc/orders": { "target": "http://localhost:8082", "pathRewrite": { "^/svc/orders": "" } },
+  "/svc/payments": { "target": "http://localhost:8083", "pathRewrite": { "^/svc/payments": "" } },
+  "/svc/shipping": { "target": "http://localhost:8084", "pathRewrite": { "^/svc/shipping": "" } },
+  "/svc/governance": { "target": "http://localhost:8085", "pathRewrite": { "^/svc/governance": "" } },
+  "/svc/agents": { "target": "http://localhost:8086", "pathRewrite": { "^/svc/agents": "" } }
+}

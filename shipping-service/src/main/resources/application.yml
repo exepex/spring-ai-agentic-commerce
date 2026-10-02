@@ -1,0 +1,56 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: shipping-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/commerce
+    username: commerce
+    password: commerce
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: shipping
+  flyway:
+    default-schema: shipping
+    schemas: shipping
+  kafka:
+    bootstrap-servers: localhost:9092
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    consumer:
+      group-id: shipping-service
+      auto-offset-reset: earliest
+      value-deserializer: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+      properties:
+        spring.json.value.default.type: io.github.exepex.commerce.shipping.OrderEvent
+        spring.json.use.type.headers: false
+  mvc:
+    problemdetails:
+      enabled: true
+
+commerce:
+  topics:
+    order-events: order.events
+
+management:
+  otlp:
+    metrics:
+      export:
+        # Jaeger only takes traces; without this every service fails to push metrics to it once a minute.
+        enabled: false
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}

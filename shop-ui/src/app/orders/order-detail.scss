@@ -1,0 +1,46 @@
+.heading {
+  margin-top: 12px;
+}
+
+.heading h1 {
+  margin: 0;
+}
+
+.detail {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.line {
+  padding: 4px 0;
+}
+
+.total {
+  font-weight: 700;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.sub {
+  margin-top: 14px;
+}
+
+.refund {
+  border-top: 1px solid var(--border);
+  padding: 8px 0;
+  display: grid;
+  gap: 2px;
+}
+
+.mail p {
+  margin: 2px 0 10px;
+}
+
+@media (max-width: 900px) {
+  .detail {
+    grid-template-columns: 1fr;
+  }
+}

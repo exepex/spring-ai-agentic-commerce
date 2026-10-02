@@ -1,0 +1,115 @@
+<main class="page shop">
+  <section class="catalog">
+    <h1>Outdoor gear</h1>
+    <div class="products">
+      @for (product of products(); track product.id) {
+        <article class="card product">
+          <div class="spread">
+            <h3>{{ product.name }}</h3>
+            <span class="price">{{ product.price | currency: product.currency }}</span>
+          </div>
+          <p class="muted small">{{ product.description }}</p>
+          <div class="spread">
+            <span class="chip" [class.ok]="product.available > 2" [class.warn]="product.available > 0 && product.available <= 2" [class.bad]="product.available === 0">
+              {{ product.available > 0 ? product.available + ' in stock' : 'Out of stock' }}
+            </span>
+            <button (click)="askAbout(product)" [disabled]="product.available === 0">Ask the assistant</button>
+          </div>
+        </article>
+      }
+    </div>
+
+    <div class="grid two">
+      <section class="card">
+        <h2>Your orders</h2>
+        @for (order of orders(); track order.id) {
+          <a class="order-link" [routerLink]="['/orders', order.id]">
+            <span>
+              {{ order.lines[0]?.productName }}@if (order.lines.length > 1) { <span class="muted"> +{{ order.lines.length - 1 }}</span> }
+              <span class="muted small"> · {{ order.createdAt | date: 'MMM d, HH:mm' }}</span>
+            </span>
+            <span class="row">
+              {{ order.total | currency: order.currency }}
+              <span class="chip {{ order.status }}">{{ order.status }}</span>
+            </span>
+          </a>
+        } @empty {
+          <p class="empty">No orders yet. Ask the assistant to put one together.</p>
+        }
+      </section>
+
+      <section class="card">
+        <h2>Your inbox</h2>
+        @for (notification of inbox(); track notification.id) {
+          <div class="mail">
+            <div class="muted small">{{ notification.createdAt | date: 'MMM d, HH:mm' }} · from Trailhead</div>
+            <p>{{ notification.message }}</p>
+          </div>
+        } @empty {
+          <p class="empty">No messages.</p>
+        }
+      </section>
+    </div>
+  </section>
+
+  <aside class="card chat" aria-label="Shopping assistant">
+    <div class="spread chat-head">
+      <h2>Shopping assistant</h2>
+      <span class="chip AGENT">Claude · MCP</span>
+    </div>
+    <div class="transcript" #transcript>
+      @for (message of messages(); track $index) {
+        <div class="bubble" [class.mine]="message.from === 'customer'">{{ message.text }}</div>
+        @for (proposal of message.proposals; track proposal.id) {
+          <div class="proposal">
+            <div class="spread">
+              <strong>Proposed order</strong>
+              <span class="chip {{ proposal.status }}">{{ proposal.status }}</span>
+            </div>
+            @for (line of proposal.lines; track line.productId) {
+              <div class="spread small">
+                <span>{{ line.quantity }} × {{ line.name }}</span>
+                <span>{{ line.unitPrice * line.quantity | currency: proposal.currency }}</span>
+              </div>
+            }
+            <div class="spread total">
+              <span>Total</span>
+              <span>{{ proposal.total | currency: proposal.currency }}</span>
+            </div>
+            @switch (proposal.status) {
+              @case ('PROPOSED') {
+                <div class="row">
+                  <select [ngModel]="paymentMethod()" (ngModelChange)="paymentMethod.set($event)" aria-label="Payment card">
+                    @for (card of testCards; track card.id) {
+                      <option [value]="card.id">{{ card.label }}</option>
+                    }
+                  </select>
+                  <button class="primary" (click)="confirm(proposal)" [disabled]="confirming() === proposal.id">
+                    {{ confirming() === proposal.id ? 'Paying…' : 'Confirm and pay' }}
+                  </button>
+                </div>
+                <p class="muted small">Only you can place this order. The assistant can't pay for you.</p>
+              }
+              @case ('CONFIRMING') {
+                <p class="muted small">Placing the order…</p>
+              }
+              @case ('CONFIRMED') {
+                <p class="small">Paid. <a [routerLink]="['/orders', proposal.orderId]">View the order</a></p>
+              }
+              @case ('FAILED') {
+                <p class="error small">{{ proposal.failure }}</p>
+              }
+            }
+          </div>
+        }
+      }
+      @if (sending()) {
+        <div class="bubble typing">Thinking…</div>
+      }
+    </div>
+    <form class="composer" (ngSubmit)="send()">
+      <input name="draft" [ngModel]="draft()" (ngModelChange)="draft.set($event)" placeholder="Ask about gear, orders, deliveries…" autocomplete="off" />
+      <button class="primary" type="submit" [disabled]="sending() || !draft().trim()">Send</button>
+    </form>
+  </aside>
+</main>
