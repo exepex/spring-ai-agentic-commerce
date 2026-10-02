@@ -10,15 +10,25 @@ class AgentDefinitionsTest {
     private final AgentDefinitions definitions = AgentDefinitions.load();
 
     @Test
-    void loadsBothShippedAgents() {
+    void loadsEveryShippedAgent() {
         assertThat(definitions.all()).extracting(AgentDefinition::id)
-                .containsExactlyInAnyOrder("shopping-assistant", "order-exceptions-agent");
+                .containsExactlyInAnyOrder("shopping-assistant", "order-exceptions-agent", "incident-agent");
 
         AgentDefinition assistant = definitions.get("shopping-assistant");
         assertThat(assistant.customerScoped()).isTrue();
         assertThat(assistant.toolCallBudget()).isEqualTo(12);
         assertThat(assistant.commerceTools()).contains("propose_order").doesNotContain("notify_customer");
         assertThat(assistant.slackTools()).isEmpty();
+        assertThat(assistant.servicenowTools()).isEmpty();
+    }
+
+    @Test
+    void theIncidentAgentWorksServiceNowIncidentsWithShopTools() {
+        AgentDefinition agent = definitions.get("incident-agent");
+
+        assertThat(agent.customerScoped()).isFalse();
+        assertThat(agent.servicenowTools()).contains("get_incident", "assign_to_team", "resolve_incident");
+        assertThat(agent.commerceTools()).contains("get_order", "issue_refund").doesNotContain("propose_order");
     }
 
     @Test

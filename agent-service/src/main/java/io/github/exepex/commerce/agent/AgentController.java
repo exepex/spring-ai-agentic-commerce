@@ -26,7 +26,8 @@ class AgentController {
 
     record AgentView(String id, Boolean enabled, String model, String effort, List<String> tools) {}
 
-    record AgentsView(boolean modelConfigured, boolean slackConfigured, List<AgentView> agents) {}
+    record AgentsView(boolean modelConfigured, boolean slackConfigured, boolean servicenowConfigured,
+            List<AgentView> agents) {}
 
     /** {@code by} is the person switching, for the audit trail. */
     record Switch(boolean enabled, @NotBlank @Size(max = 100) String by) {}
@@ -63,18 +64,21 @@ class AgentController {
             LOGGER.warn("Could not read the agents' kill switches", unreachable);
             switches = Map.of();
         }
-        boolean slackConfigured = properties.slack().isConfigured();
-        return new AgentsView(modelConfigured, slackConfigured, List.of(
-                view(definitions.get(AgentSwitchboard.SHOPPING_ASSISTANT), switches, slackConfigured),
-                view(definitions.get(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT), switches, slackConfigured)));
+        Map<String, Boolean> knownSwitches = switches;
+        return new AgentsView(modelConfigured, properties.slack().isConfigured(), properties.servicenow().isConfigured(),
+                definitions.all().stream().map(agent -> view(agent, knownSwitches)).toList());
     }
 
-    private AgentView view(AgentDefinition agent, Map<String, Boolean> switches, boolean slackConfigured) {
-        List<String> tools = slackConfigured
-                ? Stream.concat(agent.commerceTools().stream(), agent.slackTools().stream().map(tool -> "slack:" + tool))
-                        .toList()
-                : agent.commerceTools();
-        return new AgentView(agent.id(), switches.get(agent.id()), agent.model(), agent.effort(), tools);
+    /** The agent's tools on every MCP server that is configured; tools of other servers carry its name. */
+    private AgentView view(AgentDefinition agent, Map<String, Boolean> switches) {
+        Stream<String> tools = agent.commerceTools().stream();
+        if (properties.servicenow().isConfigured()) {
+            tools = Stream.concat(tools, agent.servicenowTools().stream().map(tool -> "servicenow:" + tool));
+        }
+        if (properties.slack().isConfigured()) {
+            tools = Stream.concat(tools, agent.slackTools().stream().map(tool -> "slack:" + tool));
+        }
+        return new AgentView(agent.id(), switches.get(agent.id()), agent.model(), agent.effort(), tools.toList());
     }
 
     @PutMapping("/api/agents/{agentId}")

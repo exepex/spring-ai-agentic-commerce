@@ -156,6 +156,7 @@ export interface AgentView {
 export interface AgentsView {
   modelConfigured: boolean;
   slackConfigured: boolean;
+  servicenowConfigured: boolean;
   agents: AgentView[];
 }
 

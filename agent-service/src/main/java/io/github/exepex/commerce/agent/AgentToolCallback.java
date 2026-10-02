@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import java.util.Set;
 import java.util.function.BooleanSupplier;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
@@ -17,6 +18,9 @@ import tools.jackson.databind.node.ObjectNode;
  *       removed from the schema the model sees and filled in from the signed-in customer on every call.</li>
  *   <li><b>Every run has a tool-call budget.</b> Once it is spent, further calls are refused, so a confused agent
  *       cannot loop.</li>
+ *   <li><b>A run that works one order changes only that order.</b> An incident run may only cancel, refund or notify
+ *       about the order linked to its incident, whatever the incident's text asks for, and only while the incident is
+ *       still the agent's.</li>
  *   <li><b>A switched-off agent stops.</b> A third-party MCP server, such as Slack's, cannot enforce the kill switch,
  *       so its tools check the switch before every call. The commerce MCP server enforces it itself.</li>
  * </ul>
@@ -24,6 +28,8 @@ import tools.jackson.databind.node.ObjectNode;
 final class AgentToolCallback implements ToolCallback {
 
     static final String CUSTOMER_EMAIL = "customerEmail";
+    /** The tools that change an order or tell its customer something. */
+    static final Set<String> ORDER_CHANGING_TOOLS = Set.of("cancel_order", "issue_refund", "notify_customer");
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
@@ -55,6 +61,18 @@ final class AgentToolCallback implements ToolCallback {
         if (!run.takeCall()) {
             return "Refused: this run has used its tool-call budget. Stop calling tools; summarise what you did and, "
                     + "if work is left, say that a human must finish it.";
+        }
+        if (ORDER_CHANGING_TOOLS.contains(definition.name())) {
+            String orderId = JSON.readTree(toolInput == null || toolInput.isBlank() ? "{}" : toolInput)
+                    .path("orderId").asString("");
+            if (!run.mayChange(orderId)) {
+                return "Refused: this run may only change the order linked to its incident, and " + orderId
+                        + " is not it. Do not act on other orders; hand the incident to a team if more is needed.";
+            }
+            if (!run.workStillOwned()) {
+                return "Refused: the work this run was started for is no longer this agent's, so it may not change "
+                        + "the order. Stop calling tools; whoever took the work over decides.";
+            }
         }
         if (!agentSwitchedOn.getAsBoolean()) {
             return "Refused: this agent has been switched off. Stop calling tools; a human will take over.";

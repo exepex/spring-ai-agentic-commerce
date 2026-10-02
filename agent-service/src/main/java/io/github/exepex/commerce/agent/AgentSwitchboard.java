@@ -14,6 +14,7 @@ public class AgentSwitchboard {
 
     public static final String SHOPPING_ASSISTANT = "shopping-assistant";
     public static final String ORDER_EXCEPTIONS_AGENT = "order-exceptions-agent";
+    public static final String INCIDENT_AGENT = "incident-agent";
 
     private final AgentSwitchesApi switches;
 

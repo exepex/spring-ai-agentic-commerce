@@ -23,16 +23,16 @@ class StockOutListener {
     }
 
     /**
-     * A stock-out whose order could not be handed to anyone is delivered again every 15 seconds until the hand-off
-     * succeeds, so no order is dropped however long the MCP server is down. Any other failure is not retried, so a
-     * malformed event cannot block the ones behind it.
+     * A stock-out or incident that could not be handed to anyone is delivered again every 15 seconds until the
+     * hand-off succeeds, so no work is dropped however long an MCP server is down. Any other failure is not retried,
+     * so a malformed event cannot block the ones behind it.
      */
     @Bean
     static DefaultErrorHandler stockOutRetries() {
         DefaultErrorHandler retries = new DefaultErrorHandler(
                 new FixedBackOff(Duration.ofSeconds(15).toMillis(), FixedBackOff.UNLIMITED_ATTEMPTS));
         retries.defaultFalse();
-        retries.addRetryableExceptions(OrderExceptionsAgent.HandOffFailedException.class);
+        retries.addRetryableExceptions(HandOffFailedException.class);
         return retries;
     }
 

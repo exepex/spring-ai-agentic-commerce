@@ -1,0 +1,82 @@
+server:
+  port: 8087
+
+spring:
+  application:
+    name: servicenow-mcp-server
+  threads:
+    virtual:
+      enabled: true
+  kafka:
+    bootstrap-servers: localhost:9092
+    template:
+      observation-enabled: true
+    producer:
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      properties:
+        # The event is a JSON contract between services, not a Java type: leave class names out of the headers.
+        spring.json.add.type.headers: false
+  http:
+    clients:
+      connect-timeout: 2s
+      read-timeout: 15s
+    serviceclient:
+      governance:
+        base-url: http://localhost:8085
+  ai:
+    mcp:
+      server:
+        name: servicenow
+        version: 1.0.0
+        protocol: streamable
+        instructions: >
+          Tools for ServiceNow incidents about the online shop: read an incident and its notes, add work notes,
+          resolve it, or hand it to the team whose work it is.
+
+commerce:
+  topics:
+    incidents: servicenow.incidents
+  # Each agent authenticates with its own bearer token, the same one the commerce MCP server accepts. Which tools it
+  # may call here comes from the servicenow tools in its definition in agent-definitions/src/main/resources/agents.
+  agents:
+    incident-agent:
+      token: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:dev-incident-agent-token}
+  servicenow:
+    # Leave the URL empty to run without ServiceNow; the incident agent then has nothing to do.
+    instance-url: ${AGENTIC_COMMERCE_SERVICENOW_INSTANCE_URL:}
+    username: ${AGENTIC_COMMERCE_SERVICENOW_USERNAME:}
+    password: ${AGENTIC_COMMERCE_SERVICENOW_PASSWORD:}
+    agent: incident-agent
+    # New, unassigned incidents in this assignment group are claimed for the incident agent.
+    agent-group: ${AGENTIC_COMMERCE_SERVICENOW_AGENT_GROUP:Online Shop Agent}
+    poll-interval: 30s
+    stale-after: 15m
+    close-code: Solution provided
+    # The teams the agent can hand an incident to: each is a ServiceNow assignment group, described by what it
+    # handles so the agent can choose. The default team gets incidents the agent could not finish.
+    default-team: customer-care
+    teams:
+      customer-care:
+        group: ${AGENTIC_COMMERCE_SERVICENOW_CUSTOMER_CARE_GROUP:Customer Care}
+        handles: Complaints, goodwill gestures, and anything that needs a conversation with the customer or a judgement call.
+      payments:
+        group: ${AGENTIC_COMMERCE_SERVICENOW_PAYMENTS_GROUP:Payments}
+        handles: Charges and refunds that failed, look wrong, or need approval above the agent's limit.
+      fulfilment:
+        group: ${AGENTIC_COMMERCE_SERVICENOW_FULFILMENT_GROUP:Fulfilment}
+        handles: Stock, warehouse, shipping and delivery problems, such as lost or damaged parcels.
+
+management:
+  otlp:
+    metrics:
+      export:
+        # Jaeger only takes traces; without this every service fails to push metrics to it once a minute.
+        enabled: false
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}

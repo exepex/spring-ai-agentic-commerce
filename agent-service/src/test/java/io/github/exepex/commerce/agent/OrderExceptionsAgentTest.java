@@ -2,6 +2,7 @@ package io.github.exepex.commerce.agent;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -18,19 +19,21 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 
 class OrderExceptionsAgentTest {
 
-    private static final AgentProperties PROPERTIES = new AgentProperties(
+    static final AgentProperties PROPERTIES = new AgentProperties(
             new AgentProperties.Agents("http://localhost:8085", new AgentProperties.Agent("token"),
-                    new AgentProperties.Agent("token")),
-            new AgentProperties.Slack("", "", ""));
+                    new AgentProperties.Agent("token"), new AgentProperties.Agent("token")),
+            new AgentProperties.Slack("", "", ""), new AgentProperties.ServiceNow("http://localhost:8087"));
     private static final AgentDefinitions DEFINITIONS = AgentDefinitions.load();
 
     @Test
     void anAgentThatFinishesWithoutDealingWithTheOrderHandsItToAPerson() {
         ChatModel model = mock(ChatModel.class);
+        when(model.getOptions()).thenReturn(ChatOptions.builder().build());
         when(model.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("I looked at it.")))));
         McpToolboxes toolboxes = mock(McpToolboxes.class);
@@ -41,7 +44,8 @@ class OrderExceptionsAgentTest {
 
         agent.handleStockOut(UUID.randomUUID(), "{}");
 
-        verify(toolboxes).callAsOrderExceptionsAgent(eq("escalate_to_human"), any());
+        verify(toolboxes).callAsOrderExceptionsAgent(eq("escalate_to_human"), argThat(arguments ->
+                arguments.get("summary").toString().contains("finished without cancelling")));
     }
 
     @Test
@@ -53,7 +57,7 @@ class OrderExceptionsAgentTest {
                 mock(DecisionRecorder.class), DEFINITIONS, PROPERTIES);
 
         assertThatThrownBy(() -> agent.handleStockOut(UUID.randomUUID(), "{}"))
-                .isInstanceOf(OrderExceptionsAgent.HandOffFailedException.class);
+                .isInstanceOf(HandOffFailedException.class);
     }
 
     @Test
@@ -65,7 +69,7 @@ class OrderExceptionsAgentTest {
                 mock(DecisionRecorder.class), DEFINITIONS, PROPERTIES);
 
         assertThatThrownBy(() -> agent.handleStockOut(UUID.randomUUID(), "{}"))
-                .isInstanceOf(OrderExceptionsAgent.HandOffFailedException.class)
+                .isInstanceOf(HandOffFailedException.class)
                 .hasMessageContaining("to a human");
     }
 
@@ -79,7 +83,7 @@ class OrderExceptionsAgentTest {
                 mock(DecisionRecorder.class), DEFINITIONS, PROPERTIES);
 
         assertThatThrownBy(() -> agent.handleStockOut(UUID.randomUUID(), "{}"))
-                .isInstanceOf(OrderExceptionsAgent.HandOffFailedException.class)
+                .isInstanceOf(HandOffFailedException.class)
                 .hasMessageContaining("kill switch");
         verifyNoInteractions(model, toolboxes);
     }

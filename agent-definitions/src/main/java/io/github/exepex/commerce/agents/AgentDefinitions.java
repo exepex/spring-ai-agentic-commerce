@@ -3,6 +3,7 @@ package io.github.exepex.commerce.agents;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +41,7 @@ public final class AgentDefinitions {
         } catch (IOException unreadable) {
             throw new IllegalStateException("Could not read the agent definitions", unreadable);
         }
-        return new AgentDefinitions(Map.copyOf(byId));
+        return new AgentDefinitions(Collections.unmodifiableMap(byId));
     }
 
     public AgentDefinition get(String agentId) {
@@ -70,6 +71,7 @@ public final class AgentDefinitions {
         return new AgentDefinition(id, model, effort, toolCallBudget, customerScoped,
                 list(fileName, tools, "commerce"),
                 tools.containsKey("slack") ? list(fileName, tools, "slack") : List.of(),
+                tools.containsKey("servicenow") ? list(fileName, tools, "servicenow") : List.of(),
                 requireText(fileName, "the instructions", parts[2]),
                 header.containsKey("slack-step") ? text(fileName, header, "slack-step") : "");
     }
