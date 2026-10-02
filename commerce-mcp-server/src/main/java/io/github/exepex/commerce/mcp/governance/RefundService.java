@@ -93,6 +93,8 @@ public class RefundService {
         if (earlier.isPresent()) {
             return repeat(earlier.get(), orderId, amount, idempotencyKey, agentId);
         }
+        // An order handed to a person is theirs: a new refund from an agent could pay out what they are retrying.
+        escalations.ensureNotWithHuman(orderId);
         PaymentApi.Payment payment = paymentIfReachable(orderId);
         if (payment != null && amount.compareTo(payment.refundable()) > 0) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "A refund of " + amount + " "
