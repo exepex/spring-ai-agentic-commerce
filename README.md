@@ -1,150 +1,116 @@
 # spring-ai-agentic-commerce
 
-Governed AI agents on top of ordinary Spring Boot microservices, built with Spring AI and the Model Context
-Protocol (MCP).
+**Governed AI agents on top of ordinary Spring Boot microservices**, built with Spring AI, Claude and the Model
+Context Protocol (MCP).
 
-The point of this project is to show how to add AI agents to an existing Java system **safely**: the agents handle
-the situations that need judgment, every action they take goes through tools with limits enforced in code, and
-every decision can be traced and audited afterwards.
+An online outdoor shop, *Trailhead*, runs on plain microservices. Two AI agents work alongside them: a **shopping
+assistant** that customers chat with, and an **order-exceptions agent** that steps in when an order can no longer be
+fulfilled. Every action they take goes through MCP tools whose rules are **enforced in code**, and every step is
+**traceable and auditable** afterwards.
 
-> **Status: week 1 of 4.** The commerce services and the stock-out event are built and tested. The MCP server,
-> the agents and the governance layer come next; see [Roadmap](#roadmap).
+## The idea in one paragraph
 
-## The idea
+The normal path (browse, order, pay, ship) stays plain, fast, deterministic code. **No AI agent sits on the
+checkout path.** Agents are used where judgment is needed: a customer asking for help, or stock running out after
+an order was paid. They act only through MCP tools, and the MCP server is the policy enforcement point:
 
-An online shop's normal path (browse, order, pay, ship) stays plain, fast, deterministic code. **No AI agent sits
-on the checkout path:** it would make every order slower, more expensive and less predictable.
-
-Agents are used where judgment is needed:
-
-- an item goes out of stock after the customer has already ordered it
-- a customer asks the shop assistant to cancel, or asks where their order is
-- a payment fails or a shipment is delayed
-- deciding on a refund: full, partial, or ask a human
+- each agent has its **own identity** (bearer token) and its **own tool allowlist**, checked on every call;
+- a customer-facing agent can only touch **that customer's orders**, and the customer's identity is injected by
+  code, never chosen by the model;
+- refunds above **€100 wait for a human** to approve them;
+- every refund carries an **idempotency key**, so a retrying agent can never pay out twice;
+- an agent can **propose** an order but never place it: only the customer's own "Confirm and pay" does;
+- each run has a **tool-call budget**, each agent has a **kill switch**, and when an agent fails or is switched off
+  the work goes to a **human escalation queue**;
+- every tool call, agent decision (with model and token usage), human decision and system event lands in one
+  **audit trail**, linked to its **OpenTelemetry trace** in Jaeger.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    ui["Shop UI"]
-    agent["agent-service<br/>shopping assistant +<br/>order-exceptions agent"]
-    mcp["commerce-mcp-server<br/>tools with limits and<br/>idempotency"]
-    slack["Slack MCP server<br/>(third party, allowlisted)"]
+    ui["shop-ui (Angular)<br/>shop · orders · operations"]
+    agent["agent-service<br/>shopping assistant +<br/>order-exceptions agent<br/>(Spring AI + Claude)"]
+    mcp["commerce-mcp-server<br/>MCP tools + governance:<br/>permissions, limits, approvals,<br/>idempotency, audit trail"]
+    slack["Slack MCP server<br/>(third party, one channel)"]
     catalog["catalog-service"]
-    orders["order-service"]
+    orders["order-service<br/>(checkout)"]
     payments["payment-service<br/>(Stripe test mode)"]
     shipping["shipping-service"]
     kafka[("Kafka")]
+    jaeger["Jaeger<br/>(traces)"]
 
-    ui --> agent
-    ui --> orders
-    agent -- MCP --> mcp
+    ui --> orders & catalog & agent & mcp
+    agent -- "MCP (per-agent token)" --> mcp
     agent -- MCP --> slack
     mcp --> catalog & orders & payments & shipping
-    orders --> catalog
-    catalog -- "inventory.stock-out" --> kafka
-    kafka --> agent
+    orders --> catalog & payments
+    orders -- order.events --> kafka
+    catalog -- inventory.stock-out --> kafka
+    kafka --> shipping & agent & mcp
+    agent & mcp & catalog & orders & payments & shipping -.-> jaeger
 ```
 
-Built so far: `catalog-service`, `order-service` and the `inventory.stock-out` event. Everything else is on the
-roadmap.
+| Service | Port | What it does |
+|---|---|---|
+| catalog-service | 8081 | Products and stock (on hand and reserved). A write-off below the reserved units publishes `inventory.stock-out`, naming the orders that can no longer be fulfilled. |
+| order-service | 8082 | Checkout: reserves stock, saves the order, charges the card, publishes `order.events`. Cancellation releases the stock. |
+| payment-service | 8083 | Card payments and idempotent refunds through Stripe test mode (or a built-in simulator without a key). Has a simulated-outage switch for the demo. |
+| shipping-service | 8084 | Creates and cancels shipments from order events. |
+| commerce-mcp-server | 8085 | Nine MCP tools over the services, plus the governance API: audit trail, refund approvals, order proposals, customer notifications, escalations. |
+| agent-service | 8086 | The two agents, each with its own MCP connection, allowlist, prompt, effort level and kill switch. |
+| shop-ui | 8080 | Angular app served by nginx, which routes `/svc/<service>/` to each service. |
 
-## Demo scenarios
+### The MCP tools
 
-1. **Order through chat.** A customer asks the shopping assistant for a product, confirms, and the order is placed.
-2. **Stock-out after ordering.** Damaged goods are written off; the agent cancels the affected order, refunds it and
-   notifies the customer. The order's timeline shows every step and why.
-3. **Refund above the limit.** The agent pauses and asks a human; the approval is recorded.
-4. **Payment service down.** The agent retries, then escalates instead of guessing.
+| Tool | Shopping assistant | Order-exceptions agent |
+|---|---|---|
+| `search_products` | ✅ | |
+| `find_customer_orders` | ✅ (own orders) | |
+| `get_order` | ✅ (own orders) | ✅ |
+| `track_shipment` | ✅ (own orders) | ✅ |
+| `propose_order` | ✅ | |
+| `cancel_order` | ✅ (own orders) | ✅ |
+| `issue_refund` | ✅ (own orders, limit applies) | ✅ (limit applies) |
+| `notify_customer` | | ✅ |
+| `escalate_to_human` | ✅ | ✅ |
+| Slack `conversations_add_message` | | ✅ (one channel) |
 
-## Services built so far
+## The workflows
 
-### catalog-service (port 8081)
+1. **Order through chat.** The customer asks the shopping assistant for a product. It searches the catalog and calls
+   `propose_order`; the chat shows the proposal with a **Confirm and pay** button. Only that click places the order,
+   reserves the stock and charges the card. A declined test card fails cleanly and releases the stock.
+2. **Stock-out after ordering.** Operations writes off damaged stock. The catalog publishes a stock-out naming the
+   newest order it can no longer cover. The order-exceptions agent wakes up, cancels the order, refunds it within its
+   limit, notifies the customer, posts to Slack, and records its decision. The order's timeline shows every step.
+3. **Refund above the limit.** The same stock-out on a €129.90 order: the refund is held as *pending approval*. A
+   person approves or rejects it in the operations console; the decision is recorded, and the refund runs once.
+4. **Payment service down.** With the simulated outage on, the agent's refund fails. It retries with the same
+   idempotency key, then escalates to a human instead of guessing. Once payments are back, a person clicks **Retry
+   refund**: it runs exactly once, with the same key.
+5. **Kill switch.** Switch the order-exceptions agent off: the next stock-out goes straight to the escalation queue,
+   without calling the model.
+6. **Prompt injection.** Ask the assistant to cancel another customer's order. The customer's identity is injected
+   by code and the MCP server checks ownership, so the attempt is refused and recorded as *denied*.
 
-Products and their stock. Each product tracks units **on hand** and units **reserved** for open orders.
+## Run it
 
-| Method and path | What it does |
-|---|---|
-| `GET /api/products` | List products with on-hand, reserved and available units |
-| `GET /api/products/{productId}` | One product |
-| `POST /api/products/{productId}/reservations` | Reserve units for an order. Repeating the same request returns the same reservation |
-| `DELETE /api/orders/{orderId}/reservations` | Release everything reserved for an order. Releasing twice changes nothing |
-| `POST /api/products/{productId}/stock-adjustments` | Record a delivery (`delta` > 0) or a write-off (`delta` < 0) with a reason |
-
-When a write-off leaves fewer units on hand than are reserved, the catalog publishes an event on the
-`inventory.stock-out` topic. It names the **newest** orders that together cover the shortfall: the orders that can
-no longer be fulfilled as placed. The catalog does not decide what happens to them; that judgment is the agent's
-job.
-
-```json
-{
-  "eventId": "82079e5c-514f-49d9-a0e5-603a82ef07c7",
-  "occurredAt": "2026-10-02T09:07:30.125Z",
-  "productId": "8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0002",
-  "sku": "RUN-SHOE-BLUE-43",
-  "onHand": 1,
-  "reserved": 2,
-  "shortfall": 1,
-  "reason": "damaged in warehouse",
-  "affectedOrderIds": ["f62f98ab-7dc4-40eb-981b-d41b71304ad2"]
-}
-```
-
-### order-service (port 8082)
-
-| Method and path | What it does |
-|---|---|
-| `POST /api/orders` | Place an order: prices each line from the catalog and reserves its stock |
-| `GET /api/orders/{orderId}` | One order |
-| `GET /api/orders?customerEmail=…` | A customer's orders, newest first |
-| `POST /api/orders/{orderId}/cancellation` | Cancel with a reason and release the stock. Cancelling twice keeps the first reason |
-
-Errors use the standard Problem Details format (RFC 9457).
-
-## Design decisions
-
-- **The agent is not on the checkout path.** Placing an order is plain code; agents handle exceptions.
-- **Deterministic work stays in code.** Which orders a stock-out affects is calculated by the catalog, not guessed
-  by a model.
-- **Stock changes lock the product row,** so concurrent reservations and write-offs on the same product run one
-  after another and never reserve more than is available.
-- **No database transaction is held open across remote calls.** Placing an order reserves stock in the catalog
-  first; if any step fails, the order service releases whatever it reserved and saves nothing.
-- **Events are published after the database commit,** so a consumer never sees a change that was rolled back. The
-  trade-off: if the process dies between commit and send, the event is lost. A transactional outbox closes that
-  gap; it is left out to keep the demo small.
-- **The event is a JSON contract, not a Java type.** No Java class names travel in Kafka headers.
-
-## Run it locally
-
-You need Java 21, Maven and Docker.
+You need Docker, Java 21, Maven and Node 22.22+ (or 24).
 
 ```bash
-docker compose up -d                              # Postgres and Kafka
-mvn package -DskipTests
-java -jar catalog-service/target/catalog-service-0.1.0-SNAPSHOT.jar &
-java -jar order-service/target/order-service-0.1.0-SNAPSHOT.jar &
+cp .env.example .env        # add your Anthropic API key; Stripe and Slack are optional
+./start-demo.sh             # or ./start-demo.sh --slack
 ```
 
-Then try the stock-out scenario:
+- Shop, orders and operations console: http://localhost:8080
+- Traces: http://localhost:16686
 
-```bash
-SHOE=8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0002   # seeded with 3 units
+Without a Stripe key, payments are simulated with Stripe's test-card conventions. Without an Anthropic key, the
+services run but the agents hand everything to the escalation queue.
 
-# Two customers each order one pair
-for email in ada@example.com grace@example.com; do
-  curl -s -X POST localhost:8082/api/orders -H 'Content-Type: application/json' \
-    -d "{\"customerEmail\":\"$email\",\"lines\":[{\"productId\":\"$SHOE\",\"quantity\":1}]}"
-done
-
-# Two pairs are found damaged
-curl -s -X POST localhost:8081/api/products/$SHOE/stock-adjustments -H 'Content-Type: application/json' \
-  -d '{"delta":-2,"reason":"damaged in warehouse"}'
-
-# Read the stock-out event
-docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
-  --bootstrap-server localhost:9092 --topic inventory.stock-out --from-beginning --max-messages 1
-```
+For development, start only the infrastructure (`docker compose up -d postgres kafka jaeger`), run the services
+from your IDE or with `mvn spring-boot:run`, and the UI with `npm start` in `shop-ui`.
 
 ## Tests
 
@@ -152,19 +118,45 @@ docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh \
 mvn verify
 ```
 
-The integration tests run each service against real Postgres and Kafka containers (Testcontainers). The order
-service's tests talk to the catalog over real HTTP, with WireMock standing in for it.
+Integration tests run each service against real Postgres and Kafka (Testcontainers). Service-to-service calls are
+tested over real HTTP with WireMock. The MCP server is tested through a real MCP client, as the agents use it:
+authentication, permissions, customer scoping, the approval limit, idempotent retries and the audit trail.
 
-## Roadmap
+### Agent evals
 
-| Week | Delivers |
-|---|---|
-| 1 ✅ | catalog-service, order-service, the stock-out event, CI |
-| 2 | commerce-mcp-server and the order-exceptions agent: scenario 2 end to end |
-| 3 | Shopping assistant, Stripe test-mode payments, refund limits with human approval, idempotent tools, audit trail, OpenTelemetry tracing, Slack notifications |
-| 4 | UI with the order timeline, agent evaluation tests, one-command startup, demo video |
+The agents themselves are checked by `agent-evals`: six scenarios run against the whole running demo with the real
+model, asserting on **what the agents did** (the audit trail, orders, payments and escalations), not on the wording
+of their replies.
+
+```bash
+./start-demo.sh
+mvn -pl agent-evals -Pevals test
+```
+
+They call Claude, so they are skipped in a normal build; a run costs a few cents.
+
+## Design decisions
+
+- **Agents handle exceptions, not the happy path.** Checkout is deterministic code. An agent proposes orders; the
+  customer confirms them.
+- **Governance lives in the MCP server, not in prompts.** Prompts ask the agent to behave; the server makes sure it
+  does: identity, permissions, ownership, limits, approvals and idempotency are all enforced in code.
+- **Defence in depth.** The agent service only hands each agent its allowlisted tools; the MCP server checks the same
+  permissions again on every call.
+- **Deterministic work stays in code.** Which orders a stock-out affects is calculated by the catalog, not guessed by
+  a model.
+- **Fail safe, toward a human.** A failed or switched-off agent escalates; it never leaves an order in limbo.
+- **Stock changes lock the product row,** so concurrent reservations and write-offs never reserve more than exists.
+- **No database transaction is held open across remote calls.** Checkout saves the order before charging the card,
+  and releases the stock if any step fails.
+- **Events are published after commit,** so consumers never see a rolled-back change. The trade-off: an event can be
+  lost if a process dies between commit and send. A transactional outbox closes that gap; it is left out to keep the
+  demo small.
+- **The demo UI has no login.** You pick which customer you are. In production the UI and the governance API would sit
+  behind the organisation's identity provider.
 
 ## Stack
 
-Java 21 · Spring Boot 4.1 · PostgreSQL 17 · Apache Kafka 4.1 · Flyway · Testcontainers · WireMock ·
-Spring AI 2.0 (from week 2)
+Java 21 · Spring Boot 4.1 · Spring AI 2.0 (Anthropic and MCP) · Claude (`claude-opus-5-5`) · MCP Java SDK 2.0 ·
+PostgreSQL 17 · Apache Kafka 4.1 · Stripe (test mode) · OpenTelemetry + Jaeger · Angular 22 · Flyway ·
+Testcontainers · WireMock

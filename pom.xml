@@ -25,6 +25,7 @@
         <module>shipping-service</module>
         <module>commerce-mcp-server</module>
         <module>agent-service</module>
+        <module>agent-evals</module>
     </modules>
 
     <properties>

@@ -1,0 +1,133 @@
+<main class="page">
+  <div class="spread">
+    <h1>Operations</h1>
+    <span class="muted small">Acting as {{ operator }}</span>
+  </div>
+
+  <div class="ops">
+    <div class="grid">
+      <section class="card">
+        <h2>Refunds waiting for approval</h2>
+        <p class="muted small">Agents may refund up to the approval limit on their own. Anything above waits here.</p>
+        @for (refund of pendingRefunds(); track refund.id) {
+          <div class="item">
+            <div class="spread">
+              <strong>{{ refund.amount | currency: refund.currency }}</strong>
+              <a class="small" [routerLink]="['/orders', refund.orderId]">order {{ refund.orderId.slice(0, 8) }}</a>
+            </div>
+            <div class="small">Requested by <strong>{{ refund.requestedBy }}</strong> · {{ refund.createdAt | date: 'HH:mm:ss' }}</div>
+            <div class="small muted">{{ refund.reason }}</div>
+            <div class="row">
+              <input class="note" placeholder="Note (optional)" [ngModel]="noteFor(refund.id)" (ngModelChange)="setNote(refund.id, $event)" />
+              <button class="primary" (click)="decide(refund, 'approve')" [disabled]="busy() === refund.id">Approve</button>
+              <button class="danger" (click)="decide(refund, 'reject')" [disabled]="busy() === refund.id">Reject</button>
+            </div>
+          </div>
+        } @empty {
+          <p class="empty">Nothing waiting.</p>
+        }
+      </section>
+
+      <section class="card">
+        <h2>Escalations</h2>
+        <p class="muted small">Work an agent handed to a person because it could not, or should not, finish it.</p>
+        @for (escalation of escalations(); track escalation.id) {
+          <div class="item">
+            <div class="spread">
+              <span class="row">
+                <span class="chip {{ escalation.status }}">{{ escalation.status }}</span>
+                <span class="small">from <strong>{{ escalation.raisedBy }}</strong> · {{ escalation.createdAt | date: 'HH:mm:ss' }}</span>
+              </span>
+              @if (escalation.orderId) {
+                <a class="small" [routerLink]="['/orders', escalation.orderId]">order {{ escalation.orderId.slice(0, 8) }}</a>
+              }
+            </div>
+            <div class="small">{{ escalation.summary }}</div>
+            @if (escalation.status === 'OPEN') {
+              <div class="row">
+                @if (failedRefundFor(escalation); as failed) {
+                  <button class="primary" (click)="decide(failed, 'retry')" [disabled]="busy() === failed.id">
+                    Retry refund of {{ failed.amount | currency: failed.currency }}
+                  </button>
+                }
+                <input class="note" placeholder="Resolution note" [ngModel]="noteFor(escalation.id)" (ngModelChange)="setNote(escalation.id, $event)" />
+                <button (click)="resolve(escalation)" [disabled]="busy() === escalation.id">Mark resolved</button>
+              </div>
+            } @else {
+              <div class="small muted">Resolved by {{ escalation.resolvedBy }}@if (escalation.resolutionNote) {: {{ escalation.resolutionNote }}}</div>
+            }
+          </div>
+        } @empty {
+          <p class="empty">No escalations.</p>
+        }
+      </section>
+
+      <section class="card">
+        <h2>Activity</h2>
+        <app-timeline [events]="activity()" [showOrder]="true" />
+      </section>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Agents</h2>
+        @if (agents(); as view) {
+          <div class="row badges">
+            <span class="chip" [class.ok]="view.modelConfigured" [class.bad]="!view.modelConfigured">
+              {{ view.modelConfigured ? 'Claude connected' : 'No Claude API key' }}
+            </span>
+            <span class="chip" [class.ok]="view.slackConfigured" [class.warn]="!view.slackConfigured">
+              {{ view.slackConfigured ? 'Slack connected' : 'Slack off' }}
+            </span>
+          </div>
+          @for (agent of view.agents; track agent.id) {
+            <div class="item">
+              <div class="spread">
+                <strong>{{ agent.id }}</strong>
+                <label class="switch">
+                  <input type="checkbox" [checked]="agent.enabled" (change)="toggleAgent(agent.id, $any($event.target).checked)" />
+                  {{ agent.enabled ? 'On' : 'Off (kill switch)' }}
+                </label>
+              </div>
+              <div class="small muted">{{ agent.model }} · effort {{ agent.effort }}</div>
+              <div class="tools">
+                @for (tool of agent.tools; track tool) {
+                  <span class="mono tool">{{ tool }}</span>
+                }
+              </div>
+            </div>
+          }
+        } @else {
+          <p class="error small">The agent service is not reachable.</p>
+        }
+      </section>
+
+      <section class="card">
+        <h2>Demo controls</h2>
+        <h3>Write off damaged stock</h3>
+        <p class="muted small">If fewer units remain than are reserved, the catalog publishes a stock-out and the order-exceptions agent wakes up.</p>
+        <div class="grid controls">
+          <select [ngModel]="writeOffProduct()" (ngModelChange)="writeOffProduct.set($event)" aria-label="Product">
+            @for (product of products(); track product.id) {
+              <option [value]="product.id">{{ product.name }} ({{ product.onHand }} on hand, {{ product.reserved }} reserved)</option>
+            }
+          </select>
+          <div class="row">
+            <input type="number" min="1" class="quantity" [ngModel]="writeOffQuantity()" (ngModelChange)="writeOffQuantity.set($event)" aria-label="Units to write off" />
+            <input class="note" [ngModel]="writeOffReason()" (ngModelChange)="writeOffReason.set($event)" aria-label="Reason" />
+            <button class="primary" (click)="writeOff()">Write off</button>
+          </div>
+          @if (writeOffResult()) {
+            <p class="small">{{ writeOffResult() }}</p>
+          }
+        </div>
+
+        <h3 class="sub">Payment service</h3>
+        <label class="switch">
+          <input type="checkbox" [checked]="paymentOutage()" (change)="toggleOutage($any($event.target).checked)" />
+          Simulate an outage (payments answer 503)
+        </label>
+      </section>
+    </div>
+  </div>
+</main>

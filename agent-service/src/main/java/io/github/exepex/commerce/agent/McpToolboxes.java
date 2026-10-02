@@ -11,6 +11,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.mcp.McpToolNamePrefixGenerator;
 import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
 import org.springframework.ai.tool.ToolCallback;
@@ -26,6 +28,7 @@ import org.springframework.stereotype.Component;
 @Component
 class McpToolboxes {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(McpToolboxes.class);
     private static final String SLACK = "slack";
 
     private final AgentProperties properties;
@@ -46,7 +49,13 @@ class McpToolboxes {
         List<ToolCallback> tools = new ArrayList<>(
                 toolsFrom(commerceClient(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, agent.token()), agent.tools(), false));
         if (properties.slack().isConfigured()) {
-            tools.addAll(toolsFrom(slackClient(), properties.slack().tools(), false));
+            try {
+                tools.addAll(toolsFrom(slackClient(), properties.slack().tools(), false));
+            } catch (RuntimeException slackDown) {
+                // Slack is a nice-to-have: without it the agent still does its job and records it in the audit trail.
+                LOGGER.warn("Slack MCP server unavailable; the agent runs without Slack", slackDown);
+                clients.remove(SLACK);
+            }
         }
         return tools;
     }

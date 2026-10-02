@@ -1,0 +1,89 @@
+<main class="page">
+  <a routerLink="/orders" class="small">← All orders</a>
+  @if (order(); as order) {
+    <div class="spread heading">
+      <h1>Order <span class="mono">{{ order.id.slice(0, 8) }}</span></h1>
+      <span class="chip {{ order.status }}">{{ order.status }}</span>
+    </div>
+    <p class="muted">
+      {{ order.customerEmail }} · placed {{ order.createdAt | date: 'MMM d, HH:mm:ss' }}
+      @if (order.cancellationReason) { · cancelled: {{ order.cancellationReason }} }
+      @if (order.paymentFailure) { · payment failed: {{ order.paymentFailure }} }
+    </p>
+
+    <div class="detail">
+      <div class="grid">
+        <section class="card">
+          <h2>Items</h2>
+          @for (line of order.lines; track line.productId) {
+            <div class="spread line">
+              <span>{{ line.quantity }} × {{ line.productName }} <span class="muted mono">{{ line.sku }}</span></span>
+              <span>{{ line.lineTotal | currency: order.currency }}</span>
+            </div>
+          }
+          <div class="spread line total"><span>Total</span><span>{{ order.total | currency: order.currency }}</span></div>
+        </section>
+
+        <section class="card">
+          <h2>Payment</h2>
+          @if (payment(); as payment) {
+            <div class="spread"><span>Paid</span><span>{{ payment.amount | currency: payment.currency }}</span></div>
+            <div class="spread"><span>Refunded</span><span>{{ payment.refundedAmount | currency: payment.currency }}</span></div>
+            <div class="spread muted small"><span>{{ payment.provider }}</span><span class="mono">{{ payment.providerReference }}</span></div>
+          } @else {
+            <p class="empty">No payment.</p>
+          }
+          @if (refunds().length) {
+            <h3 class="sub">Refund requests</h3>
+            @for (refund of refunds(); track refund.id) {
+              <div class="refund">
+                <div class="spread">
+                  <span>{{ refund.amount | currency: refund.currency }} · by {{ refund.requestedBy }}</span>
+                  <span class="chip {{ refund.status }}">{{ refund.status }}</span>
+                </div>
+                <div class="muted small">{{ refund.reason }}</div>
+                <div class="muted small mono">key {{ refund.idempotencyKey }}</div>
+                @if (refund.decidedBy) {
+                  <div class="small">Decided by {{ refund.decidedBy }}@if (refund.decisionNote) {: {{ refund.decisionNote }}}</div>
+                }
+                @if (refund.failure) {
+                  <div class="small error">{{ refund.failure }}</div>
+                }
+              </div>
+            }
+          }
+        </section>
+
+        <section class="card">
+          <h2>Shipment</h2>
+          @if (shipment(); as shipment) {
+            <div class="spread"><span class="mono">{{ shipment.trackingNumber }}</span><span class="chip {{ shipment.status }}">{{ shipment.status }}</span></div>
+            <div class="muted small">Estimated delivery {{ shipment.estimatedDelivery | date: 'MMM d' }}</div>
+          } @else {
+            <p class="empty">No shipment.</p>
+          }
+        </section>
+
+        <section class="card">
+          <h2>Messages to the customer</h2>
+          @for (notification of notifications(); track notification.id) {
+            <div class="mail">
+              <div class="muted small">{{ notification.createdAt | date: 'HH:mm:ss' }} · {{ notification.sentBy }}</div>
+              <p>{{ notification.message }}</p>
+            </div>
+          } @empty {
+            <p class="empty">None.</p>
+          }
+        </section>
+      </div>
+
+      <section class="card">
+        <h2>Timeline</h2>
+        <p class="muted small">Every step by the services, the agents and people, with the reason and a link to its trace.</p>
+        <app-timeline [events]="timeline()" />
+      </section>
+    </div>
+  } @else {
+    <p class="empty">Loading…</p>
+  }
+</main>
