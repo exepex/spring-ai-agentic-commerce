@@ -1,4 +1,5 @@
-# The whole demo: infrastructure, the seven services, the UI and (with --profile slack) the Slack MCP server.
+# The whole demo: infrastructure, the seven services, the UI, and with --profile slack the Slack MCP server or with
+# --profile simulator the ServiceNow simulator.
 # Start it with ./start-demo.sh. For development, start only the infrastructure:
 #   docker compose up -d postgres kafka jaeger
 # and run the services from your IDE or with mvn spring-boot:run.
@@ -129,6 +130,18 @@ services:
       AGENTIC_COMMERCE_SERVICENOW_FULFILMENT_GROUP: ${AGENTIC_COMMERCE_SERVICENOW_FULFILMENT_GROUP:-Fulfilment}
     ports:
       - "8087:8087"
+
+  servicenow-simulator:
+    # A stand-in for the part of ServiceNow's Table API the demo uses, for trying the cases and running the scenario
+    # suite without an instance. Started by ./start-demo.sh --simulator, which points the demo at it.
+    profiles: [simulator]
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: servicenow-simulator } }
+    restart: unless-stopped
+    environment:
+      AGENTIC_COMMERCE_SERVICENOW_USERNAME: ${AGENTIC_COMMERCE_SERVICENOW_USERNAME:-trailhead.agent}
+      AGENTIC_COMMERCE_SERVICENOW_PASSWORD: ${AGENTIC_COMMERCE_SERVICENOW_PASSWORD:-simulator}
+    ports:
+      - "8088:8088"
 
   agent-service:
     <<: *service

@@ -126,6 +126,22 @@ final class Demo {
         }
     }
 
+    /** Ships the order from the warehouse, then waits until the carrier has the parcel. */
+    void ship(String orderId) {
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofSeconds(1)).ignoreExceptions()
+                .until(() -> api.post().uri("/orders/api/orders/{id}/dispatch", orderId).retrieve()
+                        .toBodilessEntity().getStatusCode().is2xxSuccessful());
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofSeconds(1)).ignoreExceptions()
+                .until(() -> "SHIPPED".equals(api.get().uri("/shipping/api/shipments/{id}", orderId).retrieve()
+                        .body(JsonNode.class).path("status").asString()));
+    }
+
+    /** Plays the carrier: {@code outcome} is DELIVERED, DELIVERY_FAILED or LOST. */
+    void reportFromCarrier(String orderId, String outcome, String deliveryProblem) {
+        api.post().uri("/shipping/api/shipments/{id}/carrier-reports", orderId)
+                .body(Map.of("outcome", outcome, "deliveryProblem", deliveryProblem)).retrieve().toBodilessEntity();
+    }
+
     void setAgentEnabled(String agentId, boolean enabled) {
         api.put().uri("/agents/api/agents/{id}", agentId).body(Map.of("enabled", enabled, "by", OPERATOR))
                 .retrieve().toBodilessEntity();
