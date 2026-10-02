@@ -76,7 +76,7 @@ class EscalationLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
-    void anAgentCannotRetryARefundOnceTheOrderIsWithAPerson() {
+    void anAgentCannotRetryOrStartARefundOnceTheOrderIsWithAPerson() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
         SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(503)));
@@ -88,9 +88,16 @@ class EscalationLifecycleIntegrationTest extends McpServerTestSupport {
         stubRefundSucceeds(orderId);
 
         McpSchema.CallToolResult retriedByAgent = call(exceptionsAgent, "issue_refund", refund);
+        McpSchema.CallToolResult newRefundByAgent = call(exceptionsAgent, "issue_refund", Map.of("orderId",
+                orderId.toString(), "amount", 39.50, "reason", "item out of stock", "idempotencyKey",
+                "refund-" + orderId + "-again"));
 
         assertThat(retriedByAgent.isError()).isTrue();
         assertThat(text(retriedByAgent)).contains("handed to a human");
+        assertThat(newRefundByAgent.isError()).isTrue();
+        assertThat(text(newRefundByAgent)).contains("handed to a human");
+        assertThat(rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve().body(String.class))
+                .doesNotContain("-again");
         assertThat(refundStatus(orderId)).isEqualTo("FAILED");
         assertThat(retry(refundRequestId, ANA)).isEqualTo(200);
         assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
