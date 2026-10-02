@@ -67,6 +67,11 @@ public final class ToolRun {
         return customerEmail;
     }
 
+    /** Whether this run may work the given incident: only the one it was started for, if any. */
+    boolean mayWorkIncident(String number) {
+        return workId == null || workId.equals(number == null ? null : number.strip());
+    }
+
     /**
      * The key that makes a message to the order's customer go out once for this run's work, however often the work is
      * delivered again; null for a run that is not about one piece of work.

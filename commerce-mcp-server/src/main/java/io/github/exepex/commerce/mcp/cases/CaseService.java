@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -45,13 +46,16 @@ public class CaseService {
     private final AuditTrail audit;
     private final JdbcClient jdbc;
     private final Clock clock;
+    private final String worker;
 
-    CaseService(SupportCaseRepository cases, CaseNoteRepository notes, AuditTrail audit, JdbcClient jdbc, Clock clock) {
+    CaseService(SupportCaseRepository cases, CaseNoteRepository notes, AuditTrail audit, JdbcClient jdbc, Clock clock,
+            @Value("${commerce.cases.worker}") String worker) {
         this.cases = cases;
         this.notes = notes;
         this.audit = audit;
         this.jdbc = jdbc;
         this.clock = clock;
+        this.worker = worker;
     }
 
     /**
@@ -114,17 +118,23 @@ public class CaseService {
     }
 
     /**
-     * Agents leave an order alone while a team has one of its incidents: the people working it may be paying the
-     * customer back another way.
+     * Whether the agent may pay money back on the order now. While a team has one of the order's incidents, no agent
+     * may: the people working it may be paying the customer back another way. While any case of the order is open, only
+     * the agent that works cases may, since the others cannot see who has the incident at this moment: a person may
+     * have taken it since ServiceNow was last read.
      */
-    public void ensureNotWithTeam(UUID orderId) {
-        Optional<SupportCase> withTeam = cases.findByOrderIdAndStatus(orderId, SupportCase.Status.WITH_TEAM).stream()
-                .findFirst();
-        if (withTeam.isPresent()) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "This order is with the "
-                    + withTeam.get().getAssignmentGroup() + " team in ServiceNow" + incidentOf(withTeam.get())
-                    + ", who will finish it. Do not retry; tell the customer a person is looking into it.");
+    public void ensureAgentMayPay(UUID orderId, String agentId) {
+        List<SupportCase.Status> blocking = worker.equals(agentId) ? List.of(SupportCase.Status.WITH_TEAM) : UNRESOLVED;
+        Optional<SupportCase> open = cases.findByOrderIdAndStatusIn(orderId, blocking).stream().findFirst();
+        if (open.isEmpty()) {
+            return;
         }
+        SupportCase supportCase = open.get();
+        String who = supportCase.getStatus() == SupportCase.Status.WITH_TEAM
+                ? "with the " + supportCase.getAssignmentGroup() + " team in ServiceNow" + incidentOf(supportCase)
+                : "an open " + supportCase.getType() + " case" + incidentOf(supportCase) + " that the support team handles";
+        throw new GovernanceException(HttpStatus.CONFLICT, "This order is " + who + ", who will finish it. Do not "
+                + "retry or refund it another way; tell the customer a person is looking into it.");
     }
 
     /** Cases whose incident is still to be created, and cases with notes still to be sent, oldest first. */
@@ -208,16 +218,19 @@ public class CaseService {
         return supportCase;
     }
 
-    /** Opens a new case of the same problem for the notes a resolved incident never got. */
+    /**
+     * Opens a new case of the same problem for the notes a resolved incident never got. The notes move to it whole, so
+     * they reach its incident as work notes, however long they are.
+     */
     private void carryOverUnsentNotes(SupportCase resolved) {
         List<CaseNote> unsent = notes.findByCaseIdAndSentAtIsNullOrderByCreatedAt(resolved.getId());
         if (unsent.isEmpty()) {
             return;
         }
-        String details = "Raised again after " + resolved.getIncidentNumber() + " was resolved: "
-                + String.join(" | ", unsent.stream().map(CaseNote::getText).toList());
-        notes.deleteAll(unsent);
-        openOrAddTo(resolved.getType(), resolved.getOrderId(), details, AuditEvent.ActorType.SYSTEM, SERVICENOW);
+        SupportCase reopened = openOrAddTo(resolved.getType(), resolved.getOrderId(), "Raised again after "
+                + resolved.getIncidentNumber() + " was resolved; what was raised follows as work notes.",
+                AuditEvent.ActorType.SYSTEM, SERVICENOW);
+        unsent.forEach(note -> note.moveTo(reopened.getId()));
     }
 
     /** Serializes everything that opens, adds to or resolves the order's case of this type. */

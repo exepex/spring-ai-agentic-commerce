@@ -66,6 +66,8 @@ class ServiceNowMcpServerIntegrationTest {
     private static final String LINKED_ORDER = "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c";
     private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneOffset.UTC);
+    private static final Map<String, String> STATE_NAMES = Map.of("1", "New", "2", "In Progress", "3", "On Hold",
+            "6", "Resolved", "7", "Closed");
     private static final WireMockServer SERVICES = startWireMock();
 
     @LocalServerPort
@@ -357,16 +359,19 @@ class ServiceNowMcpServerIntegrationTest {
         String withTeam = UUID.randomUUID().toString();
         String resolved = UUID.randomUUID().toString();
         String takenByAPerson = UUID.randomUUID().toString();
+        String onHold = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
         SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("""
                 [{"id": "%s", "incidentNumber": "INC0010011"}, {"id": "%s", "incidentNumber": "INC0010012"},
-                 {"id": "%s", "incidentNumber": "INC0010013"}, {"id": "%s", "incidentNumber": "INC0010014"}]"""
-                .formatted(withAgent, withTeam, resolved, takenByAPerson))));
+                 {"id": "%s", "incidentNumber": "INC0010013"}, {"id": "%s", "incidentNumber": "INC0010014"},
+                 {"id": "%s", "incidentNumber": "INC0010016"}]"""
+                .formatted(withAgent, withTeam, resolved, takenByAPerson, onHold))));
         stubIncident("INC0010011", "sys-11", "2", "Online Shop Agent", AGENT_USER, withAgent, Instant.now());
         stubIncident("INC0010012", "sys-12", "2", "Payments", "", withTeam, Instant.now());
         stubIncident("INC0010013", "sys-13", "7", "Payments", "", resolved, Instant.now());
         stubIncident("INC0010014", "sys-14", "2", "Online Shop Agent", "desk-ana", takenByAPerson, Instant.now());
+        stubIncident("INC0010016", "sys-16", "3", "Online Shop Agent", "", onHold, Instant.now());
 
         poller.poll();
 
@@ -382,6 +387,30 @@ class ServiceNowMcpServerIntegrationTest {
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010014", "status": "WITH_TEAM",
                          "assignmentGroup": "Online Shop Agent (Incident Agent)"}""")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + onHold + "/incident-state"))
+                .withRequestBody(equalToJson("""
+                        {"number": "INC0010016", "status": "WITH_TEAM", "assignmentGroup": "Online Shop Agent (On Hold)"}""")));
+    }
+
+    @Test
+    void aCaseForPeopleGoesStraightToTheDefaultTeam() {
+        String caseId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "type": "HANDOFF", "status": "PENDING", "title": "[HANDOFF] A request needs a person",
+                  "description": "Carried over from the escalation queue.", "forPeople": true}, "unsentNotes": []}]"""
+                .formatted(caseId))));
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("correlation_display=" + caseId))
+                .willReturn(okJson("{\"result\": []}")));
+        SERVICES.stubFor(post(urlPathEqualTo("/api/now/table/incident")).willReturn(okJson("{\"result\": "
+                + incidentRow("INC0010017", "sys-17", "1", "Customer Care", "", caseId, Instant.now()) + "}")));
+
+        poller.poll();
+
+        SERVICES.verify(postRequestedFor(urlPathEqualTo("/api/now/table/incident"))
+                .withRequestBody(matchingJsonPath("$.assignment_group", equalTo("Customer Care"))));
     }
 
     @Test
@@ -435,13 +464,14 @@ class ServiceNowMcpServerIntegrationTest {
         return """
                 {"sys_id": {"value": "%s"}, "number": {"value": "%s"},
                  "short_description": {"value": "Order arrived broken"}, "description": {"value": "See comments"},
-                 "state": {"value": "%s", "display_value": "In Progress"},
+                 "state": {"value": "%s", "display_value": "%s"},
                  "assignment_group": {"display_value": "%s"},
                  "assigned_to": {"value": "%s", "display_value": "Incident Agent"},
                  "caller_id": {"display_value": "Ada Lovelace"}, "correlation_id": {"value": "%s"},
                  "correlation_display": {"value": "%s"}, "sys_created_on": {"value": "2026-10-02 08:55:00"},
                  "sys_updated_on": {"value": "%s"}}"""
-                .formatted(sysId, number, state, group, assignedTo, LINKED_ORDER, caseId, SERVICENOW_TIME.format(updatedAt));
+                .formatted(sysId, number, state, STATE_NAMES.getOrDefault(state, state), group, assignedTo, LINKED_ORDER,
+                        caseId, SERVICENOW_TIME.format(updatedAt));
     }
 
     private void stubNewIncidents(String rows) {

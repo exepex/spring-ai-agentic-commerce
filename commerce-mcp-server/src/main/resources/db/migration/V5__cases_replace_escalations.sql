@@ -12,6 +12,8 @@ create table support_case (
     incident_number   varchar(40),
     incident_url      varchar(500),
     assignment_group  varchar(200),
+    -- Its incident goes straight to the default team, not to the agent: a person already had the work.
+    for_people        boolean       not null default false,
     created_at        timestamptz   not null,
     updated_at        timestamptz   not null
 );
@@ -39,15 +41,16 @@ create table case_event (
 );
 
 -- Work still waiting in the escalation queue becomes a pending hand-off case, so it reaches ServiceNow and is not lost.
--- An order gets one case, from its oldest unresolved escalation, as an order has at most one open case of a type.
-insert into support_case (id, order_id, type, status, title, description, raised_by, created_at, updated_at)
+-- It was already for people, so its incident goes to the default team, not to the agent. An order gets one case, from
+-- its oldest unresolved escalation, as an order has at most one open case of a type.
+insert into support_case (id, order_id, type, status, title, description, raised_by, for_people, created_at, updated_at)
 select distinct on (coalesce(order_id::text, id::text))
        id, order_id, 'HANDOFF', 'PENDING',
        '[HANDOFF] ' || case when order_id is null then 'A request ' else 'Order ' || left(order_id::text, 8) || ' ' end
            || 'needs a person',
        summary || case when assigned_to is null then ''
                        else ' (It was assigned to ' || assigned_to || ' in the escalation queue.)' end,
-       raised_by, created_at, created_at
+       raised_by, true, created_at, created_at
 from escalation
 where status <> 'RESOLVED'
 order by coalesce(order_id::text, id::text), created_at;

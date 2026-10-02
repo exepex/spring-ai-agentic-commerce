@@ -37,6 +37,11 @@ public class CaseNote {
         this.createdAt = now;
     }
 
+    /** Moves the note to another case, whose incident it then goes to. */
+    void moveTo(UUID otherCaseId) {
+        caseId = otherCaseId;
+    }
+
     void markSent(Instant now) {
         if (sentAt == null) {
             sentAt = now;

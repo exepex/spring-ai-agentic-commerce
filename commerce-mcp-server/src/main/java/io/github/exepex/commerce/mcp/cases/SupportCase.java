@@ -57,6 +57,10 @@ public class SupportCase {
     @Column(name = "assignment_group")
     private String assignmentGroup;
 
+    /** Its incident goes straight to the default team, not to the agent: a person already had the work. */
+    @Column(name = "for_people")
+    private boolean forPeople;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -142,6 +146,10 @@ public class SupportCase {
 
     public String getAssignmentGroup() {
         return assignmentGroup;
+    }
+
+    public boolean isForPeople() {
+        return forPeople;
     }
 
     public Instant getCreatedAt() {

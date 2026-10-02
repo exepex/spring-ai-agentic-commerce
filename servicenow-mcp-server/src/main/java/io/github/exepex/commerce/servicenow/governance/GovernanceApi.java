@@ -18,9 +18,17 @@ public interface GovernanceApi {
     /** One tool call, recorded as the agent that made it; {@code outcome} is SUCCEEDED, FAILED or DENIED. */
     record ToolCall(UUID orderId, String action, String outcome, String summary, String details) {}
 
-    /** A shop case; {@code incidentNumber} is empty until its incident is opened. */
+    /**
+     * A shop case; {@code incidentNumber} is empty until its incident is opened. {@code forPeople} means its incident
+     * goes straight to the default team, not to the agent; missing means no.
+     */
     record Case(UUID id, UUID orderId, String type, String status, String title, String description,
-            String incidentNumber, String assignmentGroup) {}
+            String incidentNumber, String assignmentGroup, Boolean forPeople) {
+
+        public boolean isForPeople() {
+            return Boolean.TRUE.equals(forPeople);
+        }
+    }
 
     record Note(UUID id, String text) {}
 

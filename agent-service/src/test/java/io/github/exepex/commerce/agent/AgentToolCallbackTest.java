@@ -141,6 +141,20 @@ class AgentToolCallbackTest {
     }
 
     @Test
+    void anIncidentRunWorksOnlyItsOwnIncident() {
+        RecordingTool resolve = new RecordingTool("resolve_incident");
+        AgentToolCallback tool = new AgentToolCallback(resolve, false, () -> true);
+        ToolContext incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(), orderId -> true));
+
+        String other = tool.call("{\"number\": \"INC0010002\", \"resolution\": \"Done\"}", incidentRun);
+        String own = tool.call("{\"number\": \"INC0010001\", \"resolution\": \"Done\"}", incidentRun);
+
+        assertThat(other).startsWith("Refused").contains("INC0010002 is not it");
+        assertThat(own).doesNotStartWith("Refused");
+        assertThat(resolve.inputs).hasSize(1);
+    }
+
+    @Test
     void anIncidentRunsMessageToTheCustomerCarriesAKeyThatCodeSets() {
         String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
         RecordingTool notify = new RecordingTool("notify_customer");

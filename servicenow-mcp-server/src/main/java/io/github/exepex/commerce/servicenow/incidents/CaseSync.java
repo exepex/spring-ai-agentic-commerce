@@ -13,8 +13,9 @@ import org.springframework.stereotype.Component;
 
 /**
  * Keeps the shop's cases and their ServiceNow incidents in step, for the agent that works cases. It opens an incident
- * in the agent's group for each new case, sends what was added to a case later as work notes, and tells the shop who
- * has each incident now: the agent, a team, or nobody because it is resolved.
+ * for each new case, in the agent's group or, for a case already meant for people, the default team's; sends what was
+ * added to a case later as work notes; and tells the shop who has each incident now: the agent, a team, or nobody
+ * because it is resolved.
  *
  * <p>An incident carries its case's id in its Correlation display field, so a case whose incident was opened but not
  * yet reported to the shop, because the poller stopped in between, is found again instead of opened twice.
@@ -108,7 +109,9 @@ class CaseSync {
         ServiceNowClient.Incident incident = serviceNow.findByCaseId(supportCase.id()).orElse(null);
         if (incident == null) {
             Map<String, String> fields = new LinkedHashMap<>();
-            fields.put("assignment_group", properties.agentGroup());
+            fields.put("assignment_group", supportCase.isForPeople()
+                    ? properties.teams().get(properties.defaultTeam()).group()
+                    : properties.agentGroup());
             fields.put("short_description", supportCase.title());
             fields.put("description", supportCase.description());
             fields.put("correlation_id", supportCase.orderId() == null ? "" : supportCase.orderId().toString());
@@ -126,12 +129,17 @@ class CaseSync {
         }
         boolean takenByAPerson = incident.isAssigned()
                 && !serviceNow.integrationUserSysId().equals(incident.assignedToSysId());
-        if (properties.agentGroup().equals(incident.assignmentGroup()) && !takenByAPerson) {
+        // The agent only claims new incidents and only works ones in progress; in any other state, such as On Hold, a
+        // person put it there and has it.
+        boolean workableByTheAgent = ServiceNowClient.STATE_NEW.equals(incident.state())
+                || ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state());
+        if (properties.agentGroup().equals(incident.assignmentGroup()) && !takenByAPerson && workableByTheAgent) {
             return new GovernanceApi.IncidentState(incident.number(), WITH_AGENT, incident.assignmentGroup());
         }
         // A person who took the incident has it, even while it is still in the agent's group.
         String group = incident.assignmentGroup().isBlank() ? "no group" : incident.assignmentGroup();
-        String owner = takenByAPerson ? group + " (" + incident.assignedTo() + ")" : group;
+        String owner = takenByAPerson ? group + " (" + incident.assignedTo() + ")"
+                : workableByTheAgent ? group : group + " (" + incident.stateName() + ")";
         return new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, owner);
     }
 
