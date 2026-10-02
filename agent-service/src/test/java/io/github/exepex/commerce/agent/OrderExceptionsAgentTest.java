@@ -5,11 +5,13 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -34,7 +36,7 @@ class OrderExceptionsAgentTest {
         McpToolboxes toolboxes = mock(McpToolboxes.class);
         when(toolboxes.callAsOrderExceptionsAgent(eq("escalate_to_human"), any()))
                 .thenReturn(McpSchema.CallToolResult.builder().addTextContent("{}").isError(false).build());
-        OrderExceptionsAgent agent = new OrderExceptionsAgent(model, toolboxes, new AgentSwitchboard(),
+        OrderExceptionsAgent agent = new OrderExceptionsAgent(model, toolboxes, switchboard(true),
                 mock(DecisionRecorder.class), DEFINITIONS, PROPERTIES);
 
         agent.handleStockOut(UUID.randomUUID(), "{}");
@@ -47,9 +49,7 @@ class OrderExceptionsAgentTest {
         McpToolboxes toolboxes = mock(McpToolboxes.class);
         when(toolboxes.callAsOrderExceptionsAgent(eq("escalate_to_human"), any()))
                 .thenReturn(McpSchema.CallToolResult.builder().addTextContent("database down").isError(true).build());
-        AgentSwitchboard switchboard = new AgentSwitchboard();
-        switchboard.set(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, false);
-        OrderExceptionsAgent agent = new OrderExceptionsAgent(mock(ChatModel.class), toolboxes, switchboard,
+        OrderExceptionsAgent agent = new OrderExceptionsAgent(mock(ChatModel.class), toolboxes, switchboard(false),
                 mock(DecisionRecorder.class), DEFINITIONS, PROPERTIES);
 
         assertThatThrownBy(() -> agent.handleStockOut(UUID.randomUUID(), "{}"))
@@ -61,13 +61,32 @@ class OrderExceptionsAgentTest {
         McpToolboxes toolboxes = mock(McpToolboxes.class);
         when(toolboxes.callAsOrderExceptionsAgent(eq("escalate_to_human"), any()))
                 .thenThrow(new IllegalStateException("MCP server unreachable"));
-        AgentSwitchboard switchboard = new AgentSwitchboard();
-        switchboard.set(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, false);
-        OrderExceptionsAgent agent = new OrderExceptionsAgent(mock(ChatModel.class), toolboxes, switchboard,
+        OrderExceptionsAgent agent = new OrderExceptionsAgent(mock(ChatModel.class), toolboxes, switchboard(false),
                 mock(DecisionRecorder.class), DEFINITIONS, PROPERTIES);
 
         assertThatThrownBy(() -> agent.handleStockOut(UUID.randomUUID(), "{}"))
                 .isInstanceOf(OrderExceptionsAgent.HandOffFailedException.class)
                 .hasMessageContaining("to a human");
+    }
+
+    @Test
+    void whenTheKillSwitchCannotBeReadTheStockOutFailsSoKafkaDeliversItAgain() {
+        AgentSwitchesApi unreachable = mock(AgentSwitchesApi.class);
+        when(unreachable.all()).thenThrow(new IllegalStateException("MCP server unreachable"));
+        ChatModel model = mock(ChatModel.class);
+        McpToolboxes toolboxes = mock(McpToolboxes.class);
+        OrderExceptionsAgent agent = new OrderExceptionsAgent(model, toolboxes, new AgentSwitchboard(unreachable),
+                mock(DecisionRecorder.class), DEFINITIONS, PROPERTIES);
+
+        assertThatThrownBy(() -> agent.handleStockOut(UUID.randomUUID(), "{}"))
+                .isInstanceOf(OrderExceptionsAgent.HandOffFailedException.class)
+                .hasMessageContaining("kill switch");
+        verifyNoInteractions(model, toolboxes);
+    }
+
+    private static AgentSwitchboard switchboard(boolean exceptionsAgentOn) {
+        AgentSwitchesApi switches = mock(AgentSwitchesApi.class);
+        when(switches.all()).thenReturn(Map.of(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, exceptionsAgentOn));
+        return new AgentSwitchboard(switches);
     }
 }

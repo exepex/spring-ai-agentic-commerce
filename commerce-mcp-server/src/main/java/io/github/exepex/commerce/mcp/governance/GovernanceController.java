@@ -3,18 +3,23 @@ package io.github.exepex.commerce.mcp.governance;
 import io.github.exepex.commerce.mcp.security.AgentAuthenticationFilter;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The governance API: the UI reads the audit trail and acts on approvals, proposals and escalations; agents record
+ * The governance API: the UI reads the audit trail and acts on approvals, proposals, escalations and the agents' kill
+ * switches; agents record
  * their decisions under {@code /api/agent}, authenticated with their bearer token. The UI side has no login in this
  * demo; in production it would sit behind the organisation's identity provider.
  */
@@ -25,6 +30,9 @@ class GovernanceController {
 
     record Confirmation(String paymentMethod) {}
 
+    /** {@code by} is recorded as the audit entry's actor, which holds 100 characters. */
+    record SwitchChange(@NotNull Boolean enabled, @NotBlank @Size(max = 100) String by) {}
+
     record AgentDecision(UUID orderId, @NotBlank String summary, String reasoning, String model, Long inputTokens,
             Long outputTokens, Long durationMillis) {}
 
@@ -33,14 +41,16 @@ class GovernanceController {
     private final ProposalService proposals;
     private final NotificationService notifications;
     private final EscalationService escalations;
+    private final AgentSwitches switches;
 
     GovernanceController(AuditTrail audit, RefundService refunds, ProposalService proposals,
-            NotificationService notifications, EscalationService escalations) {
+            NotificationService notifications, EscalationService escalations, AgentSwitches switches) {
         this.audit = audit;
         this.refunds = refunds;
         this.proposals = proposals;
         this.notifications = notifications;
         this.escalations = escalations;
+        this.switches = switches;
     }
 
     @GetMapping("/api/orders/{orderId}/timeline")
@@ -114,6 +124,17 @@ class GovernanceController {
     @PostMapping("/api/escalations/{escalationId}/resolve")
     Escalation resolveEscalation(@PathVariable UUID escalationId, @Valid @RequestBody Decision decision) {
         return escalations.resolve(escalationId, decision.by(), decision.note());
+    }
+
+    /** Each agent's kill switch: whether it is on. */
+    @GetMapping("/api/agent-switches")
+    Map<String, Boolean> agentSwitches() {
+        return switches.all();
+    }
+
+    @PutMapping("/api/agent-switches/{agentId}")
+    Map<String, Boolean> switchAgent(@PathVariable String agentId, @Valid @RequestBody SwitchChange change) {
+        return switches.set(agentId, change.enabled(), change.by());
     }
 
     /** An agent records why it did what it did, with the model and token usage behind it. */

@@ -59,7 +59,7 @@ flowchart LR
 | payment-service | 8083 | Card payments and idempotent refunds through Stripe test mode (or a built-in simulator without a key). Publishes `payment.events` when a refund fails after it was made. Has a simulated-outage switch for the demo. |
 | shipping-service | 8084 | Creates and cancels shipments from order events. |
 | commerce-mcp-server | 8085 | Nine MCP tools over the services, plus the governance API: audit trail, refund approvals, order proposals, customer notifications, escalations. |
-| agent-service | 8086 | The two agents, each with its own MCP connection, allowlist, prompt, effort level and kill switch. |
+| agent-service | 8086 | The two agents, each with its own MCP connection, allowlist, prompt and effort level. |
 | shop-ui | 8080 | Angular app served by nginx, which routes `/svc/<service>/` to each service. |
 
 Each agent is defined in one file (model, effort, tools, budget and prompt) that both agent-service and
@@ -96,7 +96,8 @@ commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    idempotency key, then escalates to a human instead of guessing. Once payments are back, a person takes the
    escalation with **Assign to me** and clicks **Retry refund**: it runs exactly once, with the same key.
 5. **Kill switch.** Switch the order-exceptions agent off: the next stock-out goes straight to the escalation queue,
-   without calling the model.
+   without calling the model. The switch is kept by the MCP server, so it stays off after a restart, and the server
+   refuses every tool call of a switched-off agent except handing the work to a human.
 6. **Prompt injection.** Ask the assistant to cancel another customer's order. The customer's identity is injected
    by code and the MCP server checks ownership, so the attempt is refused and recorded as *denied*.
 7. **One person per escalation.** An escalation is open until someone assigns it to themselves; from then on only
@@ -171,6 +172,9 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
 - **Events are published after commit,** so consumers never see a rolled-back change. The trade-off: an event can be
   lost if a process dies between commit and send. A transactional outbox closes that gap; it is left out to keep the
   demo small.
+- **Events can arrive twice, and that is harmless.** The audit trail records each event once per order, by the id its
+  service gave it. agent-service reads stock-outs from the start of the topic when it first joins, so none published
+  before it started is missed; a stock-out handled before is found already settled.
 - **The demo UI has no login.** You pick which customer you are. In production the UI and the governance API would sit
   behind the organisation's identity provider.
 

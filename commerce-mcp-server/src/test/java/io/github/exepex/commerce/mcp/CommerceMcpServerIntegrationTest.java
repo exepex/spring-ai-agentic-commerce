@@ -15,6 +15,7 @@ import com.jayway.jsonpath.JsonPath;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -286,17 +287,51 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
-    void aStockOutAppearsOnTheTimelineOfEveryAffectedOrderAtTheTimeItHappened() {
+    void aStockOutAppearsOnceOnTheTimelineOfEveryAffectedOrderAtTheTimeItHappenedEvenWhenDeliveredAgain() {
         UUID orderId = UUID.randomUUID();
+        UUID otherOrderId = UUID.randomUUID();
+        String stockOut = stockOut(UUID.randomUUID(), "damaged in warehouse", orderId, otherOrderId);
 
-        kafka.send("inventory.stock-out", "product", """
-                {"eventId": "%s", "occurredAt": "2026-10-02T09:15:00Z", "productId": "%s", "sku": "RUN-SHOE-BLUE-43",
-                 "onHand": 1, "reserved": 2, "shortfall": 1, "reason": "damaged in warehouse", "affectedOrderIds": ["%s"]}"""
-                .formatted(UUID.randomUUID(), UUID.randomUUID(), orderId)).join();
+        kafka.send("inventory.stock-out", "product", stockOut).join();
+        kafka.send("inventory.stock-out", "product", stockOut).join();
+        kafka.send("inventory.stock-out", "product", stockOut(UUID.randomUUID(), "lost in transit", orderId)).join();
 
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
-                assertThat(rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve().body(String.class))
-                        .contains("STOCK_OUT", "damaged in warehouse", "2026-10-02T09:15:00Z"));
+                assertThat(timeline(orderId)).contains("lost in transit"));
+        List<String> damaged = JsonPath.read(timeline(orderId), "$[?(@.summary =~ /.*damaged in warehouse.*/)].occurredAt");
+        assertThat(damaged).containsExactly("2026-10-02T09:15:00Z");
+        assertThat(timeline(otherOrderId)).contains("STOCK_OUT", "damaged in warehouse");
+    }
+
+    @Test
+    void anOrderEventDeliveredAgainAppearsOnceOnTheTimeline() {
+        UUID orderId = UUID.randomUUID();
+        String confirmed = """
+                {"eventId": "%s", "type": "ORDER_CONFIRMED", "orderId": "%s", "customerEmail": "ada@example.com",
+                 "occurredAt": "2026-10-02T09:10:00Z"}""".formatted(UUID.randomUUID(), orderId);
+
+        kafka.send("order.events", orderId.toString(), confirmed).join();
+        kafka.send("order.events", orderId.toString(), confirmed).join();
+        kafka.send("order.events", orderId.toString(), """
+                {"eventId": "%s", "type": "ORDER_CANCELLED", "orderId": "%s", "customerEmail": "ada@example.com",
+                 "occurredAt": "2026-10-02T09:20:00Z"}""".formatted(UUID.randomUUID(), orderId)).join();
+
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
+                assertThat(timeline(orderId)).contains("ORDER_CANCELLED"));
+        List<String> actions = JsonPath.read(timeline(orderId), "$[*].action");
+        assertThat(actions).containsExactly("ORDER_CONFIRMED", "ORDER_CANCELLED");
+    }
+
+    private static String stockOut(UUID eventId, String reason, UUID... affectedOrderIds) {
+        String orderIds = String.join(", ", Arrays.stream(affectedOrderIds).map(id -> "\"" + id + "\"").toList());
+        return """
+                {"eventId": "%s", "occurredAt": "2026-10-02T09:15:00Z", "productId": "%s", "sku": "RUN-SHOE-BLUE-43",
+                 "onHand": 1, "reserved": 2, "shortfall": 1, "reason": "%s", "affectedOrderIds": [%s]}"""
+                .formatted(eventId, UUID.randomUUID(), reason, orderIds);
+    }
+
+    private String timeline(UUID orderId) {
+        return rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve().body(String.class);
     }
 
     /** Asks for the full €39.50 refund with one fixed key and returns 1 when the call succeeded. */

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
@@ -43,7 +44,7 @@ class AgentToolCallbackTest {
     @Test
     void hidesTheCustomerFromTheModelAndFillsInTheSignedInCustomer() {
         RecordingTool mcpTool = new RecordingTool("get_order");
-        AgentToolCallback tool = new AgentToolCallback(mcpTool, true);
+        AgentToolCallback tool = new AgentToolCallback(mcpTool, true, () -> true);
 
         assertThat(tool.getToolDefinition().inputSchema()).doesNotContain("customerEmail").contains("orderId");
 
@@ -55,7 +56,7 @@ class AgentToolCallbackTest {
 
     @Test
     void leavesTheSchemaAloneForAnAgentThatIsNotCustomerFacing() {
-        AgentToolCallback tool = new AgentToolCallback(new RecordingTool("get_order"), false);
+        AgentToolCallback tool = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true);
 
         assertThat(tool.getToolDefinition().inputSchema()).contains("customerEmail");
     }
@@ -63,7 +64,7 @@ class AgentToolCallbackTest {
     @Test
     void refusesCallsOnceTheRunHasSpentItsBudget() {
         RecordingTool mcpTool = new RecordingTool("get_order");
-        AgentToolCallback tool = new AgentToolCallback(mcpTool, false);
+        AgentToolCallback tool = new AgentToolCallback(mcpTool, false, () -> true);
         ToolContext context = contextFor(new ToolRun(null, 2));
 
         tool.call("{}", context);
@@ -75,10 +76,25 @@ class AgentToolCallbackTest {
     }
 
     @Test
+    void refusesAThirdPartyToolOnceTheAgentIsSwitchedOffDuringTheRun() {
+        RecordingTool slackTool = new RecordingTool("conversations_add_message");
+        AtomicBoolean switchedOn = new AtomicBoolean(true);
+        AgentToolCallback tool = new AgentToolCallback(slackTool, false, switchedOn::get);
+        ToolContext context = contextFor(new ToolRun(null, 5));
+
+        tool.call("{}", context);
+        switchedOn.set(false);
+        String afterSwitchOff = tool.call("{}", context);
+
+        assertThat(afterSwitchOff).startsWith("Refused").contains("switched off");
+        assertThat(slackTool.inputs).hasSize(1);
+    }
+
+    @Test
     void collectsOrderProposalsForTheChatToShow() {
         ToolRun run = new ToolRun("ada@example.com", 5);
 
-        new AgentToolCallback(new RecordingTool("propose_order"), true).call("{}", contextFor(run));
+        new AgentToolCallback(new RecordingTool("propose_order"), true, () -> true).call("{}", contextFor(run));
 
         assertThat(run.proposals()).containsExactly("{\"id\": \"proposal-1\"}");
     }
