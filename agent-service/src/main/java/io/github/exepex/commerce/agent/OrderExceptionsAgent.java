@@ -80,7 +80,7 @@ public class OrderExceptionsAgent {
                     .toolContext(Map.of(ToolRun.CONTEXT_KEY, new ToolRun(null, TOOL_CALL_BUDGET)))
                     .call()
                     .chatResponse();
-            String summary = response.getResult().getOutput().getText();
+            String summary = ClaudeReply.textOf(response);
             decisions.record(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, orderId, summary,
                     "Triggered by stock-out event: " + stockOutEvent, response, Duration.between(started, Instant.now()));
         } catch (RuntimeException failure) {

@@ -38,7 +38,9 @@ class CommerceTools {
 
     record OrderSummary(UUID orderId, String status, BigDecimal total, String currency, Instant createdAt, String items) {}
 
-    record PaymentSummary(String status, BigDecimal paid, BigDecimal refunded, BigDecimal refundable, String currency) {}
+    /** {@code message} is set only when the payment could not be read, and says so: a missing payment is not unpaid. */
+    record PaymentSummary(String status, BigDecimal paid, BigDecimal refunded, BigDecimal refundable, String currency,
+            String message) {}
 
     record ShipmentSummary(String trackingNumber, String status, LocalDate estimatedDelivery) {}
 
@@ -211,9 +213,11 @@ class CommerceTools {
         try {
             PaymentApi.Payment payment = Downstream.call("payment service", () -> payments.getPayment(orderId));
             return new PaymentSummary(payment.status(), payment.amount(), payment.refundedAmount(), payment.refundable(),
-                    payment.currency());
-        } catch (DownstreamException unavailable) {
-            return null;
+                    payment.currency(), null);
+        } catch (DownstreamException failure) {
+            return failure.isRetryable()
+                    ? new PaymentSummary("UNKNOWN", null, null, null, null, failure.getMessage())
+                    : null;
         }
     }
 

@@ -3,6 +3,7 @@ package io.github.exepex.commerce.agent;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -58,9 +59,18 @@ final class AgentToolCallback implements ToolCallback {
         }
         String result = mcpTool.call(input);
         if ("propose_order".equals(definition.name())) {
-            run.recordProposal(result);
+            run.recordProposal(textOf(result));
         }
         return result;
+    }
+
+    /** An MCP tool result reaches us as its JSON content list; the proposal is the text of its text content. */
+    private static String textOf(String mcpContent) {
+        StringBuilder text = new StringBuilder();
+        for (JsonNode content : JSON.readTree(mcpContent)) {
+            text.append(content.path("text").asString(""));
+        }
+        return text.toString();
     }
 
     private static ToolDefinition withoutCustomerParameter(ToolDefinition original) {

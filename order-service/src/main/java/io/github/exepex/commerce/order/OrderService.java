@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.ErrorResponseException;
 
 /**
  * Checkout and cancellation. This is the deterministic path: no AI agent is involved in placing an order.
@@ -52,11 +53,11 @@ public class OrderService {
             payments.charge(order.getId(), customerEmail, order.getTotalAmount(), order.getCurrency(), paymentMethod);
         } catch (PaymentGateway.PaymentDeclinedException declined) {
             failPayment(order, declined.getMessage());
-            throw OrderRejectedException.paymentDeclined(declined.getMessage());
+            throw naming(order, OrderRejectedException.paymentDeclined(declined.getMessage()));
         } catch (PaymentGateway.PaymentUnavailableException unavailable) {
             LOGGER.warn("Payment for order {} could not be taken", order.getId(), unavailable);
             failPayment(order, unavailable.getMessage());
-            throw new DependencyUnavailableException("payment service", unavailable);
+            throw naming(order, new DependencyUnavailableException("payment service", unavailable));
         }
         return transaction.execute(status -> {
             order.confirm();
@@ -123,6 +124,12 @@ public class OrderService {
         releaseQuietly(order.getId());
         order.markPaymentFailed(reason);
         orders.save(order);
+    }
+
+    /** The order whose payment failed is kept, so the error names it: callers can link what they record to it. */
+    private static <E extends ErrorResponseException> E naming(CustomerOrder order, E failure) {
+        failure.getBody().setProperty("orderId", order.getId());
+        return failure;
     }
 
     private static void rejectDuplicateProducts(List<RequestedLine> requestedLines) {

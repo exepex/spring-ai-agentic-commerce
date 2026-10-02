@@ -120,7 +120,7 @@ class OrderApiIntegrationTest {
     }
 
     @Test
-    void aDeclinedCardFailsTheOrderAndReleasesItsStock() {
+    void aDeclinedCardFailsTheOrderReleasesItsStockAndNamesTheOrder() throws Exception {
         DEPENDENCIES.stubFor(post("/api/payments").willReturn(problem(HttpStatus.PAYMENT_REQUIRED, "Your card was declined.")));
 
         MvcTestResult declined = placeOrder("alan@example.com", SHOE, 1);
@@ -128,8 +128,10 @@ class OrderApiIntegrationTest {
         assertThat(declined).hasStatus(HttpStatus.PAYMENT_REQUIRED);
         assertThat(declined).bodyJson().extractingPath("$.detail").isEqualTo("Your card was declined.");
         DEPENDENCIES.verify(deleteRequestedFor(urlMatching("/api/orders/.+/reservations")));
-        assertThat(mockMvc.get().uri("/api/orders?customerEmail=alan@example.com"))
-                .bodyJson().extractingPath("$[0].status").isEqualTo("PAYMENT_FAILED");
+        MvcTestResult orders = mockMvc.get().uri("/api/orders?customerEmail=alan@example.com").exchange();
+        assertThat(orders).bodyJson().extractingPath("$[0].status").isEqualTo("PAYMENT_FAILED");
+        String failedOrderId = JsonPath.read(orders.getResponse().getContentAsString(), "$[0].id");
+        assertThat(declined).bodyJson().extractingPath("$.orderId").isEqualTo(failedOrderId);
     }
 
     @Test

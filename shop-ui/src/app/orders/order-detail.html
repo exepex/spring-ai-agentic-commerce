@@ -27,8 +27,18 @@
         <section class="card">
           <h2>Payment</h2>
           @if (payment(); as payment) {
-            <div class="spread"><span>Paid</span><span>{{ payment.amount | currency: payment.currency }}</span></div>
-            <div class="spread"><span>Refunded</span><span>{{ payment.refundedAmount | currency: payment.currency }}</span></div>
+            @if (payment.status === 'SUCCEEDED') {
+              <div class="spread"><span>Paid</span><span>{{ payment.amount | currency: payment.currency }}</span></div>
+              <div class="spread"><span>Refunded</span><span>{{ payment.refundedAmount | currency: payment.currency }}</span></div>
+            } @else {
+              <div class="spread">
+                <span>{{ payment.amount | currency: payment.currency }} not charged</span>
+                <span class="chip {{ payment.status }}">{{ payment.status }}</span>
+              </div>
+              @if (payment.failureMessage) {
+                <div class="small error">{{ payment.failureMessage }}</div>
+              }
+            }
             <div class="spread muted small"><span>{{ payment.provider }}</span><span class="mono">{{ payment.providerReference }}</span></div>
           } @else {
             <p class="empty">No payment.</p>

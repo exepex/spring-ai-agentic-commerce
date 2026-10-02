@@ -29,6 +29,11 @@ commerce:
     stripe-secret-key: ${AGENTIC_COMMERCE_STRIPE_SECRET_KEY:}
 
 management:
+  otlp:
+    metrics:
+      export:
+        # Jaeger only takes traces; without this every service fails to push metrics to it once a minute.
+        enabled: false
   tracing:
     sampling:
       probability: 1.0

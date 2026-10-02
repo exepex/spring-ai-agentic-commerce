@@ -32,10 +32,11 @@ class AgentToolCallbackTest {
             return ToolDefinition.builder().name(name).description("a tool").inputSchema(SCHEMA).build();
         }
 
+        /** Answers like Spring AI's MCP tool callback: the JSON of the result's content list. */
         @Override
         public String call(String toolInput) {
             inputs.add(toolInput);
-            return "{\"id\": \"proposal-1\"}";
+            return "[{\"text\":\"{\\\"id\\\": \\\"proposal-1\\\"}\"}]";
         }
     }
 

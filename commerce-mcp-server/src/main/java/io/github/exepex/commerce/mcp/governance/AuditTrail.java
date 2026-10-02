@@ -25,7 +25,13 @@ public class AuditTrail {
 
     public void record(UUID orderId, AuditEvent.ActorType actorType, String actor, String action,
             AuditEvent.Outcome outcome, String summary, String details) {
-        events.save(new AuditEvent(Instant.now(clock), orderId, actorType, actor, action, outcome, summary, details,
+        recordAt(Instant.now(clock), orderId, actorType, actor, action, outcome, summary, details);
+    }
+
+    /** Records something that happened earlier, such as an event another service announced, at the time it happened. */
+    public void recordAt(Instant occurredAt, UUID orderId, AuditEvent.ActorType actorType, String actor, String action,
+            AuditEvent.Outcome outcome, String summary, String details) {
+        events.save(new AuditEvent(occurredAt, orderId, actorType, actor, action, outcome, summary, details,
                 currentTraceId()));
     }
 

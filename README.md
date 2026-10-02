@@ -133,7 +133,8 @@ of their replies.
 mvn -pl agent-evals -Pevals test
 ```
 
-They call Claude, so they are skipped in a normal build; a run costs a few cents.
+They call Claude, so they are skipped in a normal build; a run costs a few cents. When the UI runs with `npm start`
+instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:4200/svc`.
 
 ## Design decisions
 

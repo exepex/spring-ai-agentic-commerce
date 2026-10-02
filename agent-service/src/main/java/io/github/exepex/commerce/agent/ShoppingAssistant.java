@@ -76,7 +76,7 @@ public class ShoppingAssistant {
                     .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
                     .call()
                     .chatResponse();
-            String text = response.getResult().getOutput().getText();
+            String text = ClaudeReply.textOf(response);
             decisions.record(AgentSwitchboard.SHOPPING_ASSISTANT, null,
                     "Answered " + customerEmail + ": " + abbreviate(text), "Customer asked: " + message, response,
                     Duration.between(started, Instant.now()));

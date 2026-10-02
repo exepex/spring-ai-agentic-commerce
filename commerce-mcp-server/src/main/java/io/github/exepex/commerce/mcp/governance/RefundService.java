@@ -3,6 +3,7 @@ package io.github.exepex.commerce.mcp.governance;
 import io.github.exepex.commerce.mcp.GovernanceProperties;
 import io.github.exepex.commerce.mcp.downstream.Downstream;
 import io.github.exepex.commerce.mcp.downstream.DownstreamException;
+import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -27,17 +28,35 @@ public class RefundService {
 
     private final RefundRequestRepository requests;
     private final PaymentApi payments;
+    private final OrderApi orders;
     private final AuditTrail audit;
     private final BigDecimal approvalThreshold;
     private final Clock clock;
 
-    RefundService(RefundRequestRepository requests, PaymentApi payments, AuditTrail audit,
+    RefundService(RefundRequestRepository requests, PaymentApi payments, OrderApi orders, AuditTrail audit,
             GovernanceProperties properties, Clock clock) {
         this.requests = requests;
         this.payments = payments;
+        this.orders = orders;
         this.audit = audit;
         this.approvalThreshold = properties.refundApprovalThreshold();
         this.clock = clock;
+    }
+
+    /**
+     * The payment is read to refuse a too-large refund early. When the payment service is down the request is still
+     * recorded, as failed, so it can be retried with the same key once the service is back; the payment service
+     * checks the amount again itself.
+     */
+    private PaymentApi.Payment paymentIfReachable(UUID orderId) {
+        try {
+            return Downstream.call("payment service", () -> payments.getPayment(orderId));
+        } catch (DownstreamException failure) {
+            if (failure.isRetryable()) {
+                return null;
+            }
+            throw failure;
+        }
     }
 
     /** Asking again with the same idempotency key returns the first request, retrying it only if it had failed. */
@@ -52,20 +71,23 @@ public class RefundService {
             }
             return request.getStatus() == RefundRequest.Status.FAILED ? execute(request, agentId) : request;
         }
-        PaymentApi.Payment payment = Downstream.call("payment service", () -> payments.getPayment(orderId));
-        if (amount.compareTo(payment.refundable()) > 0) {
+        PaymentApi.Payment payment = paymentIfReachable(orderId);
+        if (payment != null && amount.compareTo(payment.refundable()) > 0) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "A refund of " + amount + " "
                     + payment.currency() + " exceeds the " + payment.refundable() + " still refundable on this order.");
         }
+        String currency = payment != null
+                ? payment.currency()
+                : Downstream.call("order service", () -> orders.getOrder(orderId)).currency();
         boolean needsApproval = amount.compareTo(approvalThreshold) > 0;
         // Saved before the payment service is called. Until it confirms, the request counts as FAILED: if this
         // process stops in between, a retry with the same key is safe and the processor pays out at most once.
-        RefundRequest request = requests.save(new RefundRequest(orderId, amount, payment.currency(), reason,
+        RefundRequest request = requests.save(new RefundRequest(orderId, amount, currency, reason,
                 idempotencyKey, agentId,
                 needsApproval ? RefundRequest.Status.PENDING_APPROVAL : RefundRequest.Status.FAILED, Instant.now(clock)));
         if (needsApproval) {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, "issue_refund", AuditEvent.Outcome.PENDING_APPROVAL,
-                    "Refund of " + amount + " " + payment.currency() + " is above the " + approvalThreshold
+                    "Refund of " + amount + " " + currency + " is above the " + approvalThreshold
                             + " limit and waits for a human to approve it",
                     reason);
             return request;

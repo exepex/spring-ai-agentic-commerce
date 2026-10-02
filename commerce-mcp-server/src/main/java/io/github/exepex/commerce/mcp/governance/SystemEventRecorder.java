@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.mcp.governance;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.UUID;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
@@ -16,10 +18,12 @@ class SystemEventRecorder {
 
     private final AuditTrail audit;
     private final JsonMapper jsonMapper;
+    private final Clock clock;
 
-    SystemEventRecorder(AuditTrail audit, JsonMapper jsonMapper) {
+    SystemEventRecorder(AuditTrail audit, JsonMapper jsonMapper, Clock clock) {
         this.audit = audit;
         this.jsonMapper = jsonMapper;
+        this.clock = clock;
     }
 
     @KafkaListener(topics = "${commerce.topics.order-events}")
@@ -31,8 +35,8 @@ class SystemEventRecorder {
             case "ORDER_CANCELLED" -> "Order cancelled; stock released and shipment cancelled";
             default -> "Order event " + type;
         };
-        audit.record(UUID.fromString(event.path("orderId").asString()), AuditEvent.ActorType.SYSTEM, "order-service",
-                type, AuditEvent.Outcome.SUCCEEDED, summary, null);
+        audit.recordAt(occurredAt(event), UUID.fromString(event.path("orderId").asString()), AuditEvent.ActorType.SYSTEM,
+                "order-service", type, AuditEvent.Outcome.SUCCEEDED, summary, null);
     }
 
     @KafkaListener(topics = "${commerce.topics.stock-out}")
@@ -42,8 +46,14 @@ class SystemEventRecorder {
                 + " on hand for " + event.path("reserved").asInt() + " reserved (" + event.path("reason").asString()
                 + "). This order can no longer be fulfilled as placed.";
         for (JsonNode orderId : event.path("affectedOrderIds")) {
-            audit.record(UUID.fromString(orderId.asString()), AuditEvent.ActorType.SYSTEM, "catalog-service", "STOCK_OUT",
-                    AuditEvent.Outcome.SUCCEEDED, summary, json);
+            audit.recordAt(occurredAt(event), UUID.fromString(orderId.asString()), AuditEvent.ActorType.SYSTEM,
+                    "catalog-service", "STOCK_OUT", AuditEvent.Outcome.SUCCEEDED, summary, json);
         }
+    }
+
+    /** When the service says it happened: a consumer that catches up late must not reorder the timeline. */
+    private Instant occurredAt(JsonNode event) {
+        String occurredAt = event.path("occurredAt").asString("");
+        return occurredAt.isEmpty() ? Instant.now(clock) : Instant.parse(occurredAt);
     }
 }

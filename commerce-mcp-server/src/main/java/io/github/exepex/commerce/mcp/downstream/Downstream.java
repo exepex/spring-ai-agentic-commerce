@@ -16,10 +16,16 @@ public final class Downstream {
             return request.get();
         } catch (HttpStatusCodeException refused) {
             boolean retryable = refused.getStatusCode().is5xxServerError();
+            ProblemDetail problem = problemOf(refused);
+            String detail = problem != null && problem.getDetail() != null ? problem.getDetail() : refused.getStatusCode().toString();
             String message = retryable
-                    ? "The " + service + " is unavailable (" + detailOf(refused) + "). It is safe to retry later."
-                    : detailOf(refused);
-            throw new DownstreamException(refused.getStatusCode(), message, retryable, refused);
+                    ? "The " + service + " is unavailable (" + detail + "). It is safe to retry later."
+                    : detail;
+            DownstreamException failure = new DownstreamException(refused.getStatusCode(), message, retryable, refused);
+            if (problem != null && problem.getProperties() != null) {
+                problem.getProperties().forEach(failure.getBody()::setProperty);
+            }
+            throw failure;
         } catch (RestClientException unreachable) {
             throw new DownstreamException(HttpStatus.SERVICE_UNAVAILABLE,
                     "The " + service + " could not be reached. It is safe to retry later.", true, unreachable);
@@ -33,15 +39,11 @@ public final class Downstream {
         });
     }
 
-    private static String detailOf(HttpStatusCodeException refused) {
+    private static ProblemDetail problemOf(HttpStatusCodeException refused) {
         try {
-            ProblemDetail problem = refused.getResponseBodyAs(ProblemDetail.class);
-            if (problem != null && problem.getDetail() != null) {
-                return problem.getDetail();
-            }
+            return refused.getResponseBodyAs(ProblemDetail.class);
         } catch (RuntimeException unreadableBody) {
-            // fall through to the status text
+            return null;
         }
-        return refused.getStatusCode().toString();
     }
 }

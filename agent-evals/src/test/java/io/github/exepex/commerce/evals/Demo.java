@@ -2,12 +2,14 @@ package io.github.exepex.commerce.evals;
 
 import static org.awaitility.Awaitility.await;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.StreamSupport;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 
@@ -20,7 +22,10 @@ final class Demo {
 
     private static final Duration AGENT_TIMEOUT = Duration.ofMinutes(4);
 
-    private final RestClient api = RestClient.create(System.getProperty("evals.baseUrl", "http://localhost:8080/svc"));
+    private final RestClient api = RestClient.builder()
+            .baseUrl(System.getProperty("evals.baseUrl", "http://localhost:8080/svc"))
+            .requestFactory(httpOneOneWithTimeouts())
+            .build();
 
     String placeOrder(String customerEmail, String productId) {
         return api.post().uri("/orders/api/orders")
@@ -119,6 +124,19 @@ final class Demo {
     private void adjustStock(String productId, int delta, String reason) {
         api.post().uri("/catalog/api/products/{id}/stock-adjustments", productId)
                 .body(Map.of("delta", delta, "reason", reason)).retrieve().toBodilessEntity();
+    }
+
+    /**
+     * HTTP/1.1, because the JDK client otherwise offers an HTTP/2 upgrade that the UI's development proxy never
+     * answers. A chat with the model can take a while, but no call may hang forever.
+     */
+    private static JdkClientHttpRequestFactory httpOneOneWithTimeouts() {
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(5))
+                .build());
+        requestFactory.setReadTimeout(Duration.ofMinutes(3));
+        return requestFactory;
     }
 
     private static List<JsonNode> list(JsonNode array) {

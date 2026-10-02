@@ -160,6 +160,7 @@ class CommerceMcpServerIntegrationTest {
     @Test
     void aRefundThatFailedBecausePaymentsWereDownSucceedsWhenRetriedWithTheSameKey() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
+        SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
         SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(503)));
         Map<String, Object> refund = Map.of("orderId", orderId.toString(), "amount", 39.50,
                 "reason", "item out of stock", "idempotencyKey", "refund-" + orderId);
@@ -173,17 +174,51 @@ class CommerceMcpServerIntegrationTest {
     }
 
     @Test
-    void aStockOutAppearsOnTheTimelineOfEveryAffectedOrder() {
+    void anOrderLookupSaysSoWhenThePaymentServiceIsDownInsteadOfShowingNoPayment() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
+
+        String order = text(call(exceptionsAgent, "get_order", Map.of("orderId", orderId.toString())));
+
+        assertThat((String) JsonPath.read(order, "$.payment.status")).isEqualTo("UNKNOWN");
+        assertThat((String) JsonPath.read(order, "$.payment.message")).contains("payment service is unavailable");
+    }
+
+    @Test
+    void aStockOutAppearsOnTheTimelineOfEveryAffectedOrderAtTheTimeItHappened() {
         UUID orderId = UUID.randomUUID();
 
         kafka.send("inventory.stock-out", "product", """
-                {"eventId": "%s", "productId": "%s", "sku": "RUN-SHOE-BLUE-43", "onHand": 1, "reserved": 2,
-                 "shortfall": 1, "reason": "damaged in warehouse", "affectedOrderIds": ["%s"]}"""
+                {"eventId": "%s", "occurredAt": "2026-10-02T09:15:00Z", "productId": "%s", "sku": "RUN-SHOE-BLUE-43",
+                 "onHand": 1, "reserved": 2, "shortfall": 1, "reason": "damaged in warehouse", "affectedOrderIds": ["%s"]}"""
                 .formatted(UUID.randomUUID(), UUID.randomUUID(), orderId)).join();
 
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
                 assertThat(rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve().body(String.class))
-                        .contains("STOCK_OUT", "damaged in warehouse"));
+                        .contains("STOCK_OUT", "damaged in warehouse", "2026-10-02T09:15:00Z"));
+    }
+
+    @Test
+    void aDeclinedConfirmationShowsOnTheTimelineOfTheOrderItFailed() {
+        UUID productId = UUID.randomUUID();
+        UUID failedOrderId = UUID.randomUUID();
+        SERVICES.stubFor(get("/api/products").willReturn(okJson("""
+                [{"id": "%s", "sku": "HEADLAMP-400", "name": "Headlamp", "description": "", "price": 39.50,
+                  "currency": "EUR", "onHand": 5, "reserved": 0, "available": 5}]""".formatted(productId))));
+        SERVICES.stubFor(post("/api/orders").willReturn(aResponse().withStatus(402)
+                .withHeader("Content-Type", "application/problem+json")
+                .withBody("""
+                        {"status": 402, "detail": "Your card was declined.", "orderId": "%s"}""".formatted(failedOrderId))));
+        String proposal = text(call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
+                "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1)))));
+
+        String confirmed = rest().post().uri("/api/order-proposals/{id}/confirm", (String) JsonPath.read(proposal, "$.id"))
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("paymentMethod", "pm_card_chargeDeclined"))
+                .retrieve().body(String.class);
+
+        assertThat((String) JsonPath.read(confirmed, "$.status")).isEqualTo("FAILED");
+        assertThat(rest().get().uri("/api/orders/{orderId}/timeline", failedOrderId).retrieve().body(String.class))
+                .contains("confirm_order", "FAILED", "Your card was declined.");
     }
 
     private McpSyncClient connect(String token) {

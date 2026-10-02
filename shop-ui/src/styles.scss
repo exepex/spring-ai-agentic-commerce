@@ -245,6 +245,7 @@ tr.clickable:hover td {
 
 .chip.bad,
 .chip.FAILED,
+.chip.DECLINED,
 .chip.DENIED,
 .chip.REJECTED,
 .chip.PAYMENT_FAILED,
@@ -293,6 +294,10 @@ tr.clickable:hover td {
   gap: 12px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
+}
+
+.timeline li.empty {
+  display: block;
 }
 
 .timeline li:last-child {

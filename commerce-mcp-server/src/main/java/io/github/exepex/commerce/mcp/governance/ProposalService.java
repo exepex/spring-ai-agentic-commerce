@@ -93,7 +93,7 @@ public class ProposalService {
                     "Proposal " + proposal.getId());
         } catch (DownstreamException failure) {
             proposal.markFailed(failure.getMessage());
-            audit.record(null, AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(), "confirm_order",
+            audit.record(failedOrderId(failure), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(), "confirm_order",
                     AuditEvent.Outcome.FAILED, "Order could not be placed: " + failure.getMessage(),
                     "Proposal " + proposal.getId());
         }
@@ -113,6 +113,13 @@ public class ProposalService {
 
     private List<ProposedLine> linesOf(OrderProposal proposal) {
         return jsonMapper.readValue(proposal.getLines(), new TypeReference<List<ProposedLine>>() {});
+    }
+
+    /** The order service keeps an order whose payment failed and names it, so the failure shows on its timeline. */
+    private static UUID failedOrderId(DownstreamException failure) {
+        Map<String, Object> properties = failure.getBody().getProperties();
+        Object orderId = properties == null ? null : properties.get("orderId");
+        return orderId == null ? null : UUID.fromString(orderId.toString());
     }
 
     private static UUID parseProductId(String productId) {
