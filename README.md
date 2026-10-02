@@ -101,7 +101,8 @@ commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
 7. **One person per escalation.** An escalation is open until someone assigns it to themselves; from then on only
    they can retry its refund, resolve it, or hand it back to the queue. Switch the operator at the top of the
    operations console: if two people try to take the same escalation, only one gets it and the other is told who
-   has it.
+   has it. An order has at most one open escalation, and once it is with a person, agents leave its failed refund to
+   them.
 
 ## Run it
 
