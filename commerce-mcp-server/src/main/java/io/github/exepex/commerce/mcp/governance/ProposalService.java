@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -31,6 +32,7 @@ public class ProposalService {
             OrderProposal.Status status, UUID orderId, String failure, Instant createdAt) {}
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ProposalService.class);
+    private static final Set<String> SETTLED_ORDER_STATUSES = Set.of("CONFIRMED", "CANCELLED");
 
     private final OrderProposalRepository proposals;
     private final CatalogApi catalog;
@@ -108,7 +110,8 @@ public class ProposalService {
         try {
             OrderApi.Order order = Downstream.call("order service", () -> orders.placeOrder(new OrderApi.PlaceOrderRequest(
                     proposal.getId(), proposal.getCustomerEmail(), lines, proposal.getPaymentMethod())));
-            if (!"CONFIRMED".equals(order.status())) {
+            // A cancelled order was placed and paid first; only an order still being placed or paid is pending.
+            if (!SETTLED_ORDER_STATUSES.contains(order.status())) {
                 proposals.linkPendingOrder(proposal.getId(), order.id());
             } else if (proposals.settle(proposal.getId(), OrderProposal.Status.CONFIRMED, order.id(), null) == 1) {
                 audit.record(order.id(), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(), "confirm_order",

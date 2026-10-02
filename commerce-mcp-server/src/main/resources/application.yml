@@ -62,6 +62,7 @@ commerce:
     settle-after: 30s
   topics:
     order-events: order.events
+    payment-events: payment.events
     stock-out: inventory.stock-out
   governance:
     # Refunds up to this amount run straight away; larger ones wait for a human to approve them.

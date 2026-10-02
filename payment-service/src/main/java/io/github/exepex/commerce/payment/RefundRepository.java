@@ -14,7 +14,7 @@ interface RefundRepository extends JpaRepository<Refund, UUID> {
     List<Refund> findByPaymentIdOrderByCreatedAt(UUID paymentId);
 
     /**
-     * Refunds of {@code provider}'s payments that can still change: every pending one, and succeeded ones made after
+     * Refunds of {@code provider}'s payments that can still change: every pending one, and ones that succeeded after
      * {@code succeededAfter}. Only the processor that made a refund knows it.
      */
     @Query("""
@@ -22,6 +22,6 @@ interface RefundRepository extends JpaRepository<Refund, UUID> {
             where refund.paymentId = payment.id and payment.provider = :provider
               and (refund.status = io.github.exepex.commerce.payment.PaymentGateway.RefundStatus.PENDING
                    or (refund.status = io.github.exepex.commerce.payment.PaymentGateway.RefundStatus.SUCCEEDED
-                       and refund.createdAt > :succeededAfter))""")
+                       and refund.succeededAt > :succeededAfter))""")
     List<Refund> findUnsettled(String provider, Instant succeededAfter);
 }

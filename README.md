@@ -46,6 +46,7 @@ flowchart LR
     mcp --> catalog & orders & payments & shipping
     orders --> catalog & payments
     orders -- order.events --> kafka
+    payments -- payment.events --> kafka
     catalog -- inventory.stock-out --> kafka
     kafka --> shipping & agent & mcp
     agent & mcp & catalog & orders & payments & shipping -.-> jaeger
@@ -55,7 +56,7 @@ flowchart LR
 |---|---|---|
 | catalog-service | 8081 | Products and stock (on hand and reserved). A write-off below the reserved units publishes `inventory.stock-out`, naming the orders that can no longer be fulfilled. |
 | order-service | 8082 | Checkout: reserves stock, saves the order, charges the card, publishes `order.events`. Cancellation releases the stock. |
-| payment-service | 8083 | Card payments and idempotent refunds through Stripe test mode (or a built-in simulator without a key). Has a simulated-outage switch for the demo. |
+| payment-service | 8083 | Card payments and idempotent refunds through Stripe test mode (or a built-in simulator without a key). Publishes `payment.events` when a refund fails after it was made. Has a simulated-outage switch for the demo. |
 | shipping-service | 8084 | Creates and cancels shipments from order events. |
 | commerce-mcp-server | 8085 | Nine MCP tools over the services, plus the governance API: audit trail, refund approvals, order proposals, customer notifications, escalations. |
 | agent-service | 8086 | The two agents, each with its own MCP connection, allowlist, prompt and effort level. |
@@ -102,7 +103,8 @@ commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
 7. **One person per escalation.** An escalation is open until someone assigns it to themselves; from then on only
    they can retry its refund, resolve it, or hand it back to the queue. Switch the operator at the top of the
    operations console: if two people try to take the same escalation, only one gets it and the other is told who
-   has it.
+   has it. An order has at most one open escalation, and once it is with a person, agents leave its failed refund to
+   them.
 
 ## Run it
 
@@ -164,8 +166,8 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
   down or times out), the order waits as `PAYMENT_PENDING` with its stock kept, and the payment is asked for again
   until it succeeds or is declined. Stock to give back is recorded with the order change that needs it and released
   once the catalog answers. A confirmed proposal places its order under the proposal's id, so placing it again never
-  places a second order. Refunds are checked with the card processor again, and one that fails afterwards no longer
-  counts as refunded. Each service runs its own reconciler for this; the intervals are under `commerce.reconciliation`
+  places a second order. Refunds are checked with the card processor again; one that fails afterwards no longer
+  counts as refunded, its refund request is marked failed, and the order is handed to a person. Each service runs its own reconciler for this; the intervals are under `commerce.reconciliation`
   and `commerce.payments.refund-check` in each service's `application.yml`.
 - **Events are published after commit,** so consumers never see a rolled-back change. The trade-off: an event can be
   lost if a process dies between commit and send. A transactional outbox closes that gap; it is left out to keep the

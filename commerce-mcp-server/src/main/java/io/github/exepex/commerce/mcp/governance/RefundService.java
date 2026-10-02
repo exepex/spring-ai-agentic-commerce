@@ -165,6 +165,24 @@ public class RefundService {
         return execute(request, retriedBy);
     }
 
+    /**
+     * The card processor reported an executed refund failed afterwards: the customer did not get the money. The
+     * request is marked failed and the order handed to a person, together and once, however often this is reported.
+     */
+    void recordFailedAtProcessor(UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
+        String failure = "The card processor reported the refund of " + amount + " " + currency
+                + " failed after accepting it; no money was returned.";
+        transaction.executeWithoutResult(status -> {
+            if (requests.failExecuted(idempotencyKey, failure, Instant.now(clock)) == 0) {
+                return;
+            }
+            audit.record(orderId, AuditEvent.ActorType.SYSTEM, "payment-service", "refund_failed",
+                    AuditEvent.Outcome.FAILED, failure, "Idempotency key " + idempotencyKey);
+            escalations.escalate(AuditEvent.ActorType.SYSTEM, "payment-service", orderId, failure
+                    + " Contact the customer and refund them another way.");
+        });
+    }
+
     public List<RefundRequest> withStatus(RefundRequest.Status status) {
         return requests.findByStatusOrderByCreatedAt(status);
     }
@@ -184,7 +202,12 @@ public class RefundService {
             throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
                     + " was already used for a different refund. Use a new key for a new refund.");
         }
-        return earlier.getStatus() == RefundRequest.Status.FAILED ? execute(earlier, agentId) : earlier;
+        if (earlier.getStatus() != RefundRequest.Status.FAILED) {
+            return earlier;
+        }
+        // A failed refund of an order handed to a person is theirs to retry, not the agent's.
+        escalations.ensureNotWithHuman(orderId);
+        return execute(earlier, agentId);
     }
 
     /** What was already refunded or asked for on the order, except refunds a person turned down. */

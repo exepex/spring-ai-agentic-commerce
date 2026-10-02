@@ -3,7 +3,15 @@ package io.github.exepex.commerce.payment;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,9 +20,11 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.testcontainers.kafka.KafkaContainer;
 
 /**
  * Runs against Postgres with the simulated card processor, which follows Stripe's test-card conventions. Refunds are
@@ -33,6 +43,9 @@ class PaymentApiIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private KafkaContainer kafka;
 
     @AfterEach
     void endAnyOutage() {
@@ -87,6 +100,29 @@ class PaymentApiIntegrationTest {
         assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(100.0);
         assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("FAILED");
         assertThat(refund(orderId, "40.00", "refund-fails-" + orderId)).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
+        assertThat(paymentEventsFor(orderId)).singleElement().satisfies(event -> {
+            assertThat((String) JsonPath.read(event, "$.type")).isEqualTo("REFUND_FAILED");
+            assertThat((String) JsonPath.read(event, "$.idempotencyKey")).isEqualTo("refund-fails-" + orderId);
+            assertThat((Double) JsonPath.read(event, "$.amount")).isEqualTo(40.0);
+        });
+    }
+
+    @Test
+    void aRefundPendingForLongerThanTheWatchIsStillWatchedOnceItSucceeds() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "100.00", "pm_card_refundFail");
+        refund(orderId, "40.00", "refund-pending-long-" + orderId);
+        // As if the processor had kept the refund pending for two hours.
+        jdbc.update("""
+                update payments.refund set status = 'PENDING', succeeded_at = null, created_at = now() - interval '2 hours'
+                where idempotency_key = ?""", "refund-pending-long-" + orderId);
+
+        refundReconciler.reconcile();
+        refundReconciler.reconcile();
+
+        MvcTestResult payment = mockMvc.get().uri("/api/payments/{orderId}", orderId).exchange();
+        assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("FAILED");
+        assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(100.0);
     }
 
     @Test
@@ -194,6 +230,29 @@ class PaymentApiIntegrationTest {
                 .content("""
                         {"active": %s}""".formatted(active))
                 .exchange();
+    }
+
+    /** Reads the topic for a few seconds and returns this order's events. */
+    private List<String> paymentEventsFor(UUID orderId) {
+        Map<String, Object> consumerProperties = Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG, "payment-test-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
+            consumer.subscribe(List.of("payment.events"));
+            List<String> events = new ArrayList<>();
+            long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+            while (System.nanoTime() < deadline) {
+                for (ConsumerRecord<String, String> record : KafkaTestUtils.getRecords(consumer, Duration.ofSeconds(1))) {
+                    if (orderId.toString().equals(record.key())) {
+                        events.add(record.value());
+                    }
+                }
+            }
+            return events;
+        }
     }
 
     private static String idOf(MvcTestResult result) throws Exception {

@@ -4,13 +4,18 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.jayway.jsonpath.JsonPath;
 import io.modelcontextprotocol.spec.McpSchema;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.http.MediaType;
 
 /**
@@ -18,6 +23,9 @@ import org.springframework.http.MediaType;
  * the assignee can resolve it, hand it back, or retry the refund of the escalated order.
  */
 class EscalationLifecycleIntegrationTest extends McpServerTestSupport {
+
+    @Autowired
+    private KafkaTemplate<String, String> kafka;
 
     private static final String ANA = "ana@trailhead.example";
     private static final String BEN = "ben@trailhead.example";
@@ -72,6 +80,70 @@ class EscalationLifecycleIntegrationTest extends McpServerTestSupport {
 
         assertThat(retry(refundRequestId, ANA)).isEqualTo(200);
         assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
+    }
+
+    @Test
+    void anAgentCannotRetryARefundOnceTheOrderIsWithAPerson() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
+        SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(503)));
+        Map<String, Object> refund = Map.of("orderId", orderId.toString(), "amount", 39.50, "reason",
+                "item out of stock", "idempotencyKey", "refund-" + orderId);
+        String refundRequestId = JsonPath.read(text(call(exceptionsAgent, "issue_refund", refund)), "$.refundRequestId");
+        String escalationId = escalate(orderId);
+        act(escalationId, "assign", ANA);
+        stubRefundSucceeds(orderId);
+
+        McpSchema.CallToolResult retriedByAgent = call(exceptionsAgent, "issue_refund", refund);
+
+        assertThat(retriedByAgent.isError()).isTrue();
+        assertThat(text(retriedByAgent)).contains("handed to a human");
+        assertThat(refundStatus(orderId)).isEqualTo("FAILED");
+        assertThat(retry(refundRequestId, ANA)).isEqualTo(200);
+        assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
+    }
+
+    @Test
+    void anOrderHandedOverAgainOrTwiceAtOnceKeepsOneEscalation() throws Exception {
+        UUID orderId = UUID.randomUUID();
+
+        List<String> ids = new CopyOnWriteArrayList<>();
+        runTogether(() -> ids.add(escalate(orderId)) ? 200 : 500, () -> ids.add(escalate(orderId)) ? 200 : 500);
+        String later = escalate(orderId);
+
+        assertThat(ids).hasSize(2).containsOnly(later);
+        String escalations = rest().get().uri("/api/escalations").retrieve().body(String.class);
+        List<String> forOrder = JsonPath.read(escalations, "$[?(@.orderId == '" + orderId + "')].id");
+        assertThat(forOrder).containsExactly(later);
+        List<String> summaries = JsonPath.read(rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve()
+                .body(String.class), "$[?(@.action == 'escalate_to_human')].summary");
+        assertThat(summaries).containsExactly("Handed over to a human",
+                "Already with a human; added to the open escalation", "Already with a human; added to the open escalation");
+    }
+
+    @Test
+    void aRefundTheProcessorFailsAfterwardsIsMarkedFailedAndHandedToAPersonOnce() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
+        call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(), "amount", 39.50, "reason",
+                "item out of stock", "idempotencyKey", "refund-" + orderId));
+        assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
+        String refundFailed = """
+                {"eventId": "%s", "type": "REFUND_FAILED", "orderId": "%s", "idempotencyKey": "refund-%s",
+                 "amount": 39.50, "currency": "EUR", "occurredAt": "2026-10-02T10:30:00Z"}"""
+                .formatted(UUID.randomUUID(), orderId, orderId);
+
+        kafka.send("payment.events", orderId.toString(), refundFailed).join();
+        kafka.send("payment.events", orderId.toString(), refundFailed).join();
+
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> assertThat(refundStatus(orderId)).isEqualTo("FAILED"));
+        await().during(Duration.ofSeconds(2)).atMost(Duration.ofSeconds(5)).untilAsserted(() -> {
+            String timeline = rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve().body(String.class);
+            assertThat((List<String>) JsonPath.read(timeline, "$[?(@.action == 'refund_failed')].actor"))
+                    .containsExactly("payment-service");
+            assertThat((List<String>) JsonPath.read(timeline, "$[?(@.action == 'escalate_to_human')].summary"))
+                    .containsExactly("Handed over to a human");
+        });
     }
 
     @Test

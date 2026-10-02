@@ -29,9 +29,7 @@ class StockReleases {
 
     /** Records that the order's stock must be released. Call it inside the transaction that makes it necessary. */
     void request(UUID orderId) {
-        if (!releases.existsById(orderId)) {
-            releases.save(new StockRelease(orderId, Instant.now(clock)));
-        }
+        releases.insertIfAbsent(orderId, Instant.now(clock));
     }
 
     /** Releases the order's stock now; if the catalog cannot be reached, the release stays recorded for later. */

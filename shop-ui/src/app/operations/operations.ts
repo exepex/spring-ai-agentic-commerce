@@ -49,11 +49,12 @@ export class Operations {
     this.notes.update((notes) => ({ ...notes, [id]: note }));
   }
 
-  protected decide(refund: RefundRequest, decision: 'approve' | 'reject' | 'retry'): void {
-    this.busy.set(refund.id);
+  /** {@code card} is the card the button sits on: it is busy meanwhile and shows a refusal. */
+  protected decide(refund: RefundRequest, decision: 'approve' | 'reject' | 'retry', card: string = refund.id): void {
+    this.busy.set(card);
     this.api.decideRefund(refund.id, decision, this.session.operator(), this.noteFor(refund.id)).subscribe({
-      next: () => this.done(refund.id),
-      error: (failure) => this.done(refund.id, failure),
+      next: () => this.done(card),
+      error: (failure) => this.done(card, failure),
     });
   }
 

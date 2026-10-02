@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,22 +13,42 @@ import org.springframework.transaction.annotation.Transactional;
 public class EscalationService {
 
     private static final int MAX_NOTE_LENGTH = 1000;
+    private static final List<Escalation.Status> UNRESOLVED = List.of(Escalation.Status.OPEN, Escalation.Status.ASSIGNED);
 
     private final EscalationRepository escalations;
     private final AuditTrail audit;
+    private final JdbcClient jdbc;
     private final Clock clock;
 
-    EscalationService(EscalationRepository escalations, AuditTrail audit, Clock clock) {
+    EscalationService(EscalationRepository escalations, AuditTrail audit, JdbcClient jdbc, Clock clock) {
         this.escalations = escalations;
         this.audit = audit;
+        this.jdbc = jdbc;
         this.clock = clock;
     }
 
-    /** The escalation and its audit entry are saved together or not at all. */
+    /**
+     * Hands a problem to a person. An order has at most one unresolved escalation, so it has at most one owner: handing
+     * over an order that is already with a person returns that escalation and only records the new summary. The
+     * escalation and its audit entry are saved together or not at all.
+     */
     @Transactional
-    public Escalation escalate(String raisedBy, UUID orderId, String summary) {
+    public Escalation escalate(AuditEvent.ActorType raisedByType, String raisedBy, UUID orderId, String summary) {
+        if (orderId != null) {
+            // Two hand-offs of the same order at once must not each miss the other's escalation.
+            jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:orderId, 1))")
+                    .param("orderId", orderId.toString())
+                    .query((row, number) -> number)
+                    .single();
+            List<Escalation> unresolved = escalations.findByOrderIdAndStatusIn(orderId, UNRESOLVED);
+            if (!unresolved.isEmpty()) {
+                audit.record(orderId, raisedByType, raisedBy, "escalate_to_human",
+                        AuditEvent.Outcome.SUCCEEDED, "Already with a human; added to the open escalation", summary);
+                return unresolved.getFirst();
+            }
+        }
         Escalation escalation = escalations.save(new Escalation(orderId, raisedBy, summary, Instant.now(clock)));
-        audit.record(orderId, AuditEvent.ActorType.AGENT, raisedBy, "escalate_to_human", AuditEvent.Outcome.SUCCEEDED,
+        audit.record(orderId, raisedByType, raisedBy, "escalate_to_human", AuditEvent.Outcome.SUCCEEDED,
                 "Handed over to a human", summary);
         return escalation;
     }
@@ -78,11 +99,18 @@ public class EscalationService {
      * without an unresolved escalation is not restricted.
      */
     public void ensureWorkedBy(UUID orderId, String person) {
-        for (Escalation escalation : escalations.findByOrderIdAndStatusIn(orderId,
-                List.of(Escalation.Status.OPEN, Escalation.Status.ASSIGNED))) {
+        for (Escalation escalation : escalations.findByOrderIdAndStatusIn(orderId, UNRESOLVED)) {
             if (!person.equals(escalation.getAssignedTo())) {
                 throw new GovernanceException(HttpStatus.CONFLICT, describe(escalation));
             }
+        }
+    }
+
+    /** Once an order is with a person, agents leave its unfinished work to them. */
+    public void ensureNotWithHuman(UUID orderId) {
+        if (!escalations.findByOrderIdAndStatusIn(orderId, UNRESOLVED).isEmpty()) {
+            throw new GovernanceException(HttpStatus.CONFLICT, "This order was handed to a human, who will finish it. "
+                    + "Do not retry; tell the customer a person is looking into it.");
         }
     }
 

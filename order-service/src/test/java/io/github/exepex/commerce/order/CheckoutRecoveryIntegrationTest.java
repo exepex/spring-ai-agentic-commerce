@@ -18,6 +18,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -100,6 +102,28 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
 
         DEPENDENCIES.verify(2, deleteRequestedFor(urlEqualTo("/api/orders/" + orderId + "/reservations")));
         assertThat(stockReleases.existsById(UUID.fromString(orderId))).isFalse();
+    }
+
+    @Test
+    void cancellingTheSameOrderTwiceAtOnceSucceedsBothTimesAndReleasesTheStockOnce() throws Exception {
+        for (int attempt = 0; attempt < 5; attempt++) {
+            String orderId = orderIdOf(placeOrder("pia@example.com", SHOE, 1));
+            List<Integer> statuses = new CopyOnWriteArrayList<>();
+            try (ExecutorService customers = Executors.newFixedThreadPool(2)) {
+                CountDownLatch start = new CountDownLatch(1);
+                for (int customer = 0; customer < 2; customer++) {
+                    customers.submit(() -> {
+                        start.await();
+                        statuses.add(cancel(orderId, "changed mind").getResponse().getStatus());
+                        return null;
+                    });
+                }
+                start.countDown();
+            }
+            assertThat(statuses).containsExactly(200, 200);
+            assertThat(statusOf(orderId)).isEqualTo("CANCELLED");
+            DEPENDENCIES.verify(1, deleteRequestedFor(urlEqualTo("/api/orders/" + orderId + "/reservations")));
+        }
     }
 
     @Test
