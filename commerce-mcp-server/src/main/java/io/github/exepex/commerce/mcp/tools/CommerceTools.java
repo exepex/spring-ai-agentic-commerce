@@ -45,11 +45,14 @@ class CommerceTools {
 
     record ShipmentSummary(String trackingNumber, String status, LocalDate estimatedDelivery) {}
 
-    record RefundSummary(UUID refundRequestId, BigDecimal amount, String status, String reason) {}
+    record RefundSummary(UUID refundRequestId, BigDecimal amount, String status, String reason, String idempotencyKey) {}
+
+    /** That the customer was told something about the order, and when: what an agent needs to avoid telling them twice. */
+    record NotificationSummary(Instant sentAt, String sentBy) {}
 
     record OrderDetails(UUID orderId, String customerEmail, String status, BigDecimal total, String currency,
             Instant createdAt, String cancellationReason, List<OrderApi.OrderLine> lines, PaymentSummary payment,
-            ShipmentSummary shipment, List<RefundSummary> refunds) {}
+            ShipmentSummary shipment, List<RefundSummary> refunds, List<NotificationSummary> notifications) {}
 
     record RefundResult(UUID refundRequestId, String status, BigDecimal amount, String currency, String message) {}
 
@@ -111,7 +114,8 @@ class CommerceTools {
 
     @McpTool(name = "get_order", description = """
             Get everything about one order: its lines and status, the payment (paid, refunded and still refundable), \
-            the shipment, and any refunds already requested for it.""")
+            the shipment, any refunds already requested for it (with their idempotency keys), and when the customer \
+            was notified about it.""")
     OrderDetails getOrder(McpTransportContext context,
             @McpToolParam(description = "The order id") String orderId,
             @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
@@ -123,7 +127,10 @@ class CommerceTools {
                     order.createdAt(), order.cancellationReason(), order.lines(), paymentOf(id), shipmentOf(id),
                     refunds.forOrder(id).stream()
                             .map(refund -> new RefundSummary(refund.getId(), refund.getAmount(), refund.getStatus().name(),
-                                    refund.getReason()))
+                                    refund.getReason(), refund.getIdempotencyKey()))
+                            .toList(),
+                    notifications.forOrder(id).stream()
+                            .map(notification -> new NotificationSummary(notification.getCreatedAt(), notification.getSentBy()))
                             .toList());
         });
     }

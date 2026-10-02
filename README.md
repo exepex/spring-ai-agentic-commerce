@@ -136,7 +136,7 @@ authentication, permissions, customer scoping, the approval limit, idempotent re
 
 ### Agent evals
 
-The agents themselves are checked by `agent-evals`: six scenarios run against the whole running demo with the real
+The agents themselves are checked by `agent-evals`: seven scenarios run against the whole running demo with the real
 model, asserting on **what the agents did** (the audit trail, orders, payments and escalations), not on the wording
 of their replies.
 
@@ -174,7 +174,11 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
   demo small.
 - **Events can arrive twice, and that is harmless.** The audit trail records each event once per order, by the id its
   service gave it. agent-service reads stock-outs from the start of the topic when it first joins, so none published
-  before it started is missed; a stock-out handled before is found already settled.
+  before it started is missed. On a stock-out delivered again, the agent checks which steps are already done
+  (`get_order` shows each refund's idempotency key and status, and when the customer was notified) and does only the
+  others. A stock-out refund that failed is retried with its key even when nothing seems left to refund, and a
+  refund already waiting for approval counts as returned. Nothing records whether the Slack line was posted, so it is
+  posted again: the operations channel may see an order twice, but never misses one.
 - **The demo UI has no login.** You pick which customer you are. In production the UI and the governance API would sit
   behind the organisation's identity provider.
 
