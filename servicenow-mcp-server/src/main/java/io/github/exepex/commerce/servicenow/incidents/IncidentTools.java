@@ -24,7 +24,7 @@ class IncidentTools {
     record Note(Instant at, String by, String kind, String text) {}
 
     record IncidentView(String number, String shortDescription, String description, String state, String caller,
-            String assignmentGroup, String assignedTo, String linkedOrderId, List<Note> notes) {}
+            String assignmentGroup, String assignedTo, String linkedOrderId, Instant openedAt, List<Note> notes) {}
 
     record TeamView(String team, String handles) {}
 
@@ -35,17 +35,19 @@ class IncidentTools {
 
     private final ToolGuard guard;
     private final ServiceNowClient serviceNow;
+    private final CaseSync cases;
     private final ServiceNowProperties properties;
 
-    IncidentTools(ToolGuard guard, ServiceNowClient serviceNow, ServiceNowProperties properties) {
+    IncidentTools(ToolGuard guard, ServiceNowClient serviceNow, CaseSync cases, ServiceNowProperties properties) {
         this.guard = guard;
         this.serviceNow = serviceNow;
+        this.cases = cases;
         this.properties = properties;
     }
 
     @McpTool(name = "get_incident", description = """
-            Read an incident you are working: what was reported, by whom, its state and assignment, the order it is \
-            linked to (empty when none), and its latest work notes and comments, oldest first.""")
+            Read an incident you are working: what was reported, by whom and when, its state and assignment, the \
+            order it is linked to (empty when none), and its latest work notes and comments, oldest first.""")
     IncidentView getIncident(McpTransportContext context,
             @McpToolParam(description = "The incident number, such as INC0010001") String number) {
         return guard.run(context, "get_incident", "Read incident " + number, agentId -> {
@@ -54,7 +56,7 @@ class IncidentTools {
                     .map(entry -> new Note(entry.at(), entry.by(), entry.kind(), entry.text()))
                     .toList();
             return new IncidentView(incident.number(), incident.shortDescription(), incident.description(),
-                    incident.stateName(), incident.caller(), incident.assignmentGroup(), incident.assignedTo(), incident.orderId(), notes);
+                    incident.stateName(), incident.caller(), incident.assignmentGroup(), incident.assignedTo(), incident.orderId(), incident.openedAt(), notes);
         });
     }
 
@@ -99,6 +101,7 @@ class IncidentTools {
             fields.put("assigned_to", "");
             fields.put("work_notes", requireNote(note));
             serviceNow.updateByDisplayValue(incident.sysId(), fields);
+            cases.reportHandedToTeam(incident, target.group());
             return new Acknowledgement(number, "Assigned to " + target.group() + ", who are notified by ServiceNow");
         });
     }

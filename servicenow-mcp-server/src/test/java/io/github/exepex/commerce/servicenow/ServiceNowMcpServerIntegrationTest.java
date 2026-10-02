@@ -14,6 +14,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -99,6 +100,9 @@ class ServiceNowMcpServerIntegrationTest {
         SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-1")).willReturn(okJson("{\"result\": {}}")));
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": true}")));
         SERVICES.stubFor(post("/api/agent/tool-calls").willReturn(aResponse().withStatus(200)));
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("[]")));
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("[]")));
+        SERVICES.stubFor(post(urlPathMatching("/api/agent/cases/.*")).willReturn(aResponse().withStatus(200)));
         agent = McpClient.sync(HttpClientStreamableHttpTransport.builder("http://localhost:" + port)
                         .requestBuilder(HttpRequest.newBuilder().header("Authorization", "Bearer " + AGENT_TOKEN))
                         .build())
@@ -128,6 +132,7 @@ class ServiceNowMcpServerIntegrationTest {
 
         assertThat((String) JsonPath.read(incident, "$.shortDescription")).isEqualTo("Order arrived broken");
         assertThat((String) JsonPath.read(incident, "$.linkedOrderId")).isEqualTo(LINKED_ORDER);
+        assertThat((String) JsonPath.read(incident, "$.openedAt")).isEqualTo("2026-10-02T08:55:00Z");
         assertThat(JsonPath.<List<String>>read(incident, "$.notes[*].text"))
                 .containsExactly("The customer says order 6f0c is late.", "Asked the warehouse.");
         assertThat(call("get_incident", Map.of("number", "INC1^ORactive=true")).isError()).isTrue();
@@ -274,22 +279,132 @@ class ServiceNowMcpServerIntegrationTest {
         SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
     }
 
+    @Test
+    void sendsANewCaseAsAnIncidentInTheAgentGroupAndItsNotesAsWorkNotes() {
+        String caseId = UUID.randomUUID().toString();
+        String noteId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "orderId": "%s", "type": "STOCK_OUT", "status": "PENDING",
+                  "title": "[STOCK_OUT] Order 6f0c2b8e can no longer be fulfilled", "description": "Water damage.",
+                  "raisedBy": "catalog-service", "incidentNumber": null, "createdAt": "2026-10-02T09:15:00Z"},
+                  "unsentNotes": [{"id": "%s", "text": "Raised again by the catalog."}]}]"""
+                .formatted(caseId, LINKED_ORDER, noteId))));
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("correlation_display=" + caseId))
+                .willReturn(okJson("{\"result\": []}")));
+        SERVICES.stubFor(post(urlPathEqualTo("/api/now/table/incident")).willReturn(okJson("{\"result\": "
+                + incidentRow("INC0010009", "sys-9", "1", "Online Shop Agent", "", caseId, Instant.now()) + "}")));
+        stubIncident("INC0010009", "sys-9", "1", "Online Shop Agent", "", caseId, Instant.now());
+        SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-9")).willReturn(okJson("{\"result\": {}}")));
+
+        poller.poll();
+
+        SERVICES.verify(postRequestedFor(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_input_display_value", equalTo("true"))
+                .withRequestBody(equalToJson("""
+                        {"assignment_group": "Online Shop Agent",
+                         "short_description": "[STOCK_OUT] Order 6f0c2b8e can no longer be fulfilled",
+                         "description": "Water damage.", "correlation_id": "%s", "correlation_display": "%s"}"""
+                        .formatted(LINKED_ORDER, caseId))));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/incident"))
+                .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))
+                .withRequestBody(matchingJsonPath("$.number", equalTo("INC0010009")))
+                .withRequestBody(matchingJsonPath("$.url", equalTo(SERVICES.baseUrl() + "/incident.do?sys_id=sys-9"))));
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-9"))
+                .withRequestBody(equalToJson("{\"work_notes\": \"Raised again by the catalog.\"}")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + noteId + "/sent")));
+    }
+
+    @Test
+    void aCaseWhoseIncidentWasOpenedBeforeIsLinkedAndNotOpenedAgain() {
+        String caseId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "orderId": null, "type": "HANDOFF", "status": "PENDING",
+                  "title": "[HANDOFF] A request needs a person", "description": "Help."}, "unsentNotes": []}]"""
+                .formatted(caseId))));
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("correlation_display=" + caseId))
+                .willReturn(okJson("{\"result\": [" + incidentRow("INC0010008", "sys-8", "2", "Online Shop Agent",
+                        AGENT_USER, caseId, Instant.now()) + "]}")));
+
+        poller.poll();
+
+        SERVICES.verify(0, postRequestedFor(urlPathEqualTo("/api/now/table/incident")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/incident"))
+                .withRequestBody(matchingJsonPath("$.number", equalTo("INC0010008"))));
+    }
+
+    @Test
+    void readsBackWhoHasEachCasesIncident() {
+        String withAgent = UUID.randomUUID().toString();
+        String withTeam = UUID.randomUUID().toString();
+        String resolved = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("""
+                [{"id": "%s", "incidentNumber": "INC0010011"}, {"id": "%s", "incidentNumber": "INC0010012"},
+                 {"id": "%s", "incidentNumber": "INC0010013"}]""".formatted(withAgent, withTeam, resolved))));
+        stubIncident("INC0010011", "sys-11", "2", "Online Shop Agent", AGENT_USER, withAgent, Instant.now());
+        stubIncident("INC0010012", "sys-12", "2", "Payments", "", withTeam, Instant.now());
+        stubIncident("INC0010013", "sys-13", "7", "Payments", "", resolved, Instant.now());
+
+        poller.poll();
+
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + withAgent + "/incident-state"))
+                .withRequestBody(equalToJson("""
+                        {"number": "INC0010011", "status": "WITH_AGENT", "assignmentGroup": "Online Shop Agent"}""")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + withTeam + "/incident-state"))
+                .withRequestBody(equalToJson("""
+                        {"number": "INC0010012", "status": "WITH_TEAM", "assignmentGroup": "Payments"}""")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + resolved + "/incident-state"))
+                .withRequestBody(matchingJsonPath("$.status", equalTo("RESOLVED"))));
+    }
+
+    @Test
+    void handingACasesIncidentToATeamTellsTheShopAtOnce() {
+        String caseId = UUID.randomUUID().toString();
+        stubIncident("INC0010001", "sys-1", "2", "Online Shop Agent", AGENT_USER, caseId, Instant.now());
+
+        call("assign_to_team", Map.of("number", "INC0010001", "team", "fulfilment", "note", "Arrange a new delivery."));
+
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/incident-state"))
+                .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))
+                .withRequestBody(equalToJson("""
+                        {"number": "INC0010001", "status": "WITH_TEAM", "assignmentGroup": "Fulfilment"}""")));
+    }
+
     private void stubIncident(String assignedTo, String state) {
         stubIncident(assignedTo, state, Instant.now());
     }
 
     private void stubIncident(String assignedTo, String state, Instant updatedAt) {
+        stubIncident("INC0010001", "sys-1", state, "Online Shop Agent", assignedTo, "", updatedAt);
+    }
+
+    private void stubIncident(String number, String sysId, String state, String group, String assignedTo, String caseId,
+            Instant updatedAt) {
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
-                .withQueryParam("sysparm_query", equalTo("number=INC0010001"))
-                .willReturn(okJson("""
-                        {"result": [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"},
-                          "short_description": {"value": "Order arrived broken"}, "description": {"value": "See comments"},
-                          "state": {"value": "%s", "display_value": "In Progress"},
-                          "assignment_group": {"display_value": "Online Shop Agent"},
-                          "assigned_to": {"value": "%s", "display_value": "Incident Agent"},
-                          "caller_id": {"display_value": "Ada Lovelace"}, "correlation_id": {"value": "%s"},
-                          "sys_updated_on": {"value": "%s"}}]}"""
-                        .formatted(state, assignedTo, LINKED_ORDER, SERVICENOW_TIME.format(updatedAt)))));
+                .withQueryParam("sysparm_query", equalTo("number=" + number))
+                .willReturn(okJson("{\"result\": [" + incidentRow(number, sysId, state, group, assignedTo, caseId, updatedAt)
+                        + "]}")));
+    }
+
+    private static String incidentRow(String number, String sysId, String state, String group, String assignedTo,
+            String caseId, Instant updatedAt) {
+        return """
+                {"sys_id": {"value": "%s"}, "number": {"value": "%s"},
+                 "short_description": {"value": "Order arrived broken"}, "description": {"value": "See comments"},
+                 "state": {"value": "%s", "display_value": "In Progress"},
+                 "assignment_group": {"display_value": "%s"},
+                 "assigned_to": {"value": "%s", "display_value": "Incident Agent"},
+                 "caller_id": {"display_value": "Ada Lovelace"}, "correlation_id": {"value": "%s"},
+                 "correlation_display": {"value": "%s"}, "sys_created_on": {"value": "2026-10-02 08:55:00"},
+                 "sys_updated_on": {"value": "%s"}}"""
+                .formatted(sysId, number, state, group, assignedTo, LINKED_ORDER, caseId, SERVICENOW_TIME.format(updatedAt));
     }
 
     private void stubNewIncidents(String rows) {

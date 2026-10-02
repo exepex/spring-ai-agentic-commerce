@@ -150,16 +150,22 @@ export interface CustomerNotification {
   createdAt: string;
 }
 
-export interface Escalation {
+/** A problem the shop opened a case for, worked as a ServiceNow incident. */
+export interface SupportCase {
   id: string;
   orderId: string | null;
+  type: 'STOCK_OUT' | 'DELIVERY_FAILED' | 'PARCEL_LOST' | 'REFUND_FAILED' | 'HANDOFF';
+  /** PENDING until its incident is in ServiceNow; then with the incident agent, with a team, or resolved. */
+  status: 'PENDING' | 'WITH_AGENT' | 'WITH_TEAM' | 'RESOLVED';
+  title: string;
+  description: string;
   raisedBy: string;
-  summary: string;
-  status: 'OPEN' | 'ASSIGNED' | 'RESOLVED';
-  assignedTo: string | null;
-  resolvedBy: string | null;
-  resolutionNote: string | null;
+  incidentNumber: string | null;
+  incidentUrl: string | null;
+  /** The ServiceNow group that has the incident, once it is read back. */
+  assignmentGroup: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface AgentView {
@@ -266,13 +272,16 @@ export class Api {
     return this.http.get<CustomerNotification[]>(`${GOVERNANCE}/notifications${orderId ? `?orderId=${orderId}` : ''}`);
   }
 
-  escalations(status?: string): Observable<Escalation[]> {
-    return this.http.get<Escalation[]>(`${GOVERNANCE}/escalations${status ? `?status=${status}` : ''}`);
-  }
-
-  /** Acts on an escalation: take it, hand it back to the queue, or resolve it. */
-  actOnEscalation(escalationId: string, action: 'assign' | 'hand-back' | 'resolve', by: string, note: string): Observable<Escalation> {
-    return this.http.post<Escalation>(`${GOVERNANCE}/escalations/${escalationId}/${action}`, { by, note });
+  /** Unresolved cases with {@code open}, an order's cases with {@code orderId}, otherwise the 100 most recent. */
+  cases(filter: { open?: boolean; orderId?: string } = {}): Observable<SupportCase[]> {
+    const query = new URLSearchParams();
+    if (filter.open) {
+      query.set('open', 'true');
+    }
+    if (filter.orderId) {
+      query.set('orderId', filter.orderId);
+    }
+    return this.http.get<SupportCase[]>(`${GOVERNANCE}/cases?${query}`);
   }
 
   agents(): Observable<AgentsView> {

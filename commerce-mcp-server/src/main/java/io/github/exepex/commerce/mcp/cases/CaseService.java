@@ -92,7 +92,7 @@ public class CaseService {
      */
     @Transactional
     public void raiseFor(UUID sourceEventId, CaseType type, UUID orderId, String details, String service) {
-        int firstTime = jdbc.sql("insert into case_event (source_event_id, order_id) values (:eventId, :orderId) "
+        int firstTime = jdbc.sql("insert into governance.case_event (source_event_id, order_id) values (:eventId, :orderId) "
                         + "on conflict do nothing")
                 .param("eventId", sourceEventId)
                 .param("orderId", orderId)
@@ -158,16 +158,18 @@ public class CaseService {
 
     /**
      * Takes over who has the case's incident: the agent, a team, or nobody any more because it is resolved. Recorded
-     * on the order's timeline when it changes.
+     * on the order's timeline when it changes. Only the case's own incident counts: an incident whose Correlation
+     * display field was edited to name another case cannot change that case.
      */
     @Transactional
-    public SupportCase followIncident(UUID caseId, SupportCase.Status status, String assignmentGroup) {
+    public SupportCase followIncident(UUID caseId, String number, SupportCase.Status status, String assignmentGroup) {
         if (status == SupportCase.Status.PENDING) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "An incident in ServiceNow is not pending");
         }
         SupportCase supportCase = find(caseId);
-        if (supportCase.getIncidentNumber() == null) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "Case " + caseId + " has no incident yet");
+        if (!number.equals(supportCase.getIncidentNumber())) {
+            throw new GovernanceException(HttpStatus.CONFLICT, "Incident " + number + " is not the incident of case "
+                    + caseId);
         }
         if (supportCase.followIncident(status, assignmentGroup, Instant.now(clock))) {
             String incident = supportCase.getIncidentNumber();

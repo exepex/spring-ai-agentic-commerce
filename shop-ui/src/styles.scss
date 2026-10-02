@@ -241,8 +241,8 @@ tr.clickable:hover td {
 .chip.PLACED,
 .chip.PAYMENT_PENDING,
 .chip.PENDING,
-.chip.OPEN,
-.chip.ASSIGNED,
+.chip.WITH_AGENT,
+.chip.WITH_TEAM,
 .chip.PROPOSED {
   background: var(--warn-soft);
   color: var(--warn);

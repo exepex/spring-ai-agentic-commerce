@@ -19,7 +19,12 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Feeds ServiceNow incidents to the incident agent. Each new, unassigned incident in the agent's group is claimed by
+ * Feeds ServiceNow incidents to the incident agent. Every poll first sends the shop's new cases to ServiceNow as
+ * incidents in the agent's group (see {@link CaseSync}), then claims new incidents, then reads back who has each case's
+ * incident. Each step runs even when another failed, so a governance API that is down does not stop incidents the
+ * service desk raised from being worked.
+ *
+ * <p>Each new, unassigned incident in the agent's group is claimed by
  * assigning it to the integration user, then announced on Kafka: a claimed incident is no longer new, so it is never
  * announced twice. If Kafka does not take the announcement, the claim is given back, so the next poll claims and
  * announces the incident again. ServiceNow offers no outbound call without a public URL, so the demo asks every poll interval.
@@ -39,6 +44,7 @@ public class IncidentPoller {
     private static final long SEND_TIMEOUT_SECONDS = 10;
 
     private final ServiceNowClient serviceNow;
+    private final CaseSync cases;
     private final ServiceNowProperties properties;
     private final KafkaTemplate<String, IncidentEvent> kafka;
     private final String topic;
@@ -46,10 +52,11 @@ public class IncidentPoller {
     private final AgentRegistry agents;
     private final Clock clock;
 
-    IncidentPoller(ServiceNowClient serviceNow, ServiceNowProperties properties, KafkaTemplate<String, IncidentEvent> kafka,
-            @Value("${commerce.topics.incidents}") String topic, GovernanceApi governance, AgentRegistry agents,
-            Clock clock) {
+    IncidentPoller(ServiceNowClient serviceNow, CaseSync cases, ServiceNowProperties properties,
+            KafkaTemplate<String, IncidentEvent> kafka, @Value("${commerce.topics.incidents}") String topic,
+            GovernanceApi governance, AgentRegistry agents, Clock clock) {
         this.serviceNow = serviceNow;
+        this.cases = cases;
         this.properties = properties;
         this.kafka = kafka;
         this.topic = topic;
@@ -64,11 +71,17 @@ public class IncidentPoller {
         if (!properties.isConfigured()) {
             return;
         }
+        step("send the shop's cases to ServiceNow", cases::sendCases);
+        step("hand over stale claims", this::handOverStaleClaims);
+        step("claim new incidents", this::claimNewIncidents);
+        step("read back the cases' incidents", cases::readBackIncidents);
+    }
+
+    private static void step(String what, Runnable step) {
         try {
-            handOverStaleClaims();
-            claimNewIncidents();
+            step.run();
         } catch (RuntimeException unavailable) {
-            LOGGER.warn("Could not poll ServiceNow for incidents; trying again next time", unavailable);
+            LOGGER.warn("Could not {}; trying again next poll", what, unavailable);
         }
     }
 
@@ -127,6 +140,7 @@ public class IncidentPoller {
                     + properties.staleAfter().toMinutes() + " minutes, so it goes to " + team.group()
                     + ". Nothing in its notes is confirmed beyond what they say.");
             serviceNow.updateByDisplayValue(incident.sysId(), handOver);
+            cases.reportHandedToTeam(incident, team.group());
             record("assign_to_team", "Handed " + incident.number() + " to " + team.group() + " because the agent did not finish it");
         }
     }

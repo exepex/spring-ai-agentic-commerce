@@ -6,8 +6,8 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
-import java.util.function.Predicate;
 import java.util.stream.StreamSupport;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -26,11 +26,12 @@ final class Demo {
 
     static final String HEADLAMP = "8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0004";
     static final String SHOE_42 = "8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0001";
-    static final String ORDER_EXCEPTIONS_AGENT = "order-exceptions-agent";
+    static final String INCIDENT_AGENT = "incident-agent";
     static final String OPERATOR = "evals@trailhead.example";
     private static final String STOCK_OUT_TOPIC = "inventory.stock-out";
 
-    private static final Duration AGENT_TIMEOUT = Duration.ofMinutes(4);
+    /** A case reaches ServiceNow, is worked and read back within a few poll intervals and one agent run. */
+    private static final Duration AGENT_TIMEOUT = Duration.ofMinutes(6);
 
     private final RestClient api = RestClient.builder()
             .baseUrl(System.getProperty("evals.baseUrl", "http://localhost:8080/svc"))
@@ -75,24 +76,16 @@ final class Demo {
         return list(api.get().uri("/governance/api/refund-requests?orderId={id}", orderId).retrieve().body(JsonNode.class));
     }
 
-    List<JsonNode> escalationsFor(String orderId) {
-        return list(api.get().uri("/governance/api/escalations").retrieve().body(JsonNode.class)).stream()
-                .filter(escalation -> orderId.equals(escalation.path("orderId").asString()))
-                .toList();
+    List<JsonNode> casesOf(String orderId) {
+        return list(api.get().uri("/governance/api/cases?orderId={id}", orderId).retrieve().body(JsonNode.class));
     }
 
     List<JsonNode> notifications(String orderId) {
         return list(api.get().uri("/governance/api/notifications?orderId={id}", orderId).retrieve().body(JsonNode.class));
     }
 
-    /** Takes the order's escalation, as a person would, then retries the refund: only the assignee may. */
-    JsonNode retryRefund(String orderId, String refundRequestId) {
-        for (JsonNode escalation : escalationsFor(orderId)) {
-            if ("OPEN".equals(escalation.path("status").asString())) {
-                api.post().uri("/governance/api/escalations/{id}/assign", escalation.path("id").asString())
-                        .body(Map.of("by", OPERATOR)).retrieve().toBodilessEntity();
-            }
-        }
+    /** Retries a failed refund from the operations console, as any operator may. */
+    JsonNode retryRefund(String refundRequestId) {
         return api.post().uri("/governance/api/refund-requests/{id}/retry", refundRequestId)
                 .body(Map.of("by", OPERATOR)).retrieve().body(JsonNode.class);
     }
@@ -148,25 +141,14 @@ final class Demo {
                 .retrieve().body(JsonNode.class);
     }
 
-    /** Waits until the order's timeline shows an event matching the predicate, then returns the whole timeline. */
-    List<JsonNode> awaitTimeline(String orderId, Predicate<JsonNode> event) {
-        await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(2))
-                .until(() -> timeline(orderId).stream().anyMatch(event));
-        return timeline(orderId);
-    }
-
-    /** Waits until the agent has finished {@code runs} runs on the order, or handed it to a person. */
-    List<JsonNode> awaitAgentRuns(String orderId, int runs) {
-        await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(2))
-                .until(() -> count(timeline(orderId), ORDER_EXCEPTIONS_AGENT, "decision", "SUCCEEDED") >= runs
-                        || !escalationsFor(orderId).isEmpty());
-        return timeline(orderId);
-    }
-
-    /** The agent records its decision last, so this waits for the whole run to finish. */
-    List<JsonNode> awaitAgentFinished(String orderId) {
-        return awaitTimeline(orderId, event -> is(event, ORDER_EXCEPTIONS_AGENT, "decision")
-                || is(event, ORDER_EXCEPTIONS_AGENT, "escalate_to_human"));
+    /**
+     * Waits until the order's case is finished in ServiceNow: resolved, or with a team. The poller reads that back
+     * after the agent's run, so the whole run is in the timeline by then.
+     */
+    JsonNode awaitCaseFinished(String orderId) {
+        await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(3)).until(() -> casesOf(orderId).stream()
+                .anyMatch(supportCase -> Set.of("RESOLVED", "WITH_TEAM").contains(supportCase.path("status").asString())));
+        return casesOf(orderId).getFirst();
     }
 
     static boolean is(JsonNode event, String actor, String action) {

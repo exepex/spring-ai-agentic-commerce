@@ -15,8 +15,7 @@ spring:
       observation-enabled: true
     consumer:
       group-id: agent-service
-      # A stock-out published before this service first joined its group is still handled. A replayed one does not
-      # act twice: the agent checks which steps are already done and does only the others.
+      # An incident claimed before this service first joined its group is still worked.
       auto-offset-reset: earliest
   http:
     clients:
@@ -35,7 +34,6 @@ spring:
 
 commerce:
   topics:
-    stock-out: inventory.stock-out
     incidents: servicenow.incidents
   # Where the agents connect and with which tokens. What each agent is (model, effort, tools, budget, prompt) is in
   # its definition in agent-definitions/src/main/resources/agents.
@@ -43,8 +41,6 @@ commerce:
     mcp-url: http://localhost:8085
     shopping-assistant:
       token: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:dev-shopping-assistant-token}
-    order-exceptions-agent:
-      token: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:dev-order-exceptions-agent-token}
     incident-agent:
       token: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:dev-incident-agent-token}
   slack:

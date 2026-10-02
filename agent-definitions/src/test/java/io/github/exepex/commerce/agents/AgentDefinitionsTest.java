@@ -12,7 +12,7 @@ class AgentDefinitionsTest {
     @Test
     void loadsEveryShippedAgent() {
         assertThat(definitions.all()).extracting(AgentDefinition::id)
-                .containsExactlyInAnyOrder("shopping-assistant", "order-exceptions-agent", "incident-agent");
+                .containsExactlyInAnyOrder("shopping-assistant", "incident-agent");
 
         AgentDefinition assistant = definitions.get("shopping-assistant");
         assertThat(assistant.customerScoped()).isTrue();
@@ -33,9 +33,9 @@ class AgentDefinitionsTest {
 
     @Test
     void addsTheSlackStepOnlyWhenAChannelIsConfigured() {
-        AgentDefinition agent = definitions.get("order-exceptions-agent");
+        AgentDefinition agent = definitions.get("incident-agent");
 
-        assertThat(agent.systemPrompt("C123")).contains("in channel C123:").doesNotContain("{slack");
+        assertThat(agent.systemPrompt("C123")).contains("in channel C123").doesNotContain("{slack");
         assertThat(agent.systemPrompt(null)).doesNotContain("conversations_add_message").doesNotContain("{slack");
     }
 

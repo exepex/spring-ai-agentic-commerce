@@ -22,8 +22,7 @@ agent-service (which runs the agent) and the MCP servers (which enforce its perm
 | Agent | Definition | What it does |
 |---|---|---|
 | `shopping-assistant` | [shopping-assistant.md](agent-definitions/src/main/resources/agents/shopping-assistant.md) | Chats with one signed-in customer: finds products, proposes orders, cancels and refunds their orders. |
-| `order-exceptions-agent` | [order-exceptions-agent.md](agent-definitions/src/main/resources/agents/order-exceptions-agent.md) | Handles a stock-out on a paid order: cancels, refunds, tells the customer, posts to Slack. |
-| `incident-agent` | [incident-agent.md](agent-definitions/src/main/resources/agents/incident-agent.md) | Works ServiceNow incidents first: gathers the facts, fixes what it may, resolves the incident or hands it to the right team. |
+| `incident-agent` | [incident-agent.md](agent-definitions/src/main/resources/agents/incident-agent.md) | Works every case first, as a ServiceNow incident (stock-outs, failed deliveries, lost parcels, failed refunds, hand-offs, and incidents the service desk raises): gathers the facts, cancels, refunds and tells the customer where its policy allows, then resolves the incident or hands it to the right team. |
 
 Everything else an agent depends on has one home too:
 
@@ -35,6 +34,7 @@ Everything else an agent depends on has one home too:
 | The Slack MCP server and its channel | `commerce.slack` in [agent-service/src/main/resources/application.yml](agent-service/src/main/resources/application.yml) |
 | The ServiceNow instance, the agent's group and the teams | `commerce.servicenow` in [servicenow-mcp-server/src/main/resources/application.yml](servicenow-mcp-server/src/main/resources/application.yml) |
 | The ServiceNow tools and their rules | [IncidentTools](servicenow-mcp-server/src/main/java/io/github/exepex/commerce/servicenow/incidents/IncidentTools.java) and [ToolGuard](servicenow-mcp-server/src/main/java/io/github/exepex/commerce/servicenow/governance/ToolGuard.java) |
+| The cases, and how they reach ServiceNow and come back | [CaseService](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/cases/CaseService.java) and [CaseSync](servicenow-mcp-server/src/main/java/io/github/exepex/commerce/servicenow/incidents/CaseSync.java) |
 | The kill switches | Kept and enforced by [AgentSwitches](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/governance/AgentSwitches.java); agent-service reads them through [AgentSwitchboard](agent-service/src/main/java/io/github/exepex/commerce/agent/AgentSwitchboard.java) |
 
 To change an agent's model, effort, tools, budget or prompt, edit its definition file; nothing else needs to change.
@@ -48,7 +48,7 @@ Report a finding when it describes a concrete scenario that this code can actual
 
 - **A README workflow behaves wrongly**, including under realistic edge cases:
   - a double click or a retried request;
-  - two people acting on the same item at the same time (a refund, an escalation, a proposal);
+  - two people acting on the same item at the same time (a refund, a case, a proposal);
   - a dependency that is down or slow (payments, the MCP server, Slack, Claude);
   - the model misbehaving: calling the wrong tool, stopping without acting, or obeying a prompt injection.
 - **Money or stock is wrong:** a double charge or refund, a refund above what was paid, or stock oversold or never

@@ -355,9 +355,9 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         kafka.send("shipment.events", orderId.toString(), failed).join();
 
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
-                assertThat(timeline(orderId)).contains("SHIPMENT_DELIVERY_FAILED"));
+                assertThat(timeline(orderId)).contains("SHIPMENT_DELIVERY_FAILED", "raise_case"));
         List<String> actions = JsonPath.read(timeline(orderId), "$[*].action");
-        assertThat(actions).containsExactly("ORDER_SHIPPED", "SHIPMENT_DELIVERY_FAILED");
+        assertThat(actions).containsExactly("ORDER_SHIPPED", "SHIPMENT_DELIVERY_FAILED", "raise_case");
         assertThat(timeline(orderId)).contains("Parcel ACTEST000001 could not be delivered: Nobody home, parcel returned");
     }
 

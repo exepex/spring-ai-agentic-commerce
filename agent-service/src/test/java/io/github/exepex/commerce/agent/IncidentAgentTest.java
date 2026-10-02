@@ -26,6 +26,10 @@ import org.springframework.ai.chat.prompt.Prompt;
 class IncidentAgentTest {
 
     private static final AgentDefinitions DEFINITIONS = AgentDefinitions.load();
+    private static final AgentProperties PROPERTIES = new AgentProperties(
+            new AgentProperties.Agents("http://localhost:8085", new AgentProperties.Agent("token"),
+                    new AgentProperties.Agent("token")),
+            new AgentProperties.Slack("", "", ""), new AgentProperties.ServiceNow("http://localhost:8087"));
     private static final String INCIDENT = "INC0010001";
 
     private final McpToolboxes toolboxes = mock(McpToolboxes.class);
@@ -90,7 +94,7 @@ class IncidentAgentTest {
         AgentSwitchesApi switches = mock(AgentSwitchesApi.class);
         when(switches.all()).thenReturn(Map.of(AgentSwitchboard.INCIDENT_AGENT, switchedOn));
         return new IncidentAgent(model, toolboxes, new AgentSwitchboard(switches), mock(DecisionRecorder.class),
-                DEFINITIONS, OrderExceptionsAgentTest.PROPERTIES);
+                DEFINITIONS, PROPERTIES);
     }
 
     private static McpSchema.CallToolResult result(String text, boolean error) {

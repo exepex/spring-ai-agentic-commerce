@@ -124,9 +124,10 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
         assertThat((String) JsonPath.read(cases(orderId), "$[0].status")).isEqualTo("WITH_AGENT");
         assertThat((String) JsonPath.read(cases(orderId), "$[0].incidentNumber")).isEqualTo("INC0010001");
 
-        followIncident(caseId, "WITH_TEAM", "Payments");
-        followIncident(caseId, "WITH_TEAM", "Payments");
-        followIncident(caseId, "RESOLVED", "Payments");
+        assertThat(followIncident(caseId, "INC0010001", "WITH_TEAM", "Payments")).isEqualTo(200);
+        assertThat(followIncident(caseId, "INC0010001", "WITH_TEAM", "Payments")).isEqualTo(200);
+        assertThat(followIncident(caseId, "INC0099999", "RESOLVED", "Payments")).isEqualTo(409);
+        assertThat(followIncident(caseId, "INC0010001", "RESOLVED", "Payments")).isEqualTo(200);
 
         List<String> steps = JsonPath.read(timeline(orderId),
                 "$[?(@.action == 'open_incident' || @.action == 'follow_incident')].summary");
@@ -148,7 +149,7 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
         handOff(orderId, "the refund keeps failing");
         String caseId = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
         sync("/api/agent/cases/{id}/incident", caseId, Map.of("number", "INC0010002"));
-        followIncident(caseId, "WITH_TEAM", "Payments");
+        assertThat(followIncident(caseId, "INC0010002", "WITH_TEAM", "Payments")).isEqualTo(200);
         stubRefundSucceeds(orderId);
 
         McpSchema.CallToolResult retriedByAgent = call(incidentAgent, "issue_refund", refund);
@@ -195,9 +196,9 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
         return JsonPath.parse(forOrder).jsonString();
     }
 
-    private void followIncident(String caseId, String status, String group) {
-        assertThat(sync("/api/agent/cases/{id}/incident-state", caseId, Map.of("status", status, "assignmentGroup", group)))
-                .isEqualTo(200);
+    private int followIncident(String caseId, String number, String status, String group) {
+        return sync("/api/agent/cases/{id}/incident-state", caseId, Map.of("number", number, "status", status,
+                "assignmentGroup", group));
     }
 
     private int sync(String path, String caseId, Map<String, Object> body) {

@@ -39,53 +39,64 @@
       </section>
 
       <section class="card">
-        <h2>Escalations</h2>
-        <p class="muted small">Work an agent handed to a person because it could not, or should not, finish it.</p>
-        @for (escalation of escalations(); track escalation.id) {
+        <h2>Failed refunds</h2>
+        <p class="muted small">
+          Refunds that did not go through. Retrying uses the same idempotency key, so the customer is paid at most once.
+        </p>
+        @for (refund of failedRefunds(); track refund.id) {
           <div class="item">
             <div class="spread">
-              <span class="row">
-                <span class="chip {{ escalation.status }}">{{ escalation.status }}</span>
-                <span class="small">from <strong>{{ escalation.raisedBy }}</strong> · {{ escalation.createdAt | date: 'HH:mm:ss' }}</span>
-              </span>
-              @if (escalation.orderId) {
-                <a class="small" [routerLink]="['/orders', escalation.orderId]">order {{ escalation.orderId.slice(0, 8) }}</a>
-              }
+              <strong>{{ refund.amount | currency: refund.currency }}</strong>
+              <a class="small" [routerLink]="['/orders', refund.orderId]">order {{ refund.orderId.slice(0, 8) }}</a>
             </div>
-            <div class="small">{{ escalation.summary }}</div>
-            @switch (escalation.status) {
-              @case ('OPEN') {
-                <div class="row">
-                  <button class="primary" (click)="act(escalation, 'assign')" [disabled]="busy() === escalation.id">Assign to me</button>
-                </div>
-              }
-              @case ('ASSIGNED') {
-                @if (isMine(escalation)) {
-                  <div class="small">Assigned to you</div>
-                  <div class="row">
-                    @if (failedRefundFor(escalation); as failed) {
-                      <button class="primary" (click)="decide(failed, 'retry', escalation.id)" [disabled]="busy() === escalation.id">
-                        Retry refund of {{ failed.amount | currency: failed.currency }}
-                      </button>
-                    }
-                    <input class="note" placeholder="Note" [ngModel]="noteFor(escalation.id)" (ngModelChange)="setNote(escalation.id, $event)" />
-                    <button (click)="act(escalation, 'resolve')" [disabled]="busy() === escalation.id">Mark resolved</button>
-                    <button (click)="act(escalation, 'hand-back')" [disabled]="busy() === escalation.id">Hand back</button>
-                  </div>
-                } @else {
-                  <div class="small muted">Assigned to <strong>{{ escalation.assignedTo }}</strong>; only they can work on it.</div>
-                }
-              }
-              @case ('RESOLVED') {
-                <div class="small muted">Resolved by {{ escalation.resolvedBy }}@if (escalation.resolutionNote) {: {{ escalation.resolutionNote }}}</div>
-              }
-            }
-            @if (refusalFor(escalation.id); as refusal) {
+            <div class="small">Requested by <strong>{{ refund.requestedBy }}</strong> · {{ refund.createdAt | date: 'HH:mm:ss' }}</div>
+            <div class="small error">{{ refund.failure }}</div>
+            <div class="row">
+              <button class="primary" (click)="decide(refund, 'retry')" [disabled]="busy() === refund.id">Retry refund</button>
+            </div>
+            @if (refusalFor(refund.id); as refusal) {
               <div class="small error">{{ refusal }}</div>
             }
           </div>
         } @empty {
-          <p class="empty">No escalations.</p>
+          <p class="empty">No failed refunds.</p>
+        }
+      </section>
+
+      <section class="card">
+        <h2>Cases</h2>
+        <p class="muted small">
+          Every problem becomes a ServiceNow incident. The incident agent works it first and hands it to a team when a
+          person is needed; the teams work it in ServiceNow.
+        </p>
+        @for (supportCase of cases(); track supportCase.id) {
+          <div class="item">
+            <div class="spread">
+              <span class="row">
+                <span class="chip {{ supportCase.status }}">{{ supportCase.status }}</span>
+                <span class="small mono">{{ supportCase.type }}</span>
+                @if (supportCase.incidentUrl) {
+                  <a class="small mono" [href]="supportCase.incidentUrl" target="_blank" rel="noopener">{{ supportCase.incidentNumber }}</a>
+                } @else if (supportCase.incidentNumber) {
+                  <span class="small mono">{{ supportCase.incidentNumber }}</span>
+                }
+              </span>
+              @if (supportCase.orderId) {
+                <a class="small" [routerLink]="['/orders', supportCase.orderId]">order {{ supportCase.orderId.slice(0, 8) }}</a>
+              }
+            </div>
+            <div class="small">{{ supportCase.description }}</div>
+            <div class="small muted">
+              Raised by {{ supportCase.raisedBy }} · {{ supportCase.createdAt | date: 'HH:mm:ss' }}
+              @switch (supportCase.status) {
+                @case ('PENDING') { · waiting to reach ServiceNow }
+                @case ('WITH_AGENT') { · with the incident agent }
+                @case ('WITH_TEAM') { · with <strong>{{ supportCase.assignmentGroup }}</strong> }
+              }
+            </div>
+          </div>
+        } @empty {
+          <p class="empty">No cases.</p>
         }
       </section>
 
@@ -169,7 +180,7 @@
       <section class="card">
         <h2>Demo controls</h2>
         <h3>Write off damaged stock</h3>
-        <p class="muted small">If fewer units remain than are reserved, the catalog publishes a stock-out and the order-exceptions agent wakes up.</p>
+        <p class="muted small">If fewer units remain than are reserved, the catalog publishes a stock-out and the shop opens a case for each order it can no longer fulfil.</p>
         <div class="grid controls">
           <select [ngModel]="writeOffProduct()" (ngModelChange)="writeOffProduct.set($event)" aria-label="Product">
             @for (product of products(); track product.id) {

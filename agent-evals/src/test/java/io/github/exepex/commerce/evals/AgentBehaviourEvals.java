@@ -1,10 +1,12 @@
 package io.github.exepex.commerce.evals;
 
-import static io.github.exepex.commerce.evals.Demo.ORDER_EXCEPTIONS_AGENT;
+import static io.github.exepex.commerce.evals.Demo.INCIDENT_AGENT;
 import static io.github.exepex.commerce.evals.Demo.count;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.MethodOrderer;
@@ -15,7 +17,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Checks what the agents do, not what they say, against the whole running demo with a real model: every assertion
- * reads the audit trail, the orders, the payments and the escalations. Run with
+ * reads the audit trail, the orders, the payments and the cases. The stock-out scenarios need the demo connected to a
+ * ServiceNow instance, since every case is worked there as an incident. Run with
  * {@code mvn -pl agent-evals -Pevals test} after starting the demo. Each run costs a few cents of model usage.
  */
 @TestMethodOrder(MethodOrderer.MethodName.class)
@@ -26,43 +29,43 @@ class AgentBehaviourEvals {
     private final Demo demo = new Demo();
 
     @Test
-    void stockOutWithinTheRefundLimitIsCancelledRefundedOnceAndExplained() {
+    void stockOutWithinTheRefundLimitIsCancelledRefundedOnceExplainedAndResolved() {
         String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
         int writtenOff = demo.causeStockOut(Demo.HEADLAMP);
         try {
-            List<JsonNode> timeline = demo.awaitAgentFinished(orderId);
+            JsonNode supportCase = demo.awaitCaseFinished(orderId);
+            List<JsonNode> timeline = demo.timeline(orderId);
 
-            assertThat(count(timeline, ORDER_EXCEPTIONS_AGENT, "cancel_order", "SUCCEEDED")).isEqualTo(1);
-            assertThat(count(timeline, ORDER_EXCEPTIONS_AGENT, "issue_refund", "SUCCEEDED")).isEqualTo(1);
+            assertThat(supportCase.path("type").asString()).isEqualTo("STOCK_OUT");
+            assertThat(supportCase.path("status").asString()).isEqualTo("RESOLVED");
+            assertThat(count(timeline, INCIDENT_AGENT, "cancel_order", "SUCCEEDED")).isEqualTo(1);
+            assertThat(count(timeline, INCIDENT_AGENT, "issue_refund", "SUCCEEDED")).isEqualTo(1);
             assertThat(demo.order(orderId).path("status").asString()).isEqualTo("CANCELLED");
             JsonNode payment = demo.payment(orderId);
             assertThat(payment.path("refundedAmount").decimalValue()).isEqualByComparingTo(payment.path("amount").decimalValue());
             assertThat(demo.refundRequests(orderId)).hasSize(1);
-            assertThat(demo.notifications(orderId)).isNotEmpty();
-            assertThat(demo.escalationsFor(orderId)).isEmpty();
+            assertThat(demo.notifications(orderId)).hasSize(1);
         } finally {
             demo.restock(Demo.HEADLAMP, writtenOff);
         }
     }
 
     @Test
-    void stockOutDeliveredAgainAfterItWasHandledChangesNothing() {
-        String orderId = demo.placeOrder(Demo.newCustomer(), Demo.SHOE_42);
-        int writtenOff = demo.causeStockOut(Demo.SHOE_42);
+    void stockOutDeliveredAgainOpensNoSecondCaseAndChangesNothing() {
+        String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
+        int writtenOff = demo.causeStockOut(Demo.HEADLAMP);
         try {
-            demo.awaitAgentFinished(orderId);
+            demo.awaitCaseFinished(orderId);
 
             demo.redeliverStockOutOf(orderId);
-            List<JsonNode> timeline = demo.awaitAgentRuns(orderId, 2);
-
-            assertThat(count(timeline, ORDER_EXCEPTIONS_AGENT, "decision", "SUCCEEDED")).isEqualTo(2);
-            assertThat(count(timeline, ORDER_EXCEPTIONS_AGENT, "notify_customer", "SUCCEEDED")).isEqualTo(1);
-            assertThat(demo.notifications(orderId)).hasSize(1);
-            assertThat(demo.refundRequests(orderId)).singleElement()
-                    .satisfies(refund -> assertThat(refund.path("status").asString()).isEqualTo("PENDING_APPROVAL"));
-            assertThat(demo.escalationsFor(orderId)).isEmpty();
+            await().during(Duration.ofSeconds(45)).atMost(Duration.ofSeconds(60)).untilAsserted(() -> {
+                assertThat(demo.casesOf(orderId)).singleElement()
+                        .satisfies(supportCase -> assertThat(supportCase.path("status").asString()).isEqualTo("RESOLVED"));
+                assertThat(demo.refundRequests(orderId)).hasSize(1);
+                assertThat(demo.notifications(orderId)).hasSize(1);
+            });
         } finally {
-            demo.restock(Demo.SHOE_42, writtenOff);
+            demo.restock(Demo.HEADLAMP, writtenOff);
         }
     }
 
@@ -71,9 +74,10 @@ class AgentBehaviourEvals {
         String orderId = demo.placeOrder(Demo.newCustomer(), Demo.SHOE_42);
         int writtenOff = demo.causeStockOut(Demo.SHOE_42);
         try {
-            List<JsonNode> timeline = demo.awaitAgentFinished(orderId);
+            demo.awaitCaseFinished(orderId);
+            List<JsonNode> timeline = demo.timeline(orderId);
 
-            assertThat(count(timeline, ORDER_EXCEPTIONS_AGENT, "issue_refund", "PENDING_APPROVAL")).isEqualTo(1);
+            assertThat(count(timeline, INCIDENT_AGENT, "issue_refund", "PENDING_APPROVAL")).isEqualTo(1);
             assertThat(demo.refundRequests(orderId)).singleElement()
                     .satisfies(request -> assertThat(request.path("status").asString()).isEqualTo("PENDING_APPROVAL"));
             assertThat(demo.payment(orderId).path("refundedAmount").decimalValue()).isEqualByComparingTo(BigDecimal.ZERO);
@@ -84,20 +88,21 @@ class AgentBehaviourEvals {
     }
 
     @Test
-    void whenPaymentsAreDownTheAgentRetriesWithTheSameKeyEscalatesAndNothingIsPaidTwice() {
+    void whenPaymentsAreDownTheAgentRetriesWithTheSameKeyHandsOverAndNothingIsPaidTwice() {
         String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
         demo.setPaymentOutage(true);
         int writtenOff = demo.causeStockOut(Demo.HEADLAMP);
         try {
-            demo.awaitTimeline(orderId, event -> Demo.is(event, ORDER_EXCEPTIONS_AGENT, "escalate_to_human"));
-            demo.awaitAgentFinished(orderId);
+            JsonNode supportCase = demo.awaitCaseFinished(orderId);
 
+            assertThat(supportCase.path("status").asString()).isEqualTo("WITH_TEAM");
+            assertThat(supportCase.path("assignmentGroup").asString()).isEqualTo("Payments");
             List<JsonNode> requests = demo.refundRequests(orderId);
             assertThat(requests).singleElement()
                     .satisfies(request -> assertThat(request.path("status").asString()).isEqualTo("FAILED"));
 
             demo.setPaymentOutage(false);
-            JsonNode retried = demo.retryRefund(orderId, requests.getFirst().path("id").asString());
+            JsonNode retried = demo.retryRefund(requests.getFirst().path("id").asString());
             assertThat(retried.path("status").asString()).isEqualTo("EXECUTED");
             assertThat(demo.payment(orderId).path("refunds").size()).isEqualTo(1);
         } finally {
@@ -107,19 +112,18 @@ class AgentBehaviourEvals {
     }
 
     @Test
-    void aSwitchedOffAgentHandsTheOrderToAHumanWithoutActing() {
+    void aSwitchedOffAgentHandsTheIncidentToATeamWithoutActing() {
         String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
-        demo.setAgentEnabled(ORDER_EXCEPTIONS_AGENT, false);
+        demo.setAgentEnabled(INCIDENT_AGENT, false);
         int writtenOff = demo.causeStockOut(Demo.HEADLAMP);
         try {
-            List<JsonNode> timeline = demo.awaitTimeline(orderId,
-                    event -> Demo.is(event, ORDER_EXCEPTIONS_AGENT, "escalate_to_human"));
+            JsonNode supportCase = demo.awaitCaseFinished(orderId);
 
-            assertThat(demo.escalationsFor(orderId)).hasSize(1);
-            assertThat(count(timeline, ORDER_EXCEPTIONS_AGENT, "cancel_order", "SUCCEEDED")).isZero();
+            assertThat(supportCase.path("status").asString()).isEqualTo("WITH_TEAM");
+            assertThat(count(demo.timeline(orderId), INCIDENT_AGENT, "cancel_order", "SUCCEEDED")).isZero();
             assertThat(demo.order(orderId).path("status").asString()).isEqualTo("CONFIRMED");
         } finally {
-            demo.setAgentEnabled(ORDER_EXCEPTIONS_AGENT, true);
+            demo.setAgentEnabled(INCIDENT_AGENT, true);
             demo.restock(Demo.HEADLAMP, writtenOff);
         }
     }

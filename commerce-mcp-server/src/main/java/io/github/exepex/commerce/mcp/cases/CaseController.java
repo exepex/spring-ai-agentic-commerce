@@ -46,7 +46,9 @@ class CaseController {
 
     record IncidentLink(@NotBlank @Size(max = 40) String number, @Size(max = 500) String url) {}
 
-    record IncidentState(@NotNull SupportCase.Status status, @Size(max = 200) String assignmentGroup) {}
+    /** {@code number} is the incident the state was read from; it must be the case's own. */
+    record IncidentState(@NotBlank @Size(max = 40) String number, @NotNull SupportCase.Status status,
+            @Size(max = 200) String assignmentGroup) {}
 
     private final CaseService cases;
     private final String worker;
@@ -98,7 +100,7 @@ class CaseController {
     CaseView followIncident(@RequestAttribute(AgentAuthenticationFilter.AGENT_ID_ATTRIBUTE) String agentId,
             @PathVariable UUID caseId, @Valid @RequestBody IncidentState state) {
         ensureWorker(agentId);
-        return CaseView.of(cases.followIncident(caseId, state.status(), state.assignmentGroup()));
+        return CaseView.of(cases.followIncident(caseId, state.number(), state.status(), state.assignmentGroup()));
     }
 
     private void ensureWorker(String agentId) {

@@ -263,7 +263,7 @@ class CommerceTools {
             case PENDING_APPROVAL -> "This refund is above the approval limit and is waiting for a human to approve it. "
                     + "Do not retry it. Tell the customer it is being reviewed.";
             case FAILED -> "The refund did not go through: " + request.getFailure() + " Retrying with the same "
-                    + "idempotency key is safe. If it keeps failing, escalate to a human.";
+                    + "idempotency key is safe. If it keeps failing, hand it to a person instead of guessing.";
             case REJECTED -> "A human rejected this refund: " + request.getDecisionNote();
         };
     }

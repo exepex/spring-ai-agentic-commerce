@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -86,12 +87,21 @@ public class IncidentAgent {
             return;
         }
         String summary = ClaudeReply.textOf(response);
-        decisions.record(AgentSwitchboard.INCIDENT_AGENT, null, "Incident " + number + ": " + summary,
+        decisions.record(AgentSwitchboard.INCIDENT_AGENT, orderOf(linkedOrderId), "Incident " + number + ": " + summary,
                 "Triggered by ServiceNow incident " + number + ": " + incidentEvent, response,
                 Duration.between(started, Instant.now()));
         if (!isFinished(number, run)) {
             handToTeam(number, "The incident agent finished without resolving this incident or handing it to a team, "
                     + "so a person must finish it. The agent said: " + summary);
+        }
+    }
+
+    /** The linked order, so the decision shows on its timeline; null when the incident names no valid order id. */
+    private static UUID orderOf(String linkedOrderId) {
+        try {
+            return linkedOrderId == null || linkedOrderId.isBlank() ? null : UUID.fromString(linkedOrderId.strip());
+        } catch (IllegalArgumentException notAnOrderId) {
+            return null;
         }
     }
 

@@ -58,25 +58,6 @@ class McpToolboxes {
                 ENFORCED_BY_THE_SERVER);
     }
 
-    List<ToolCallback> orderExceptionsAgentTools() {
-        AgentDefinition agent = definitions.get(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT);
-        List<ToolCallback> tools = new ArrayList<>(
-                toolsFrom(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT,
-                        () -> commerceClient(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT), agent.commerceTools(),
-                        agent.customerScoped(), ENFORCED_BY_THE_SERVER));
-        if (properties.slack().isConfigured() && !agent.slackTools().isEmpty()) {
-            try {
-                tools.addAll(toolsFrom(SLACK, this::slackClient, agent.slackTools(), false,
-                        () -> isSwitchedOn(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT)));
-            } catch (RuntimeException slackDown) {
-                // Slack is a nice-to-have: without it the agent still does its job and records it in the audit trail.
-                LOGGER.warn("Slack MCP server unavailable; the agent runs without Slack", slackDown);
-                clients.remove(SLACK);
-            }
-        }
-        return tools;
-    }
-
     /** The incident agent's tools: the shop's, ServiceNow's and, when configured, Slack's. */
     List<ToolCallback> incidentAgentTools() {
         AgentDefinition agent = definitions.get(AgentSwitchboard.INCIDENT_AGENT);
@@ -100,14 +81,6 @@ class McpToolboxes {
     /** Calls a ServiceNow tool directly as the incident agent, without a model: to hand an incident to a team. */
     McpSchema.CallToolResult callAsIncidentAgent(String tool, Map<String, Object> arguments) {
         return onLiveConnection(SERVICENOW, () -> servicenowClient(AgentSwitchboard.INCIDENT_AGENT),
-                client -> client.callTool(new McpSchema.CallToolRequest(tool, arguments)));
-    }
-
-    /** Calls a commerce tool directly, without a model: used when an agent is switched off or fails. */
-    McpSchema.CallToolResult callAsOrderExceptionsAgent(String tool, Map<String, Object> arguments) {
-        // Only used to hand work to a human: if the first attempt is lost, a second escalation beats none.
-        return onLiveConnection(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT,
-                () -> commerceClient(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT),
                 client -> client.callTool(new McpSchema.CallToolRequest(tool, arguments)));
     }
 

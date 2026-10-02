@@ -95,6 +95,29 @@
         </section>
 
         <section class="card">
+          <h2>Cases</h2>
+          @for (supportCase of cases(); track supportCase.id) {
+            <div class="refund">
+              <div class="spread">
+                <span class="mono small">{{ supportCase.type }}</span>
+                <span class="chip {{ supportCase.status }}">{{ supportCase.status }}</span>
+              </div>
+              <div class="small">
+                @if (supportCase.incidentUrl) {
+                  <a class="mono" [href]="supportCase.incidentUrl" target="_blank" rel="noopener">{{ supportCase.incidentNumber }}</a>
+                } @else {
+                  <span class="muted">Not in ServiceNow yet</span>
+                }
+                @if (supportCase.status === 'WITH_TEAM') { · with {{ supportCase.assignmentGroup }} }
+              </div>
+              <div class="muted small">{{ supportCase.description }}</div>
+            </div>
+          } @empty {
+            <p class="empty">None.</p>
+          }
+        </section>
+
+        <section class="card">
           <h2>Messages to the customer</h2>
           @for (notification of notifications(); track notification.id) {
             <div class="mail">

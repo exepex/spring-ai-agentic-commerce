@@ -49,7 +49,7 @@ spring:
         protocol: streamable
         instructions: >
           Tools for an online shop: look up products, orders, payments and shipments; propose orders for a customer
-          to confirm; cancel orders; refund payments within a limit; notify customers; escalate to a human.
+          to confirm; cancel orders; refund payments within a limit; notify customers; hand a problem to the support team.
   mvc:
     problemdetails:
       enabled: true
