@@ -68,7 +68,7 @@ public class IncidentAgent {
             return;
         }
         Instant started = Instant.now();
-        ToolRun run = new ToolRun(null, definition.toolCallBudget(),
+        ToolRun run = new ToolRun(null, definition.toolCallBudget(), number,
                 linkedOrderId == null || linkedOrderId.isBlank() ? Set.of() : Set.of(linkedOrderId),
                 () -> stillOwns(number));
         ChatResponse response;

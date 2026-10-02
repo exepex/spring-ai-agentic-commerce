@@ -18,6 +18,7 @@ public final class ToolRun {
     public static final String CONTEXT_KEY = "commerce.toolRun";
 
     private final String customerEmail;
+    private final String workId;
     private final Set<String> changeableOrders;
     private final BooleanSupplier workStillOwned;
     private final AtomicInteger callsLeft;
@@ -27,17 +28,20 @@ public final class ToolRun {
     private final List<ToolResult> succeeded = new ArrayList<>();
 
     public ToolRun(String customerEmail, int callBudget) {
-        this(customerEmail, callBudget, null, () -> true);
+        this(customerEmail, callBudget, null, null, () -> true);
     }
 
     /**
+     * @param workId what this run was started for, such as an incident number; null for a conversation
      * @param changeableOrders the only orders this run may change, possibly none; {@code null} when the run is not
      *     limited to particular orders
      * @param workStillOwned asked before every order change: whether the work this run was started for, such as an
      *     incident, is still this agent's
      */
-    public ToolRun(String customerEmail, int callBudget, Set<String> changeableOrders, BooleanSupplier workStillOwned) {
+    public ToolRun(String customerEmail, int callBudget, String workId, Set<String> changeableOrders,
+            BooleanSupplier workStillOwned) {
         this.customerEmail = customerEmail;
+        this.workId = workId;
         this.workStillOwned = workStillOwned;
         this.changeableOrders = changeableOrders == null ? null
                 : changeableOrders.stream().map(ToolRun::normalized).collect(Collectors.toUnmodifiableSet());
@@ -61,6 +65,11 @@ public final class ToolRun {
 
     String customerEmail() {
         return customerEmail;
+    }
+
+    /** Whether this run may work the given incident: only the one it was started for, if any. */
+    boolean mayWorkIncident(String number) {
+        return workId == null || workId.equals(number == null ? null : number.strip());
     }
 
     boolean takeCall() {

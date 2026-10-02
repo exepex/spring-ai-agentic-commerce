@@ -153,7 +153,9 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
         String outgoing = outgoingFor(orderId);
         assertThat((List<String>) JsonPath.read(outgoing, "$[*].supportCase.id")).doesNotContain(caseId);
         assertThat((String) JsonPath.read(outgoing, "$[0].supportCase.description"))
-                .isEqualTo("Raised again after INC0010003 was resolved: the customer called again");
+                .startsWith("Raised again after INC0010003 was resolved");
+        assertThat((List<String>) JsonPath.read(outgoing, "$[0].unsentNotes[*].text"))
+                .containsExactly("the customer called again");
     }
 
     @Test
@@ -182,6 +184,27 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
                 .doesNotContain("-again");
         assertThat(refundStatus(orderId)).isEqualTo("FAILED");
         assertThat(retry(refundRequestId, "ana@trailhead.example")).isEqualTo(200);
+        assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
+    }
+
+    @Test
+    void whileAnOrderHasAnOpenCaseOnlyTheAgentThatWorksCasesMayRefundIt() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
+        handOff(orderId, "the customer wants to talk to a person");
+        String caseId = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", caseId, Map.of("number", "INC0010004"));
+
+        McpSchema.CallToolResult byTheAssistant = call(assistant, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 39.50, "reason", "changed my mind", "idempotencyKey", "refund-" + orderId + "-cancel",
+                "customerEmail", "ada@example.com"));
+        McpSchema.CallToolResult byTheIncidentAgent = call(incidentAgent, "issue_refund", Map.of("orderId",
+                orderId.toString(), "amount", 39.50, "reason", "changed my mind", "idempotencyKey",
+                "refund-" + orderId + "-INC0010004"));
+
+        assertThat(byTheAssistant.isError()).isTrue();
+        assertThat(text(byTheAssistant)).contains("open HANDOFF case (INC0010004)");
+        assertThat(byTheIncidentAgent.isError()).isFalse();
         assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
     }
 

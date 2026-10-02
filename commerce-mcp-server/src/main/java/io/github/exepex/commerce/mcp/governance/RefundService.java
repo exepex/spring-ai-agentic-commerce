@@ -95,8 +95,8 @@ public class RefundService {
         if (earlier.isPresent()) {
             return repeat(earlier.get(), orderId, amount, idempotencyKey, agentId);
         }
-        // An order a team is working is theirs: a new refund from an agent could pay out what they are paying back.
-        cases.ensureNotWithTeam(orderId);
+        // An order people are working is theirs: a new refund from an agent could pay out what they are paying back.
+        cases.ensureAgentMayPay(orderId, agentId);
         PaymentApi.Payment payment = paymentIfReachable(orderId);
         if (payment != null && amount.compareTo(payment.refundable()) > 0) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "A refund of " + amount + " "
@@ -213,8 +213,8 @@ public class RefundService {
         if (earlier.getStatus() != RefundRequest.Status.FAILED) {
             return earlier;
         }
-        // A failed refund of an order a team is working is theirs to retry, not the agent's.
-        cases.ensureNotWithTeam(orderId);
+        // A failed refund of an order people are working is theirs to retry, not the agent's.
+        cases.ensureAgentMayPay(orderId, agentId);
         return execute(earlier, agentId);
     }
 

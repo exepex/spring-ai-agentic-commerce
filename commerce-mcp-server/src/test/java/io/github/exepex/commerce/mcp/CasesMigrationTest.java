@@ -13,7 +13,7 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * A demo database that still has work in the escalation queue keeps it when cases replace the queue: each unresolved
- * escalation becomes a pending hand-off case, one per order.
+ * escalation becomes a pending hand-off case for people, one per order.
  */
 class CasesMigrationTest {
 
@@ -40,6 +40,7 @@ class CasesMigrationTest {
             assertThat(cases).allSatisfy(row -> {
                 assertThat(row.get("type")).isEqualTo("HANDOFF");
                 assertThat(row.get("status")).isEqualTo("PENDING");
+                assertThat(row.get("for_people")).as("a person already had the work").isEqualTo(true);
             });
             assertThat(cases.get(0).get("title")).isEqualTo("[HANDOFF] Order " + order.toString().substring(0, 8)
                     + " needs a person");

@@ -10,7 +10,7 @@ interface SupportCaseRepository extends JpaRepository<SupportCase, UUID> {
 
     Optional<SupportCase> findByOrderIdAndTypeAndStatusNot(UUID orderId, CaseType type, SupportCase.Status status);
 
-    List<SupportCase> findByOrderIdAndStatus(UUID orderId, SupportCase.Status status);
+    List<SupportCase> findByOrderIdAndStatusIn(UUID orderId, Collection<SupportCase.Status> statuses);
 
     List<SupportCase> findByStatusInOrderByCreatedAt(Collection<SupportCase.Status> statuses);
 

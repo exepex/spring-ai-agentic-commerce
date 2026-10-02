@@ -27,15 +27,17 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 class CaseController {
 
+    /** {@code forPeople} means its incident goes straight to the default team, not to the agent. */
     record CaseView(UUID id, UUID orderId, CaseType type, SupportCase.Status status, String title, String description,
-            String raisedBy, String incidentNumber, String incidentUrl, String assignmentGroup, Instant createdAt,
-            Instant updatedAt) {
+            String raisedBy, String incidentNumber, String incidentUrl, String assignmentGroup, boolean forPeople,
+            Instant createdAt, Instant updatedAt) {
 
         static CaseView of(SupportCase supportCase) {
             return new CaseView(supportCase.getId(), supportCase.getOrderId(), supportCase.getType(),
                     supportCase.getStatus(), supportCase.getTitle(), supportCase.getDescription(),
                     supportCase.getRaisedBy(), supportCase.getIncidentNumber(), supportCase.getIncidentUrl(),
-                    supportCase.getAssignmentGroup(), supportCase.getCreatedAt(), supportCase.getUpdatedAt());
+                    supportCase.getAssignmentGroup(), supportCase.isForPeople(), supportCase.getCreatedAt(),
+                    supportCase.getUpdatedAt());
         }
     }
 

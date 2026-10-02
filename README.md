@@ -104,8 +104,9 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    incident in the agent's group; the incident agent claims it, cancels the order, refunds it within its limit,
    notifies the customer, posts to Slack, writes work notes and resolves the incident. The order's timeline shows every
    step, and its page links the incident.
-3. **Refund above the limit.** The same stock-out on a €129.90 order: the refund is held as *pending approval*. A
-   person approves or rejects it in the operations console; the decision is recorded, and the refund runs once.
+3. **Refund above the limit.** The same stock-out on a €129.90 order: the refund is held as *pending approval*, and the
+   agent hands the incident to Payments instead of resolving it. A person approves or rejects the refund in the
+   operations console; the decision is recorded, and the refund runs once.
 4. **Payment service down.** With the simulated outage on, the agent's refund fails. It retries with the same
    idempotency key, then assigns the incident to the Payments team instead of guessing. Once payments are back, any
    operator clicks **Retry refund** on the failed refund in the console: it runs exactly once, with the same key.
@@ -119,7 +120,8 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    hands something over with `escalate_to_human`. An order has at most one open case of each kind; the same problem
    raised again adds a work note to its incident. The incident agent works each case first; a failed delivery goes
    to Fulfilment and a failed refund to Payments. The console's **Cases** card shows who has each incident now. While
-   a team has one of an order's incidents, agents leave the order's money to them: their refunds are refused.
+   a team or a person has one of an order's incidents, agents leave the order's money to them: their refunds are
+   refused. While any case of an order is open, the shopping assistant may not refund it either.
 8. **Incident from the service desk.** The service desk raises an incident in the agent's assignment group, for example
    "Order arrived broken, the customer wants their money back", with the order's id in the incident's Correlation ID
    field. The incident agent claims it, reads it, checks
