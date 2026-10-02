@@ -50,6 +50,10 @@ public class ProposalService {
         if (requestedLines == null || requestedLines.isEmpty()) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "An order needs at least one line");
         }
+        if (requestedLines.stream().map(RequestedLine::productId).distinct().count() < requestedLines.size()) {
+            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "Each product can appear on only one line; put the whole quantity on that line.");
+        }
         Map<UUID, CatalogApi.Product> productsById = Downstream.call("catalog", catalog::listProducts).stream()
                 .collect(Collectors.toMap(CatalogApi.Product::id, Function.identity()));
         List<ProposedLine> lines = requestedLines.stream().map(requested -> {

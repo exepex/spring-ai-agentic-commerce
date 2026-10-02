@@ -29,7 +29,7 @@ class OrderExceptionsAgentTest {
                 mock(DecisionRecorder.class), properties);
 
         assertThatThrownBy(() -> agent.handleStockOut(UUID.randomUUID(), "{}"))
-                .isInstanceOf(IllegalStateException.class)
+                .isInstanceOf(OrderExceptionsAgent.HandOffFailedException.class)
                 .hasMessageContaining("to a human");
     }
 }

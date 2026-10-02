@@ -20,6 +20,11 @@ final class PaymentProblems {
                 "Refund of " + requested + " exceeds the " + refundable + " still refundable");
     }
 
+    static ErrorResponseException chargeConflicts(UUID orderId) {
+        return problem(HttpStatus.CONFLICT, "Order " + orderId
+                + " was already charged with a different customer, amount or currency");
+    }
+
     static ErrorResponseException refundNotCompleted(String providerStatus) {
         return problem(HttpStatus.UNPROCESSABLE_CONTENT, "The card processor did not complete the refund (status "
                 + providerStatus + "); no money was returned");

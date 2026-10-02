@@ -19,6 +19,14 @@ import org.springframework.stereotype.Service;
 @Service
 public class OrderExceptionsAgent {
 
+    /** Neither the agent nor a person got the order: Kafka keeps delivering the stock-out until one does. */
+    static final class HandOffFailedException extends IllegalStateException {
+
+        HandOffFailedException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
     private static final Logger LOGGER = LoggerFactory.getLogger(OrderExceptionsAgent.class);
     private static final int TOOL_CALL_BUDGET = 15;
 
@@ -99,7 +107,7 @@ public class OrderExceptionsAgent {
         try {
             toolboxes.callAsOrderExceptionsAgent("escalate_to_human", Map.of("orderId", orderId.toString(), "summary", summary));
         } catch (RuntimeException unavailable) {
-            throw new IllegalStateException("Could not hand order " + orderId + " to a human: " + summary, unavailable);
+            throw new HandOffFailedException("Could not hand order " + orderId + " to a human: " + summary, unavailable);
         }
     }
 }

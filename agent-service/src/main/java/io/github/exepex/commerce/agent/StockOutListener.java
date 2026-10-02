@@ -23,12 +23,17 @@ class StockOutListener {
     }
 
     /**
-     * A stock-out whose order could not be handed to anyone is delivered again: every 15 seconds for five minutes,
-     * long enough to ride out a restart of the MCP server.
+     * A stock-out whose order could not be handed to anyone is delivered again every 15 seconds until the hand-off
+     * succeeds, so no order is dropped however long the MCP server is down. Any other failure is not retried, so a
+     * malformed event cannot block the ones behind it.
      */
     @Bean
     static DefaultErrorHandler stockOutRetries() {
-        return new DefaultErrorHandler(new FixedBackOff(Duration.ofSeconds(15).toMillis(), 20));
+        DefaultErrorHandler retries = new DefaultErrorHandler(
+                new FixedBackOff(Duration.ofSeconds(15).toMillis(), FixedBackOff.UNLIMITED_ATTEMPTS));
+        retries.defaultFalse();
+        retries.addRetryableExceptions(OrderExceptionsAgent.HandOffFailedException.class);
+        return retries;
     }
 
     @KafkaListener(topics = "${commerce.topics.stock-out}")

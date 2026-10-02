@@ -6,9 +6,12 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class EscalationService {
+
+    private static final int MAX_NOTE_LENGTH = 1000;
 
     private final EscalationRepository escalations;
     private final AuditTrail audit;
@@ -27,7 +30,13 @@ public class EscalationService {
         return escalation;
     }
 
+    /** The resolution and its audit entry are saved together, so the audit trail never shows one that did not happen. */
+    @Transactional
     public Escalation resolve(UUID escalationId, String resolvedBy, String note) {
+        if (note != null && note.length() > MAX_NOTE_LENGTH) {
+            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "A resolution note can be at most " + MAX_NOTE_LENGTH + " characters");
+        }
         Escalation escalation = escalations.findById(escalationId)
                 .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Escalation " + escalationId + " does not exist"));
         if (escalation.getStatus() == Escalation.Status.OPEN) {

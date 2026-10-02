@@ -29,7 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class RefundService {
 
-    private record NewRequest(RefundRequest request, BigDecimal refundedOrAsked) {}
+    private record NewRequest(RefundRequest request, BigDecimal refundedOrAsked, boolean isNew) {}
 
     /** The longest reason the payment service stores; longer ones are refused before any money moves. */
     static final int MAX_REASON_LENGTH = 500;
@@ -80,12 +80,7 @@ public class RefundService {
         }
         Optional<RefundRequest> earlier = requests.findByIdempotencyKey(idempotencyKey);
         if (earlier.isPresent()) {
-            RefundRequest request = earlier.get();
-            if (!request.matches(orderId, amount)) {
-                throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
-                        + " was already used for a different refund. Use a new key for a new refund.");
-            }
-            return request.getStatus() == RefundRequest.Status.FAILED ? execute(request, agentId) : request;
+            return repeat(earlier.get(), orderId, amount, idempotencyKey, agentId);
         }
         PaymentApi.Payment payment = paymentIfReachable(orderId);
         if (payment != null && amount.compareTo(payment.refundable()) > 0) {
@@ -104,13 +99,21 @@ public class RefundService {
                     .param("orderId", orderId.toString())
                     .query((row, number) -> number)
                     .single();
+            // The same refund may have arrived at the same moment and got the lock first.
+            Optional<RefundRequest> sameKey = requests.findByIdempotencyKey(idempotencyKey);
+            if (sameKey.isPresent()) {
+                return new NewRequest(sameKey.get(), null, false);
+            }
             BigDecimal refundedOrAsked = amount.add(requestedBefore(orderId));
             boolean needsApproval = refundedOrAsked.compareTo(approvalThreshold) > 0;
             return new NewRequest(requests.save(new RefundRequest(orderId, amount, currency, reason, idempotencyKey,
                     agentId, needsApproval ? RefundRequest.Status.PENDING_APPROVAL : RefundRequest.Status.FAILED,
-                    Instant.now(clock))), refundedOrAsked);
+                    Instant.now(clock))), refundedOrAsked, true);
         });
         RefundRequest request = decided.request();
+        if (!decided.isNew()) {
+            return repeat(request, orderId, amount, idempotencyKey, agentId);
+        }
         if (request.getStatus() == RefundRequest.Status.PENDING_APPROVAL) {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, "issue_refund", AuditEvent.Outcome.PENDING_APPROVAL,
                     "Refund of " + amount + " " + currency + " takes this order's refunds to " + decided.refundedOrAsked()
@@ -157,6 +160,16 @@ public class RefundService {
 
     public List<RefundRequest> forOrder(UUID orderId) {
         return requests.findByOrderIdOrderByCreatedAt(orderId);
+    }
+
+    /** A request with a key seen before returns the first request, retrying it only if it had failed. */
+    private RefundRequest repeat(RefundRequest earlier, UUID orderId, BigDecimal amount, String idempotencyKey,
+            String agentId) {
+        if (!earlier.matches(orderId, amount)) {
+            throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
+                    + " was already used for a different refund. Use a new key for a new refund.");
+        }
+        return earlier.getStatus() == RefundRequest.Status.FAILED ? execute(earlier, agentId) : earlier;
     }
 
     /** What was already refunded or asked for on the order, except refunds a person turned down. */

@@ -217,6 +217,55 @@ class CommerceMcpServerIntegrationTest {
     }
 
     @Test
+    void theSameRefundSentTwiceAtOnceGivesOneRequestAndBothCallsSucceed() throws Exception {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(okJson("""
+                {"id": "%s", "orderId": "%s", "amount": 39.50, "refundedAmount": 0, "refundable": 39.50, "currency": "EUR",
+                 "status": "SUCCEEDED", "refunds": []}""".formatted(UUID.randomUUID(), orderId)).withFixedDelay(300)));
+        stubRefundSucceeds(orderId);
+
+        List<Integer> succeeded = runTogether(
+                () -> refundAll(exceptionsAgent, orderId), () -> refundAll(exceptionsAgent, orderId));
+
+        assertThat(succeeded).containsExactly(1, 1);
+        String requests = rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve().body(String.class);
+        assertThat((List<?>) JsonPath.read(requests, "$")).hasSize(1);
+    }
+
+    @Test
+    void aProposalCannotListTheSameProductTwice() {
+        UUID productId = UUID.randomUUID();
+        SERVICES.stubFor(get("/api/products").willReturn(okJson("""
+                [{"id": "%s", "sku": "HEADLAMP-400", "name": "Headlamp", "description": "", "price": 39.50,
+                  "currency": "EUR", "onHand": 5, "reserved": 0, "available": 5}]""".formatted(productId))));
+
+        McpSchema.CallToolResult refused = call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
+                "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1),
+                        Map.of("productId", productId.toString(), "quantity", 2))));
+
+        assertThat(refused.isError()).isTrue();
+        assertThat(text(refused)).contains("only one line");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void aResolutionNoteTooLongToStoreLeavesTheEscalationAndTheAuditTrailUnchanged() {
+        String escalationId = JsonPath.read(text(call(exceptionsAgent, "escalate_to_human",
+                Map.of("summary", "payments keep failing"))), "$.id");
+
+        int status = rest().post().uri("/api/escalations/{id}/resolve", escalationId)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("by", "ops@example.com", "note", "x".repeat(1001)))
+                .exchange((request, response) -> response.getStatusCode().value());
+
+        assertThat(status).isEqualTo(422);
+        String escalations = rest().get().uri("/api/escalations").retrieve().body(String.class);
+        assertThat((List<String>) JsonPath.read(escalations, "$[?(@.id == '" + escalationId + "')].status"))
+                .containsExactly("OPEN");
+        String audit = rest().get().uri("/api/audit-events").retrieve().body(String.class);
+        assertThat(audit).doesNotContain("x".repeat(1001));
+    }
+
+    @Test
     void twoPeopleDecidingOnTheSameRefundAtOnceCannotBothAct() throws Exception {
         UUID orderId = stubOrder("ada@example.com", "129.90");
         SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(201)
@@ -316,6 +365,13 @@ class CommerceMcpServerIntegrationTest {
         assertThat((String) JsonPath.read(confirmed, "$.status")).isEqualTo("FAILED");
         assertThat(rest().get().uri("/api/orders/{orderId}/timeline", failedOrderId).retrieve().body(String.class))
                 .contains("confirm_order", "FAILED", "Your card was declined.");
+    }
+
+    /** Asks for the full €39.50 refund with one fixed key and returns 1 when the call succeeded. */
+    private static int refundAll(McpSyncClient client, UUID orderId) {
+        McpSchema.CallToolResult result = call(client, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 39.50, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId));
+        return Boolean.TRUE.equals(result.isError()) ? 0 : 1;
     }
 
     /** Asks for a €60 refund and returns 1 when the tool call succeeded, 0 when it was refused. */

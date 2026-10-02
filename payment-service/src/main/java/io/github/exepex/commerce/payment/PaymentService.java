@@ -28,7 +28,12 @@ public class PaymentService {
     public Payment charge(UUID orderId, String customerEmail, BigDecimal amount, String currency, String paymentMethod) {
         Optional<Payment> existing = payments.findByOrderId(orderId);
         if (existing.isPresent()) {
-            return existing.get();
+            Payment earlier = existing.get();
+            if (earlier.getAmount().compareTo(amount) != 0 || !earlier.getCurrency().equals(currency)
+                    || !earlier.getCustomerEmail().equalsIgnoreCase(customerEmail)) {
+                throw PaymentProblems.chargeConflicts(orderId);
+            }
+            return earlier;
         }
         PaymentGateway.ChargeResult charge = gateway.charge(amount, currency, paymentMethod,
                 "Order " + orderId, "charge-" + orderId);

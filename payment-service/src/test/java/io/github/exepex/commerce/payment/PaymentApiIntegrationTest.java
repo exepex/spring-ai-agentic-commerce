@@ -64,6 +64,14 @@ class PaymentApiIntegrationTest {
     }
 
     @Test
+    void aRepeatedChargeWithADifferentAmountIsRefusedInsteadOfReportedAsPaid() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "10.00", "pm_card_visa");
+
+        assertThat(charge(orderId, "129.90", "pm_card_visa")).hasStatus(HttpStatus.CONFLICT);
+    }
+
+    @Test
     void rejectsARefundReasonLongerThanItCanStoreBeforeRefundingAnything() {
         UUID orderId = UUID.randomUUID();
         charge(orderId, "50.00", "pm_card_visa");
