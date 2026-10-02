@@ -34,7 +34,7 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
 
     @Test
     void shipsAConfirmedOrderOnceAndAnnouncesIt() throws Exception {
-        String orderId = orderIdOf(placeOrder("ada@example.com", SHOE, 1));
+        String orderId = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
 
         assertThat(ship(orderId)).hasStatusOk().bodyJson().extractingPath("$.status").isEqualTo("SHIPPED");
         assertThat(ship(orderId)).hasStatusOk().bodyJson().extractingPath("$.status").isEqualTo("SHIPPED");
@@ -45,7 +45,7 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
 
     @Test
     void aShippedOrderCannotBeCancelled() throws Exception {
-        String orderId = orderIdOf(placeOrder("grace@example.com", SHOE, 1));
+        String orderId = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
         ship(orderId);
 
         assertThat(cancel(orderId, "customer changed their mind")).hasStatus(HttpStatus.CONFLICT)
@@ -56,7 +56,7 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
 
     @Test
     void aCancelledOrderCannotShip() throws Exception {
-        String orderId = orderIdOf(placeOrder("linus@example.com", SHOE, 1));
+        String orderId = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
         cancel(orderId, "customer changed their mind");
 
         assertThat(ship(orderId)).hasStatus(HttpStatus.CONFLICT);
@@ -65,7 +65,7 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
 
     @Test
     void aCancellationDuringTheDispatchWinsAndTheShipmentIsRefused() throws Exception {
-        String orderId = orderIdOf(placeOrder("barbara@example.com", SHOE, 1));
+        String orderId = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
         DEPENDENCIES.stubFor(post("/api/orders/" + orderId + "/dispatch")
                 .willReturn(aResponse().withStatus(204).withFixedDelay(1500)));
 
@@ -83,7 +83,7 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
 
     @Test
     void refusesToShipWhenTheWarehouseNoLongerHasTheStockAndTheOrderCanStillBeCancelled() throws Exception {
-        String orderId = orderIdOf(placeOrder("edsger@example.com", SHOE, 1));
+        String orderId = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
         DEPENDENCIES.stubFor(post("/api/orders/" + orderId + "/dispatch").willReturn(problem(HttpStatus.CONFLICT,
                 "The stock on hand of RUN-SHOE-BLUE-42 no longer covers order " + orderId)));
 
@@ -95,7 +95,7 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
 
     @Test
     void reportsTheCatalogAsUnavailableAndLeavesTheOrderConfirmed() throws Exception {
-        String orderId = orderIdOf(placeOrder("margaret@example.com", SHOE, 1));
+        String orderId = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
         DEPENDENCIES.stubFor(post("/api/orders/" + orderId + "/dispatch")
                 .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
 
@@ -105,10 +105,10 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
 
     @Test
     void theOrderFollowsWhatTheCarrierReportsEvenWhenAReportArrivesTwice() throws Exception {
-        String delivered = orderIdOf(placeOrder("ada@example.com", SHOE, 1));
-        String failed = orderIdOf(placeOrder("ada@example.com", SHOE, 1));
-        String lost = orderIdOf(placeOrder("ada@example.com", SHOE, 1));
-        String notShipped = orderIdOf(placeOrder("ada@example.com", SHOE, 1));
+        String delivered = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
+        String failed = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
+        String lost = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
+        String notShipped = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
         ship(delivered);
         ship(failed);
         ship(lost);
@@ -125,6 +125,11 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
             assertThat(status(lost)).isEqualTo("LOST");
         });
         assertThat(status(notShipped)).isEqualTo("CONFIRMED");
+    }
+
+    /** A customer of its own, so these orders never show up in another test's list of a customer's orders. */
+    private static String newCustomer() {
+        return "shipping-" + UUID.randomUUID() + "@example.com";
     }
 
     private MvcTestResult ship(String orderId) {
