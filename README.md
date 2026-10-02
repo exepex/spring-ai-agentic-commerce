@@ -3,9 +3,10 @@
 **Governed AI agents on top of ordinary Spring Boot microservices**, built with Spring AI, Claude and the Model
 Context Protocol (MCP).
 
-An online outdoor shop, *Trailhead*, runs on plain microservices. Two AI agents work alongside them: a **shopping
-assistant** that customers chat with, and an **order-exceptions agent** that steps in when an order can no longer be
-fulfilled. Every action they take goes through MCP tools whose rules are **enforced in code**, and every step is
+An online outdoor shop, *Trailhead*, runs on plain microservices. Three AI agents work alongside them: a **shopping
+assistant** that customers chat with, an **order-exceptions agent** that steps in when an order can no longer be
+fulfilled, and an **incident agent** that works ServiceNow incidents first and hands them to the right team when it
+cannot finish them. Every action they take goes through MCP tools whose rules are **enforced in code**, and every step is
 **traceable and auditable** afterwards.
 
 ## The idea in one paragraph
@@ -30,9 +31,11 @@ an order was paid. They act only through MCP tools, and the MCP server is the po
 ```mermaid
 flowchart LR
     ui["shop-ui (Angular)<br/>shop · orders · operations"]
-    agent["agent-service<br/>shopping assistant +<br/>order-exceptions agent<br/>(Spring AI + Claude)"]
+    agent["agent-service<br/>shopping assistant +<br/>order-exceptions agent +<br/>incident agent<br/>(Spring AI + Claude)"]
     mcp["commerce-mcp-server<br/>MCP tools + governance:<br/>permissions, limits, approvals,<br/>idempotency, audit trail"]
     slack["Slack MCP server<br/>(third party, one channel)"]
+    snmcp["servicenow-mcp-server<br/>incident tools + poller"]
+    snow["ServiceNow<br/>(incidents, teams)"]
     catalog["catalog-service"]
     orders["order-service<br/>(checkout)"]
     payments["payment-service<br/>(Stripe test mode)"]
@@ -43,6 +46,10 @@ flowchart LR
     ui --> orders & catalog & agent & mcp
     agent -- "MCP (per-agent token)" --> mcp
     agent -- MCP --> slack
+    agent -- "MCP (per-agent token)" --> snmcp
+    snmcp --> snow
+    snmcp -. "kill switch, audit trail" .-> mcp
+    snmcp -- servicenow.incidents --> kafka
     mcp --> catalog & orders & payments & shipping
     orders --> catalog & payments
     orders -- order.events --> kafka
@@ -59,26 +66,29 @@ flowchart LR
 | payment-service | 8083 | Card payments and idempotent refunds through Stripe test mode (or a built-in simulator without a key). Publishes `payment.events` when a refund fails after it was made. Has a simulated-outage switch for the demo. |
 | shipping-service | 8084 | Creates and cancels shipments from order events. |
 | commerce-mcp-server | 8085 | Nine MCP tools over the services, plus the governance API: audit trail, refund approvals, order proposals, customer notifications, escalations. |
-| agent-service | 8086 | The two agents, each with its own MCP connection, allowlist, prompt and effort level. |
+| servicenow-mcp-server | 8087 | Five MCP tools over ServiceNow incidents, governed like the commerce tools. Claims new incidents for the incident agent and publishes `servicenow.incidents`. |
+| agent-service | 8086 | The three agents, each with its own MCP connections, allowlist, prompt and effort level. |
 | shop-ui | 8080 | Angular app served by nginx, which routes `/svc/<service>/` to each service. |
 
-Each agent is defined in one file (model, effort, tools, budget and prompt) that both agent-service and
-commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
+Each agent is defined in one file (model, effort, tools, budget and prompt) that agent-service and the MCP servers
+read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
 
 ### The MCP tools
 
-| Tool | Shopping assistant | Order-exceptions agent |
-|---|---|---|
-| `search_products` | ✅ | |
-| `find_customer_orders` | ✅ (own orders) | |
-| `get_order` | ✅ (own orders) | ✅ |
-| `track_shipment` | ✅ (own orders) | ✅ |
-| `propose_order` | ✅ | |
-| `cancel_order` | ✅ (own orders) | ✅ |
-| `issue_refund` | ✅ (own orders, limit applies) | ✅ (limit applies) |
-| `notify_customer` | | ✅ |
-| `escalate_to_human` | ✅ | ✅ |
-| Slack `conversations_add_message` | | ✅ (one channel) |
+| Tool | Shopping assistant | Order-exceptions agent | Incident agent |
+|---|---|---|---|
+| `search_products` | ✅ | | |
+| `find_customer_orders` | ✅ (own orders) | | ✅ |
+| `get_order` | ✅ (own orders) | ✅ | ✅ |
+| `track_shipment` | ✅ (own orders) | ✅ | ✅ |
+| `propose_order` | ✅ | | |
+| `cancel_order` | ✅ (own orders) | ✅ | ✅ |
+| `issue_refund` | ✅ (own orders, limit applies) | ✅ (limit applies) | ✅ (limit applies) |
+| `notify_customer` | | ✅ | ✅ |
+| `escalate_to_human` | ✅ | ✅ | |
+| ServiceNow `get_incident`, `add_work_note`, `list_teams`, `resolve_incident` | | | ✅ (incidents it is working) |
+| ServiceNow `assign_to_team` | | | ✅ (also when switched off) |
+| Slack `conversations_add_message` | | ✅ (one channel) | ✅ (one channel) |
 
 ## The workflows
 
@@ -105,6 +115,12 @@ commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    operations console: if two people try to take the same escalation, only one gets it and the other is told who
    has it. An order has at most one open escalation, and once it is with a person, agents leave its failed refund to
    them.
+8. **Incident from ServiceNow.** The service desk raises an incident in the agent's assignment group, for example
+   "Order 6f0c… arrived broken, the customer wants their money back". The incident agent claims it, reads it, checks
+   the order, payment and shipment, refunds within its limit, tells the customer, writes what it found and did as
+   work notes, and resolves the incident. When it cannot decide, it hands the incident to the team whose work it is
+   (customer care, payments or fulfilment) with a note of what that team needs to do; ServiceNow notifies the team.
+   It needs a ServiceNow instance; see "ServiceNow incidents" below.
 
 ## Run it
 
@@ -120,6 +136,20 @@ cp .env.example .env        # add your Anthropic API key; Stripe and Slack are o
 
 Without a Stripe key, payments are simulated with Stripe's test-card conventions. Without an Anthropic key, the
 services run but the agents hand everything to the escalation queue.
+
+### ServiceNow incidents
+
+The incident agent needs a ServiceNow instance; a free developer instance (developer.servicenow.com) works. In it:
+
+1. Create the assignment groups: one for the agent (`Online Shop Agent`) and one per team (`Customer Care`,
+   `Payments`, `Fulfilment`). Add people to the team groups; ServiceNow notifies a group when an incident is assigned
+   to it.
+2. Create an integration user for the agent with the `itil` role, and add it to the `Online Shop Agent` group.
+3. Set `AGENTIC_COMMERCE_SERVICENOW_INSTANCE_URL`, `_USERNAME` and `_PASSWORD` in `.env` to that instance and user.
+   Other group names can be set with the variables in `servicenow-mcp-server`'s `application.yml`.
+
+Then raise an incident in the `Online Shop Agent` group, naming an order id or the customer's email. Within half a
+minute the agent claims it.
 
 For development, start only the infrastructure (`docker compose up -d postgres kafka jaeger`), run the services
 from your IDE or with `mvn spring-boot:run`, and the UI with `npm start` in `shop-ui`.
@@ -158,7 +188,11 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
   permissions again on every call.
 - **Deterministic work stays in code.** Which orders a stock-out affects is calculated by the catalog, not guessed by
   a model.
-- **Fail safe, toward a human.** A failed or switched-off agent escalates; it never leaves an order in limbo.
+- **Fail safe, toward a human.** A failed or switched-off agent escalates; it never leaves an order in limbo. The
+  incident agent's incidents always end with an owner: resolved by the agent, or assigned to a team, by the agent, by
+  code when its run fails or ends without either, or by the poller when a claimed incident is not finished in time.
+- **The agent only changes what it owns.** Every ServiceNow tool works only on an incident assigned to the agent's
+  integration user, so it cannot touch incidents that a person or another team owns.
 - **Stock changes lock the product row,** so concurrent reservations and write-offs never reserve more than exists.
 - **No database transaction is held open across remote calls.** Checkout saves the order before charging the card,
   and releases the stock if any step fails.

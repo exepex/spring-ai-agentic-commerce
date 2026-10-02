@@ -16,28 +16,31 @@ README has to work correctly, including the edge cases a real user, operator or 
 ## The demo's agents
 
 Each agent the demo runs is defined in **one file**. The YAML header holds the agent's model, effort, tool-call
-budget, whether it is customer-scoped, and its tools on each MCP server. The Markdown body is its prompt. Both
-agent-service (which runs the agent) and commerce-mcp-server (which enforces its permissions) read the same file.
+budget, whether it is customer-scoped, and its tools on each MCP server. The Markdown body is its prompt.
+agent-service (which runs the agent) and the MCP servers (which enforce its permissions) read the same file.
 
 | Agent | Definition | What it does |
 |---|---|---|
 | `shopping-assistant` | [shopping-assistant.md](agent-definitions/src/main/resources/agents/shopping-assistant.md) | Chats with one signed-in customer: finds products, proposes orders, cancels and refunds their orders. |
 | `order-exceptions-agent` | [order-exceptions-agent.md](agent-definitions/src/main/resources/agents/order-exceptions-agent.md) | Handles a stock-out on a paid order: cancels, refunds, tells the customer, posts to Slack. |
+| `incident-agent` | [incident-agent.md](agent-definitions/src/main/resources/agents/incident-agent.md) | Works ServiceNow incidents first: gathers the facts, fixes what it may, resolves the incident or hands it to the right team. |
 
 Everything else an agent depends on has one home too:
 
 | What | Where |
 |---|---|
-| Each agent's bearer token | Environment variables (see `.env.example`), referenced in both services' `application.yml` |
+| Each agent's bearer token | Environment variables (see `.env.example`), referenced in the `application.yml` of agent-service and each MCP server |
 | The refund approval limit | `commerce.governance.refund-approval-threshold` in [commerce-mcp-server/src/main/resources/application.yml](commerce-mcp-server/src/main/resources/application.yml) |
 | The MCP tools and how each rule is enforced | [CommerceTools](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/tools/CommerceTools.java), [ToolGuard](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/tools/ToolGuard.java) and [AgentRegistry](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/security/AgentRegistry.java) |
 | The Slack MCP server and its channel | `commerce.slack` in [agent-service/src/main/resources/application.yml](agent-service/src/main/resources/application.yml) |
+| The ServiceNow instance, the agent's group and the teams | `commerce.servicenow` in [servicenow-mcp-server/src/main/resources/application.yml](servicenow-mcp-server/src/main/resources/application.yml) |
+| The ServiceNow tools and their rules | [IncidentTools](servicenow-mcp-server/src/main/java/io/github/exepex/commerce/servicenow/incidents/IncidentTools.java) and [ToolGuard](servicenow-mcp-server/src/main/java/io/github/exepex/commerce/servicenow/governance/ToolGuard.java) |
 | The kill switches | Kept and enforced by [AgentSwitches](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/governance/AgentSwitches.java); agent-service reads them through [AgentSwitchboard](agent-service/src/main/java/io/github/exepex/commerce/agent/AgentSwitchboard.java) |
 
 To change an agent's model, effort, tools, budget or prompt, edit its definition file; nothing else needs to change.
 A tool listed there must exist on its MCP server. Adding a new agent also needs code in agent-service that runs it,
-and a token for it in both services' configuration. Both services refuse to start if a definition or a token is
-missing.
+and a token for it in the configuration of agent-service and of each MCP server it uses. They refuse to start if a
+definition or a token is missing.
 
 ## Review guidelines
 

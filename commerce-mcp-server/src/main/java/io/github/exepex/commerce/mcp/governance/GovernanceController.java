@@ -36,6 +36,13 @@ class GovernanceController {
     record AgentDecision(UUID orderId, @NotBlank String summary, String reasoning, String model, Long inputTokens,
             Long outputTokens, Long durationMillis) {}
 
+    /**
+     * A tool call an agent made on another MCP server, such as ServiceNow's, reported by that server with the
+     * agent's own token. {@code action} is the tool, prefixed with the server's name.
+     */
+    record ToolCallReport(UUID orderId, @NotBlank @Size(max = 100) String action, @NotNull AuditEvent.Outcome outcome,
+            @NotBlank String summary, String details) {}
+
     private final AuditTrail audit;
     private final RefundService refunds;
     private final ProposalService proposals;
@@ -135,6 +142,13 @@ class GovernanceController {
     @PutMapping("/api/agent-switches/{agentId}")
     Map<String, Boolean> switchAgent(@PathVariable String agentId, @Valid @RequestBody SwitchChange change) {
         return switches.set(agentId, change.enabled(), change.by());
+    }
+
+    @PostMapping("/api/agent/tool-calls")
+    void recordToolCall(@RequestAttribute(AgentAuthenticationFilter.AGENT_ID_ATTRIBUTE) String agentId,
+            @Valid @RequestBody ToolCallReport call) {
+        audit.record(call.orderId(), AuditEvent.ActorType.AGENT, agentId, call.action(), call.outcome(), call.summary(),
+                call.details());
     }
 
     /** An agent records why it did what it did, with the model and token usage behind it. */

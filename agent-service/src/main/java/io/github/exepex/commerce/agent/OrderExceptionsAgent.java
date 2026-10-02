@@ -22,14 +22,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class OrderExceptionsAgent {
 
-    /** Neither the agent nor a person got the order: Kafka keeps delivering the stock-out until one does. */
-    static final class HandOffFailedException extends IllegalStateException {
-
-        HandOffFailedException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-
     private static final Logger LOGGER = LoggerFactory.getLogger(OrderExceptionsAgent.class);
 
     private final ChatClient chatClient;

@@ -36,6 +36,7 @@ spring:
 commerce:
   topics:
     stock-out: inventory.stock-out
+    incidents: servicenow.incidents
   # Where the agents connect and with which tokens. What each agent is (model, effort, tools, budget, prompt) is in
   # its definition in agent-definitions/src/main/resources/agents.
   agents:
@@ -44,11 +45,16 @@ commerce:
       token: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:dev-shopping-assistant-token}
     order-exceptions-agent:
       token: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:dev-order-exceptions-agent-token}
+    incident-agent:
+      token: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:dev-incident-agent-token}
   slack:
     # The Slack MCP server and the one channel agents may post in. Leave the URL empty to run without Slack.
     mcp-url: ${AGENTIC_COMMERCE_SLACK_MCP_URL:}
     api-key: ${AGENTIC_COMMERCE_SLACK_MCP_API_KEY:dev-slack-mcp-key}
     channel-id: ${AGENTIC_COMMERCE_SLACK_CHANNEL_ID:}
+  servicenow:
+    # The ServiceNow MCP server, which feeds incidents to the incident agent. Leave it empty to run without ServiceNow.
+    mcp-url: ${AGENTIC_COMMERCE_SERVICENOW_MCP_URL:}
 
 management:
   otlp:

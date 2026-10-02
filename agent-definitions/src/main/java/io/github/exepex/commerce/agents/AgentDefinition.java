@@ -14,11 +14,13 @@ import java.util.List;
  * @param customerScoped whether the agent acts for one customer and may only touch that customer's orders
  * @param commerceTools the commerce MCP tools the agent may call
  * @param slackTools the Slack MCP tools the agent may call, if Slack is configured
+ * @param servicenowTools the ServiceNow MCP tools the agent may call, if ServiceNow is configured
  * @param instructions the system prompt
  * @param slackInstructions the extra step added to the prompt when Slack is configured, or empty
  */
 public record AgentDefinition(String id, String model, String effort, int toolCallBudget, boolean customerScoped,
-        List<String> commerceTools, List<String> slackTools, String instructions, String slackInstructions) {
+        List<String> commerceTools, List<String> slackTools, List<String> servicenowTools, String instructions,
+        String slackInstructions) {
 
     /** Where the Slack step goes in the instructions; {@value #SLACK_CHANNEL} inside it becomes the channel id. */
     public static final String SLACK_STEP = "{slackStep}";

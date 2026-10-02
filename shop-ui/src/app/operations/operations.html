@@ -106,6 +106,9 @@
             <span class="chip" [class.ok]="view.slackConfigured" [class.warn]="!view.slackConfigured">
               {{ view.slackConfigured ? 'Slack connected' : 'Slack off' }}
             </span>
+            <span class="chip" [class.ok]="view.servicenowConfigured" [class.warn]="!view.servicenowConfigured">
+              {{ view.servicenowConfigured ? 'ServiceNow connected' : 'ServiceNow off' }}
+            </span>
           </div>
           @for (agent of view.agents; track agent.id) {
             <div class="item">

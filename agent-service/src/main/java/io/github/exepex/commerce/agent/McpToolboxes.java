@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Connects each agent to its MCP servers with its own credentials, and hands it only the tools on its allowlist.
- * The commerce MCP server checks the same permissions again on every call.
+ * The commerce and ServiceNow MCP servers check the same permissions again on every call.
  *
  * <p>Connections open on first use and are reopened after a failure, so the agents start even when an MCP server is
  * not up yet, and carry on after it restarts.
@@ -35,6 +35,7 @@ class McpToolboxes {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpToolboxes.class);
     private static final String SLACK = "slack";
+    private static final String SERVICENOW = "servicenow";
     /** The commerce MCP server enforces the kill switch on every call itself. */
     private static final BooleanSupplier ENFORCED_BY_THE_SERVER = () -> true;
 
@@ -74,6 +75,32 @@ class McpToolboxes {
             }
         }
         return tools;
+    }
+
+    /** The incident agent's tools: the shop's, ServiceNow's and, when configured, Slack's. */
+    List<ToolCallback> incidentAgentTools() {
+        AgentDefinition agent = definitions.get(AgentSwitchboard.INCIDENT_AGENT);
+        List<ToolCallback> tools = new ArrayList<>(toolsFrom(AgentSwitchboard.INCIDENT_AGENT,
+                () -> commerceClient(AgentSwitchboard.INCIDENT_AGENT), agent.commerceTools(), agent.customerScoped(),
+                ENFORCED_BY_THE_SERVER));
+        tools.addAll(toolsFrom(SERVICENOW, () -> servicenowClient(AgentSwitchboard.INCIDENT_AGENT), agent.servicenowTools(),
+                false, ENFORCED_BY_THE_SERVER));
+        if (properties.slack().isConfigured() && !agent.slackTools().isEmpty()) {
+            try {
+                tools.addAll(toolsFrom(SLACK, this::slackClient, agent.slackTools(), false,
+                        () -> isSwitchedOn(AgentSwitchboard.INCIDENT_AGENT)));
+            } catch (RuntimeException slackDown) {
+                LOGGER.warn("Slack MCP server unavailable; the agent runs without Slack", slackDown);
+                clients.remove(SLACK);
+            }
+        }
+        return tools;
+    }
+
+    /** Calls a ServiceNow tool directly as the incident agent, without a model: to hand an incident to a team. */
+    McpSchema.CallToolResult callAsIncidentAgent(String tool, Map<String, Object> arguments) {
+        return onLiveConnection(SERVICENOW, () -> servicenowClient(AgentSwitchboard.INCIDENT_AGENT),
+                client -> client.callTool(new McpSchema.CallToolRequest(tool, arguments)));
     }
 
     /** Calls a commerce tool directly, without a model: used when an agent is switched off or fails. */
@@ -133,6 +160,10 @@ class McpToolboxes {
 
     private McpSyncClient commerceClient(String agentId) {
         return connect(agentId, properties.agents().mcpUrl(), properties.agents().tokenOf(agentId));
+    }
+
+    private McpSyncClient servicenowClient(String agentId) {
+        return connect(SERVICENOW, properties.servicenow().mcpUrl(), properties.agents().tokenOf(agentId));
     }
 
     private McpSyncClient slackClient() {

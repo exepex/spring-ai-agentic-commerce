@@ -8,22 +8,27 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @param agents the commerce MCP server and each agent's credentials
  * @param slack the Slack MCP server and the one channel agents may post in
+ * @param servicenow the ServiceNow MCP server
  */
 @ConfigurationProperties("commerce")
-public record AgentProperties(Agents agents, Slack slack) {
+public record AgentProperties(Agents agents, Slack slack, ServiceNow servicenow) {
 
     /**
      * @param mcpUrl the commerce MCP server
      * @param shoppingAssistant the shopping assistant's credentials
      * @param orderExceptionsAgent the order-exceptions agent's credentials
+     * @param incidentAgent the incident agent's credentials
      */
-    public record Agents(String mcpUrl, Agent shoppingAssistant, Agent orderExceptionsAgent) {
+    public record Agents(String mcpUrl, Agent shoppingAssistant, Agent orderExceptionsAgent, Agent incidentAgent) {
 
-        /** The bearer token the given agent presents to the MCP server. */
+        /** The bearer token the given agent presents to the MCP servers. */
         public String tokenOf(String agentId) {
-            return AgentSwitchboard.SHOPPING_ASSISTANT.equals(agentId)
-                    ? shoppingAssistant.token()
-                    : orderExceptionsAgent.token();
+            return switch (agentId) {
+                case AgentSwitchboard.SHOPPING_ASSISTANT -> shoppingAssistant.token();
+                case AgentSwitchboard.ORDER_EXCEPTIONS_AGENT -> orderExceptionsAgent.token();
+                case AgentSwitchboard.INCIDENT_AGENT -> incidentAgent.token();
+                default -> throw new IllegalArgumentException("Unknown agent " + agentId);
+            };
         }
     }
 
@@ -39,6 +44,14 @@ public record AgentProperties(Agents agents, Slack slack) {
 
         public boolean isConfigured() {
             return mcpUrl != null && !mcpUrl.isBlank() && channelId != null && !channelId.isBlank();
+        }
+    }
+
+    /** @param mcpUrl the ServiceNow MCP server; empty to run without ServiceNow */
+    public record ServiceNow(String mcpUrl) {
+
+        public boolean isConfigured() {
+            return mcpUrl != null && !mcpUrl.isBlank();
         }
     }
 }
