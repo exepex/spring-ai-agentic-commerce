@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agents.AgentDefinitions;
 import java.time.Duration;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -16,29 +17,25 @@ class DecisionRecorder {
 
     private final GovernanceApi governance;
     private final AgentProperties properties;
+    private final AgentDefinitions definitions;
 
-    DecisionRecorder(GovernanceApi governance, AgentProperties properties) {
+    DecisionRecorder(GovernanceApi governance, AgentProperties properties, AgentDefinitions definitions) {
         this.governance = governance;
         this.properties = properties;
+        this.definitions = definitions;
     }
 
     void record(String agentId, UUID orderId, String summary, String reasoning, ChatResponse response, Duration took) {
         Usage usage = response == null ? null : response.getMetadata().getUsage();
         GovernanceApi.Decision decision = new GovernanceApi.Decision(orderId, summary, reasoning,
-                properties.agents().model(),
+                definitions.get(agentId).model(),
                 usage == null ? null : usage.getPromptTokens().longValue(),
                 usage == null ? null : usage.getCompletionTokens().longValue(),
                 took.toMillis());
         try {
-            governance.recordDecision("Bearer " + tokenOf(agentId), decision);
+            governance.recordDecision("Bearer " + properties.agents().tokenOf(agentId), decision);
         } catch (RuntimeException unavailable) {
             LOGGER.warn("Could not record {}'s decision in the audit trail: {}", agentId, summary, unavailable);
         }
-    }
-
-    private String tokenOf(String agentId) {
-        return AgentSwitchboard.SHOPPING_ASSISTANT.equals(agentId)
-                ? properties.agents().shoppingAssistant().token()
-                : properties.agents().orderExceptionsAgent().token();
     }
 }

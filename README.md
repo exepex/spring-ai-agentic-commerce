@@ -61,6 +61,9 @@ flowchart LR
 | agent-service | 8086 | The two agents, each with its own MCP connection, allowlist, prompt, effort level and kill switch. |
 | shop-ui | 8080 | Angular app served by nginx, which routes `/svc/<service>/` to each service. |
 
+Each agent is defined in one file (model, effort, tools, budget and prompt) that both agent-service and
+commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
+
 ### The MCP tools
 
 | Tool | Shopping assistant | Order-exceptions agent |

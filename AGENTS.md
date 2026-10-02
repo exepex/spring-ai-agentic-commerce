@@ -1,7 +1,8 @@
 # Instructions for AI agents and reviewers
 
-This file is read by code-review agents (Codex) and coding agents (Claude Code). It says what this repository is,
-which review findings are wanted, and how changes are made.
+This file is the one place for everything AI agents follow in this repository. Code-review agents (Codex) and coding
+agents (Claude Code, through `CLAUDE.md`) read it. It says what this repository is, where the demo's own agents are
+defined, which review findings are wanted, and how changes are made.
 
 ## What this repository is
 
@@ -11,6 +12,32 @@ server that enforces the rules, and an audit trail. The README describes the ser
 It is a demo, not a production system. Each service runs as one instance, and some production concerns are
 deliberately left out (see "Design decisions" in the README). But it must be a **good** demo: every workflow in the
 README has to work correctly, including the edge cases a real user, operator or model can cause.
+
+## The demo's agents
+
+Each agent the demo runs is defined in **one file**. The YAML header holds the agent's model, effort, tool-call
+budget, whether it is customer-scoped, and its tools on each MCP server. The Markdown body is its prompt. Both
+agent-service (which runs the agent) and commerce-mcp-server (which enforces its permissions) read the same file.
+
+| Agent | Definition | What it does |
+|---|---|---|
+| `shopping-assistant` | [shopping-assistant.md](agent-definitions/src/main/resources/agents/shopping-assistant.md) | Chats with one signed-in customer: finds products, proposes orders, cancels and refunds their orders. |
+| `order-exceptions-agent` | [order-exceptions-agent.md](agent-definitions/src/main/resources/agents/order-exceptions-agent.md) | Handles a stock-out on a paid order: cancels, refunds, tells the customer, posts to Slack. |
+
+Everything else an agent depends on has one home too:
+
+| What | Where |
+|---|---|
+| Each agent's bearer token | Environment variables (see `.env.example`), referenced in both services' `application.yml` |
+| The refund approval limit | `commerce.governance.refund-approval-threshold` in [commerce-mcp-server/src/main/resources/application.yml](commerce-mcp-server/src/main/resources/application.yml) |
+| The MCP tools and how each rule is enforced | [CommerceTools](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/tools/CommerceTools.java), [ToolGuard](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/tools/ToolGuard.java) and [AgentRegistry](commerce-mcp-server/src/main/java/io/github/exepex/commerce/mcp/security/AgentRegistry.java) |
+| The Slack MCP server and its channel | `commerce.slack` in [agent-service/src/main/resources/application.yml](agent-service/src/main/resources/application.yml) |
+| The kill switches | [AgentSwitchboard](agent-service/src/main/java/io/github/exepex/commerce/agent/AgentSwitchboard.java) |
+
+To change an agent's model, effort, tools, budget or prompt, edit its definition file; nothing else needs to change.
+A tool listed there must exist on its MCP server. Adding a new agent also needs code in agent-service that runs it,
+and a token for it in both services' configuration. Both services refuse to start if a definition or a token is
+missing.
 
 ## Review guidelines
 
