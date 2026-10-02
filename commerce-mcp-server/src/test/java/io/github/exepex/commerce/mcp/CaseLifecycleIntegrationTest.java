@@ -139,6 +139,24 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void whatWasRaisedAgainButNeverReachedAResolvedIncidentGoesToANewCase() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        handOff(orderId, "first");
+        String caseId = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", caseId, Map.of("number", "INC0010003"));
+        handOff(orderId, "the customer called again");
+
+        assertThat(followIncident(caseId, "INC0010003", "RESOLVED", "Online Shop Agent")).isEqualTo(200);
+
+        List<String> statuses = JsonPath.read(cases(orderId), "$[*].status");
+        assertThat(statuses).containsExactly("RESOLVED", "PENDING");
+        String outgoing = outgoingFor(orderId);
+        assertThat((List<String>) JsonPath.read(outgoing, "$[*].supportCase.id")).doesNotContain(caseId);
+        assertThat((String) JsonPath.read(outgoing, "$[0].supportCase.description"))
+                .isEqualTo("Raised again after INC0010003 was resolved: the customer called again");
+    }
+
+    @Test
     void whileATeamHasTheOrdersIncidentAgentsLeaveItsMoneyAloneButAPersonCanRetryTheRefund() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));

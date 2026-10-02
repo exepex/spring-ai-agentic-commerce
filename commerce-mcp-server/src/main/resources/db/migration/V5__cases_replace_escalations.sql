@@ -1,6 +1,5 @@
 -- Every problem that needs handling is a case, worked as a ServiceNow incident; a hand-off to people is the incident's
--- assignment to a team. The escalation queue it replaces goes away.
-drop table escalation;
+-- assignment to a team. The escalation queue it replaces goes away, once its unresolved work is carried over below.
 
 create table support_case (
     id                uuid primary key,
@@ -38,3 +37,19 @@ create table case_event (
     order_id         uuid not null,
     primary key (source_event_id, order_id)
 );
+
+-- Work still waiting in the escalation queue becomes a pending hand-off case, so it reaches ServiceNow and is not lost.
+-- An order gets one case, from its oldest unresolved escalation, as an order has at most one open case of a type.
+insert into support_case (id, order_id, type, status, title, description, raised_by, created_at, updated_at)
+select distinct on (coalesce(order_id::text, id::text))
+       id, order_id, 'HANDOFF', 'PENDING',
+       '[HANDOFF] ' || case when order_id is null then 'A request ' else 'Order ' || left(order_id::text, 8) || ' ' end
+           || 'needs a person',
+       summary || case when assigned_to is null then ''
+                       else ' (It was assigned to ' || assigned_to || ' in the escalation queue.)' end,
+       raised_by, created_at, created_at
+from escalation
+where status <> 'RESOLVED'
+order by coalesce(order_id::text, id::text), created_at;
+
+drop table escalation;

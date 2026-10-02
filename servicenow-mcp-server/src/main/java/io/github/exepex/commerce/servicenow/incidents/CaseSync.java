@@ -4,6 +4,7 @@ import io.github.exepex.commerce.servicenow.ServiceNowProperties;
 import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -48,16 +49,28 @@ class CaseSync {
                 if (number == null || number.isBlank()) {
                     number = openIncident(supportCase);
                 }
-                for (GovernanceApi.Note note : outgoing.unsentNotes()) {
-                    String incidentNumber = number;
-                    ServiceNowClient.Incident incident = serviceNow.findByNumber(number)
-                            .orElseThrow(() -> new IllegalStateException("Incident " + incidentNumber + " is gone"));
-                    serviceNow.update(incident.sysId(), Map.of("work_notes", note.text()));
-                    governance.markNoteSent(authorization(), supportCase.id(), note.id());
+                if (!outgoing.unsentNotes().isEmpty()) {
+                    sendNotes(supportCase, number, outgoing.unsentNotes());
                 }
             } catch (RuntimeException failure) {
                 LOGGER.warn("Could not send case {} to ServiceNow; trying again next time", supportCase.id(), failure);
             }
+        }
+    }
+
+    /**
+     * Sends the notes as work notes. An incident already resolved gets none: nobody reads it any more. The shop learns
+     * of the resolution from the read-back and opens a new case for the notes that did not reach it.
+     */
+    private void sendNotes(GovernanceApi.Case supportCase, String number, List<GovernanceApi.Note> notes) {
+        ServiceNowClient.Incident incident = serviceNow.findByNumber(number)
+                .orElseThrow(() -> new IllegalStateException("Incident " + number + " is gone"));
+        if (ServiceNowClient.STATES_FINISHED.contains(incident.state())) {
+            return;
+        }
+        for (GovernanceApi.Note note : notes) {
+            serviceNow.update(incident.sysId(), Map.of("work_notes", note.text()));
+            governance.markNoteSent(authorization(), supportCase.id(), note.id());
         }
     }
 
@@ -111,11 +124,15 @@ class CaseSync {
         if (ServiceNowClient.STATES_FINISHED.contains(incident.state())) {
             return new GovernanceApi.IncidentState(incident.number(), RESOLVED, incident.assignmentGroup());
         }
-        if (properties.agentGroup().equals(incident.assignmentGroup())) {
+        boolean takenByAPerson = incident.isAssigned()
+                && !serviceNow.integrationUserSysId().equals(incident.assignedToSysId());
+        if (properties.agentGroup().equals(incident.assignmentGroup()) && !takenByAPerson) {
             return new GovernanceApi.IncidentState(incident.number(), WITH_AGENT, incident.assignmentGroup());
         }
+        // A person who took the incident has it, even while it is still in the agent's group.
         String group = incident.assignmentGroup().isBlank() ? "no group" : incident.assignmentGroup();
-        return new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, group);
+        String owner = takenByAPerson ? group + " (" + incident.assignedTo() + ")" : group;
+        return new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, owner);
     }
 
     private void report(UUID caseId, GovernanceApi.IncidentState state) {

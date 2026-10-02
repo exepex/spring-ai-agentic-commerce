@@ -343,14 +343,17 @@ class ServiceNowMcpServerIntegrationTest {
         String withAgent = UUID.randomUUID().toString();
         String withTeam = UUID.randomUUID().toString();
         String resolved = UUID.randomUUID().toString();
+        String takenByAPerson = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
         SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("""
                 [{"id": "%s", "incidentNumber": "INC0010011"}, {"id": "%s", "incidentNumber": "INC0010012"},
-                 {"id": "%s", "incidentNumber": "INC0010013"}]""".formatted(withAgent, withTeam, resolved))));
+                 {"id": "%s", "incidentNumber": "INC0010013"}, {"id": "%s", "incidentNumber": "INC0010014"}]"""
+                .formatted(withAgent, withTeam, resolved, takenByAPerson))));
         stubIncident("INC0010011", "sys-11", "2", "Online Shop Agent", AGENT_USER, withAgent, Instant.now());
         stubIncident("INC0010012", "sys-12", "2", "Payments", "", withTeam, Instant.now());
         stubIncident("INC0010013", "sys-13", "7", "Payments", "", resolved, Instant.now());
+        stubIncident("INC0010014", "sys-14", "2", "Online Shop Agent", "desk-ana", takenByAPerson, Instant.now());
 
         poller.poll();
 
@@ -362,6 +365,27 @@ class ServiceNowMcpServerIntegrationTest {
                         {"number": "INC0010012", "status": "WITH_TEAM", "assignmentGroup": "Payments"}""")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + resolved + "/incident-state"))
                 .withRequestBody(matchingJsonPath("$.status", equalTo("RESOLVED"))));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + takenByAPerson + "/incident-state"))
+                .withRequestBody(equalToJson("""
+                        {"number": "INC0010014", "status": "WITH_TEAM",
+                         "assignmentGroup": "Online Shop Agent (Incident Agent)"}""")));
+    }
+
+    @Test
+    void notesForAnIncidentAlreadyResolvedAreNotSentThere() {
+        String caseId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010015"},
+                  "unsentNotes": [{"id": "%s", "text": "The customer called again."}]}]"""
+                .formatted(caseId, UUID.randomUUID()))));
+        stubIncident("INC0010015", "sys-15", "6", "Online Shop Agent", "", caseId, Instant.now());
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-15")));
+        SERVICES.verify(0, postRequestedFor(urlPathMatching("/api/agent/cases/.*/notes/.*/sent")));
     }
 
     @Test

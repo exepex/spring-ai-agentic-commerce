@@ -89,10 +89,7 @@ public class CaseService {
         Instant now = Instant.now(clock);
         if (orderId != null) {
             // Two raises of the same problem at once must not each miss the other's case.
-            jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:key, 2))")
-                    .param("key", orderId + "/" + type)
-                    .query((row, number) -> number)
-                    .single();
+            lockProblem(orderId, type);
             Optional<SupportCase> open = cases.findByOrderIdAndTypeAndStatusNot(orderId, type,
                     SupportCase.Status.RESOLVED);
             if (open.isPresent()) {
@@ -168,6 +165,10 @@ public class CaseService {
      * Takes over who has the case's incident: the agent, a team, or nobody any more because it is resolved. Recorded
      * on the order's timeline when it changes. Only the case's own incident counts: an incident whose Correlation
      * display field was edited to name another case cannot change that case.
+     *
+     * <p>Notes that had not reached the incident when it was resolved would never be read there, so they go to a new
+     * case of the same problem. This holds the same lock as raising the problem, so a raise either lands before the
+     * resolution, and is carried over, or after it, and opens the new case.
      */
     @Transactional
     public SupportCase followIncident(UUID caseId, String number, SupportCase.Status status, String assignmentGroup) {
@@ -179,6 +180,9 @@ public class CaseService {
             throw new GovernanceException(HttpStatus.CONFLICT, "Incident " + number + " is not the incident of case "
                     + caseId);
         }
+        if (supportCase.getOrderId() != null) {
+            lockProblem(supportCase.getOrderId(), supportCase.getType());
+        }
         if (supportCase.followIncident(status, assignmentGroup, Instant.now(clock))) {
             String incident = supportCase.getIncidentNumber();
             String summary = switch (status) {
@@ -189,8 +193,31 @@ public class CaseService {
             };
             audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, "follow_incident",
                     AuditEvent.Outcome.SUCCEEDED, summary, null);
+            if (status == SupportCase.Status.RESOLVED) {
+                carryOverUnsentNotes(supportCase);
+            }
         }
         return supportCase;
+    }
+
+    /** Opens a new case of the same problem for the notes a resolved incident never got. */
+    private void carryOverUnsentNotes(SupportCase resolved) {
+        List<CaseNote> unsent = notes.findByCaseIdAndSentAtIsNullOrderByCreatedAt(resolved.getId());
+        if (unsent.isEmpty()) {
+            return;
+        }
+        String details = "Raised again after " + resolved.getIncidentNumber() + " was resolved: "
+                + String.join(" | ", unsent.stream().map(CaseNote::getText).toList());
+        notes.deleteAll(unsent);
+        openOrAddTo(resolved.getType(), resolved.getOrderId(), details, AuditEvent.ActorType.SYSTEM, SERVICENOW);
+    }
+
+    /** Serializes everything that opens, adds to or resolves the order's case of this type. */
+    private void lockProblem(UUID orderId, CaseType type) {
+        jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:key, 2))")
+                .param("key", orderId + "/" + type)
+                .query((row, number) -> number)
+                .single();
     }
 
     public List<SupportCase> unresolved() {
@@ -203,10 +230,6 @@ public class CaseService {
 
     public List<SupportCase> forOrder(UUID orderId) {
         return cases.findByOrderIdOrderByCreatedAt(orderId);
-    }
-
-    public List<CaseNote> notesOf(UUID caseId) {
-        return notes.findByCaseIdOrderByCreatedAt(caseId);
     }
 
     private SupportCase find(UUID caseId) {

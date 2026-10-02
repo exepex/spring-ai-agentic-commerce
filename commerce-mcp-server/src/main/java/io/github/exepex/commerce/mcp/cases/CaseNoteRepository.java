@@ -8,5 +8,5 @@ interface CaseNoteRepository extends JpaRepository<CaseNote, UUID> {
 
     List<CaseNote> findBySentAtIsNullOrderByCreatedAt();
 
-    List<CaseNote> findByCaseIdOrderByCreatedAt(UUID caseId);
+    List<CaseNote> findByCaseIdAndSentAtIsNullOrderByCreatedAt(UUID caseId);
 }
