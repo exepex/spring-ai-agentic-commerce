@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -29,6 +30,9 @@ class PaymentApiIntegrationTest {
 
     @Autowired
     private RefundReconciler refundReconciler;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @AfterEach
     void endAnyOutage() {
@@ -83,6 +87,21 @@ class PaymentApiIntegrationTest {
         assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(100.0);
         assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("FAILED");
         assertThat(refund(orderId, "40.00", "refund-fails-" + orderId)).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    void onlyRefundsOfPaymentsTheCurrentProcessorTookAreChecked() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "100.00", "pm_card_refundFail");
+        refund(orderId, "40.00", "refund-other-processor-" + orderId);
+        // As if the payment had been taken through Stripe before the demo was switched to the simulator.
+        jdbc.update("update payments.payment set provider = 'stripe' where order_id = ?", orderId);
+
+        refundReconciler.reconcile();
+
+        MvcTestResult payment = mockMvc.get().uri("/api/payments/{orderId}", orderId).exchange();
+        assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(60.0);
+        assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("SUCCEEDED");
     }
 
     @Test
