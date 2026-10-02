@@ -122,12 +122,14 @@ public class IncidentPoller {
 
     /**
      * Gives a claim back, so the next poll claims and announces the incident again: but only while it is still the
-     * agent's claim. A person who took the incident while Kafka was refusing the announcement keeps it.
+     * agent's claim. A person who took the incident, or moved it to another group, while Kafka was refusing the
+     * announcement keeps it.
      */
     private void giveBack(String number) {
         ServiceNowClient.Incident incident = serviceNow.findByNumber(number).orElse(null);
         if (incident == null || !serviceNow.integrationUserSysId().equals(incident.assignedToSysId())
-                || !ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())) {
+                || !ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())
+                || !properties.agentGroup().equals(incident.assignmentGroup())) {
             LOGGER.info("Incident {} is no longer the agent's claim, so it is not given back", number);
             return;
         }

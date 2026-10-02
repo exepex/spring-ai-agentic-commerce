@@ -72,4 +72,22 @@ class IncidentPollerTest {
 
         verify(serviceNow, never()).update("sys-1", Map.of("assigned_to", "", "state", ServiceNowClient.STATE_NEW));
     }
+
+    @Test
+    void anIncidentMovedToAnotherGroupWhileKafkaRefusedTheAnnouncementStaysThere() {
+        ServiceNowClient.Incident takenByAPerson = new ServiceNowClient.Incident("sys-1", "INC0010001",
+                "Order arrived broken", "", ServiceNowClient.STATE_IN_PROGRESS, "In Progress", "Payments",
+                "agent-sys-id", "Agent", "Ada", "", "", null, null);
+        when(serviceNow.integrationUserSysId()).thenReturn("agent-sys-id");
+        when(serviceNow.findClaimedByAgent()).thenReturn(List.of());
+        when(serviceNow.findNewForAgent()).thenReturn(List.of(NEW_INCIDENT));
+        when(serviceNow.findByNumber("INC0010001")).thenReturn(Optional.of(NEW_INCIDENT), Optional.of(takenByAPerson));
+        when(kafka.send(eq("servicenow.incidents"), eq("INC0010001"), any()))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("Kafka is down")));
+
+        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", governance,
+                mock(AgentRegistry.class), Clock.systemUTC()).poll();
+
+        verify(serviceNow, never()).update("sys-1", Map.of("assigned_to", "", "state", ServiceNowClient.STATE_NEW));
+    }
 }
