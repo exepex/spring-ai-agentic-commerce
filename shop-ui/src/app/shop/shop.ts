@@ -88,9 +88,23 @@ export class Shop {
         this.replaceProposal(confirmed);
         this.confirming.set(null);
         this.refresh();
+        this.followWhileConfirming(confirmed);
       },
       error: () => this.confirming.set(null),
     });
+  }
+
+  /** Another tab may be placing this order; check again until it is confirmed or failed. */
+  private followWhileConfirming(proposal: Proposal): void {
+    if (proposal.status !== 'CONFIRMING') {
+      return;
+    }
+    setTimeout(() => {
+      this.api.proposal(proposal.id).subscribe((latest) => {
+        this.replaceProposal(latest);
+        this.followWhileConfirming(latest);
+      });
+    }, 2000);
   }
 
   private addAssistantMessage(text: string, proposals: Proposal[]): void {

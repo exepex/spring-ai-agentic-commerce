@@ -254,7 +254,7 @@ class CommerceMcpServerIntegrationTest {
                 Map.of("summary", "payments keep failing"))), "$.id");
 
         int status = rest().post().uri("/api/escalations/{id}/resolve", escalationId)
-                .contentType(MediaType.APPLICATION_JSON).body(Map.of("by", "ops@example.com", "note", "x".repeat(1001)))
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("by", "ops@example.com", "note", "resolved ".repeat(112)))
                 .exchange((request, response) -> response.getStatusCode().value());
 
         assertThat(status).isEqualTo(422);
@@ -262,7 +262,36 @@ class CommerceMcpServerIntegrationTest {
         assertThat((List<String>) JsonPath.read(escalations, "$[?(@.id == '" + escalationId + "')].status"))
                 .containsExactly("OPEN");
         String audit = rest().get().uri("/api/audit-events").retrieve().body(String.class);
-        assertThat(audit).doesNotContain("x".repeat(1001));
+        assertThat(audit).doesNotContain("resolved ".repeat(112));
+    }
+
+    @Test
+    void anApprovalNoteTooLongToStoreIsRefusedBeforeAnyMoneyMoves() {
+        UUID orderId = stubOrder("ada@example.com", "129.90");
+        stubRefundSucceeds(orderId);
+        String requestId = JsonPath.read(text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 129.90, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId))), "$.refundRequestId");
+
+        int status = rest().post().uri("/api/refund-requests/{id}/approve", requestId)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("by", "ops@example.com", "note", "x".repeat(1001)))
+                .exchange((request, response) -> response.getStatusCode().value());
+
+        assertThat(status).isEqualTo(422);
+        SERVICES.verify(0, postRequestedFor(urlEqualTo("/api/payments/" + orderId + "/refunds")));
+        String requests = rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve().body(String.class);
+        assertThat((String) JsonPath.read(requests, "$[0].status")).isEqualTo("PENDING_APPROVAL");
+    }
+
+    @Test
+    void anIdempotencyKeyTooLongToStoreIsRefused() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
+
+        McpSchema.CallToolResult refused = call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 39.50, "reason", "item out of stock", "idempotencyKey", "k".repeat(201)));
+
+        assertThat(refused.isError()).isTrue();
+        SERVICES.verify(0, postRequestedFor(urlEqualTo("/api/payments/" + orderId + "/refunds")));
     }
 
     @Test

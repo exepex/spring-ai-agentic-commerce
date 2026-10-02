@@ -116,7 +116,7 @@ export interface Proposal {
   lines: ProposedLine[];
   total: number;
   currency: string;
-  status: 'PROPOSED' | 'CONFIRMED' | 'FAILED';
+  status: 'PROPOSED' | 'CONFIRMING' | 'CONFIRMED' | 'FAILED';
   orderId: string | null;
   failure: string | null;
 }
@@ -216,6 +216,10 @@ export class Api {
     return this.http.post<RefundRequest>(`${GOVERNANCE}/refund-requests/${requestId}/${decision}`, { by, note });
   }
 
+  proposal(proposalId: string): Observable<Proposal> {
+    return this.http.get<Proposal>(`${GOVERNANCE}/order-proposals/${proposalId}`);
+  }
+
   confirmProposal(proposalId: string, paymentMethod: string): Observable<Proposal> {
     return this.http.post<Proposal>(`${GOVERNANCE}/order-proposals/${proposalId}/confirm`, { paymentMethod });
   }
@@ -224,8 +228,8 @@ export class Api {
     return this.http.get<CustomerNotification[]>(`${GOVERNANCE}/notifications${orderId ? `?orderId=${orderId}` : ''}`);
   }
 
-  escalations(): Observable<Escalation[]> {
-    return this.http.get<Escalation[]>(`${GOVERNANCE}/escalations`);
+  escalations(status?: string): Observable<Escalation[]> {
+    return this.http.get<Escalation[]>(`${GOVERNANCE}/escalations${status ? `?status=${status}` : ''}`);
   }
 
   resolveEscalation(escalationId: string, by: string, note: string): Observable<Escalation> {

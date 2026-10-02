@@ -57,14 +57,13 @@ final class AgentToolCallback implements ToolCallback {
             arguments.put(CUSTOMER_EMAIL, run.customerEmail());
             input = JSON.writeValueAsString(arguments);
         }
+        // A call the MCP server refused throws here, so only successful calls are recorded.
         String result = mcpTool.call(input);
-        if ("propose_order".equals(definition.name())) {
-            run.recordProposal(textOf(result));
-        }
+        run.recordSuccess(definition.name(), textOf(result));
         return result;
     }
 
-    /** An MCP tool result reaches us as its JSON content list; the proposal is the text of its text content. */
+    /** An MCP tool result reaches us as its JSON content list; what the tool returned is the text of its content. */
     private static String textOf(String mcpContent) {
         StringBuilder text = new StringBuilder();
         for (JsonNode content : JSON.readTree(mcpContent)) {

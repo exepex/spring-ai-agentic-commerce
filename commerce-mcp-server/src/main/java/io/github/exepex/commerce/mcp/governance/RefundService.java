@@ -34,6 +34,10 @@ public class RefundService {
     /** The longest reason the payment service stores; longer ones are refused before any money moves. */
     static final int MAX_REASON_LENGTH = 500;
 
+    /** The longest idempotency key and decision note the database stores. */
+    private static final int MAX_KEY_LENGTH = 200;
+    private static final int MAX_NOTE_LENGTH = 1000;
+
     private final RefundRequestRepository requests;
     private final PaymentApi payments;
     private final OrderApi orders;
@@ -77,6 +81,10 @@ public class RefundService {
         if (reason != null && reason.length() > MAX_REASON_LENGTH) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "A refund reason can be at most " + MAX_REASON_LENGTH + " characters; say it in one sentence.");
+        }
+        if (idempotencyKey != null && idempotencyKey.length() > MAX_KEY_LENGTH) {
+            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "An idempotency key can be at most " + MAX_KEY_LENGTH + " characters.");
         }
         Optional<RefundRequest> earlier = requests.findByIdempotencyKey(idempotencyKey);
         if (earlier.isPresent()) {
@@ -126,7 +134,7 @@ public class RefundService {
 
     public RefundRequest approve(UUID requestId, String decidedBy, String note) {
         // Approved requests count as FAILED until the payment service confirms, as when an agent's request runs.
-        RefundRequest request = claimPending(requestId, RefundRequest.Status.FAILED);
+        RefundRequest request = claimPending(requestId, RefundRequest.Status.FAILED, note);
         request.recordDecision(decidedBy, note, Instant.now(clock));
         audit.record(request.getOrderId(), AuditEvent.ActorType.HUMAN, decidedBy, "approve_refund",
                 AuditEvent.Outcome.SUCCEEDED, "Approved a refund of " + request.getAmount() + " " + request.getCurrency(), note);
@@ -134,7 +142,7 @@ public class RefundService {
     }
 
     public RefundRequest reject(UUID requestId, String decidedBy, String note) {
-        RefundRequest request = claimPending(requestId, RefundRequest.Status.REJECTED);
+        RefundRequest request = claimPending(requestId, RefundRequest.Status.REJECTED, note);
         request.reject(decidedBy, note, Instant.now(clock));
         audit.record(request.getOrderId(), AuditEvent.ActorType.HUMAN, decidedBy, "reject_refund",
                 AuditEvent.Outcome.REJECTED, "Rejected a refund of " + request.getAmount() + " " + request.getCurrency(), note);
@@ -184,7 +192,12 @@ public class RefundService {
      * Takes a pending request out of the approval queue in one statement, so two people deciding at once cannot both
      * act on it: the second one gets a conflict.
      */
-    private RefundRequest claimPending(UUID requestId, RefundRequest.Status decided) {
+    private RefundRequest claimPending(UUID requestId, RefundRequest.Status decided, String note) {
+        // Checked before the claim: a note too long to save must not stop the decision after money has moved.
+        if (note != null && note.length() > MAX_NOTE_LENGTH) {
+            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "A decision note can be at most " + MAX_NOTE_LENGTH + " characters");
+        }
         RefundRequest request = find(requestId);
         if (requests.moveStatus(requestId, RefundRequest.Status.PENDING_APPROVAL, decided) == 0) {
             throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + find(requestId).getStatus()

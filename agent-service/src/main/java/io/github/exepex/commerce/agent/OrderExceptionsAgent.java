@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import io.modelcontextprotocol.spec.McpSchema;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -80,22 +81,29 @@ public class OrderExceptionsAgent {
             return;
         }
         Instant started = Instant.now();
+        ToolRun run = new ToolRun(null, TOOL_CALL_BUDGET);
+        ChatResponse response;
         try {
-            ChatResponse response = chatClient.prompt()
+            response = chatClient.prompt()
                     .system(systemPrompt)
                     .user("Order " + orderId + " is affected by this stock-out event:\n" + stockOutEvent)
                     .toolCallbacks(toolboxes.orderExceptionsAgentTools())
-                    .toolContext(Map.of(ToolRun.CONTEXT_KEY, new ToolRun(null, TOOL_CALL_BUDGET)))
+                    .toolContext(Map.of(ToolRun.CONTEXT_KEY, run))
                     .call()
                     .chatResponse();
-            String summary = ClaudeReply.textOf(response);
-            decisions.record(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, orderId, summary,
-                    "Triggered by stock-out event: " + stockOutEvent, response, Duration.between(started, Instant.now()));
         } catch (RuntimeException failure) {
             LOGGER.error("The order-exceptions agent failed on order {}", orderId, failure);
             handToHuman(orderId, "Stock-out: this order can no longer be fulfilled as placed. The order-exceptions agent "
                     + "failed while handling it (" + failure.getMessage() + "), so a person must finish: check the order, "
                     + "cancel and refund it if that has not happened yet.");
+            return;
+        }
+        String summary = ClaudeReply.textOf(response);
+        decisions.record(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT, orderId, summary,
+                "Triggered by stock-out event: " + stockOutEvent, response, Duration.between(started, Instant.now()));
+        if (!StockOutSettlement.isSettled(run.succeeded())) {
+            handToHuman(orderId, "Stock-out: the order-exceptions agent finished without cancelling and refunding this "
+                    + "order or handing it over, so a person must finish it. The agent said: " + summary);
         }
     }
 
@@ -104,10 +112,16 @@ public class OrderExceptionsAgent {
      * again, so the order is never left without an agent or a person handling it.
      */
     private void handToHuman(UUID orderId, String summary) {
+        McpSchema.CallToolResult result;
         try {
-            toolboxes.callAsOrderExceptionsAgent("escalate_to_human", Map.of("orderId", orderId.toString(), "summary", summary));
+            result = toolboxes.callAsOrderExceptionsAgent("escalate_to_human",
+                    Map.of("orderId", orderId.toString(), "summary", summary));
         } catch (RuntimeException unavailable) {
             throw new HandOffFailedException("Could not hand order " + orderId + " to a human: " + summary, unavailable);
+        }
+        if (Boolean.TRUE.equals(result.isError())) {
+            throw new HandOffFailedException("The MCP server refused to hand order " + orderId + " to a human: "
+                    + result.content(), null);
         }
     }
 }

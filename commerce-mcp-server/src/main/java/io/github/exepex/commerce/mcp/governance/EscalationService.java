@@ -23,6 +23,8 @@ public class EscalationService {
         this.clock = clock;
     }
 
+    /** The escalation and its audit entry are saved together or not at all. */
+    @Transactional
     public Escalation escalate(String raisedBy, UUID orderId, String summary) {
         Escalation escalation = escalations.save(new Escalation(orderId, raisedBy, summary, Instant.now(clock)));
         audit.record(orderId, AuditEvent.ActorType.AGENT, raisedBy, "escalate_to_human", AuditEvent.Outcome.SUCCEEDED,

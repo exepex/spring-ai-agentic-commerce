@@ -90,6 +90,9 @@
                 </div>
                 <p class="muted small">Only you can place this order. The assistant can't pay for you.</p>
               }
+              @case ('CONFIRMING') {
+                <p class="muted small">Placing the order…</p>
+              }
               @case ('CONFIRMED') {
                 <p class="small">Paid. <a [routerLink]="['/orders', proposal.orderId]">View the order</a></p>
               }

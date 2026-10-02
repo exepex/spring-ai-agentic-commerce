@@ -96,13 +96,16 @@ export class Operations {
   }
 
   private refresh(): void {
+    // Open work is fetched by status, so it never drops out behind the 100 most recent records.
     forkJoin({
-      refunds: this.api.refundRequests(),
-      escalations: this.api.escalations(),
+      pending: this.api.refundRequests({ status: 'PENDING_APPROVAL' }),
+      failed: this.api.refundRequests({ status: 'FAILED' }),
+      open: this.api.escalations('OPEN'),
+      recent: this.api.escalations(),
       activity: this.api.recentActivity(),
-    }).subscribe(({ refunds, escalations, activity }) => {
-      this.refunds.set(refunds);
-      this.escalations.set(escalations);
+    }).subscribe(({ pending, failed, open, recent, activity }) => {
+      this.refunds.set([...pending, ...failed]);
+      this.escalations.set([...open, ...recent.filter((escalation) => escalation.status !== 'OPEN')]);
       this.activity.set(activity);
     });
     this.api.agents().subscribe({ next: (agents) => this.agents.set(agents), error: () => this.agents.set(null) });

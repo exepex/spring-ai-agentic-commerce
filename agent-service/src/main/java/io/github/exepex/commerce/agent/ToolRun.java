@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The state of one agent run, passed to every tool call through Spring AI's tool context: whose conversation it is,
- * how many tool calls are left, and the order proposals made so far. The model never sees any of it.
+ * how many tool calls are left, and the results of the calls that succeeded. The model never sees any of it.
  */
 public final class ToolRun {
 
@@ -14,7 +14,10 @@ public final class ToolRun {
 
     private final String customerEmail;
     private final AtomicInteger callsLeft;
-    private final List<String> proposals = new ArrayList<>();
+    /** One successful tool call and what it returned. */
+    public record ToolResult(String tool, String result) {}
+
+    private final List<ToolResult> succeeded = new ArrayList<>();
 
     public ToolRun(String customerEmail, int callBudget) {
         this.customerEmail = customerEmail;
@@ -29,11 +32,15 @@ public final class ToolRun {
         return callsLeft.getAndDecrement() > 0;
     }
 
-    synchronized void recordProposal(String proposalJson) {
-        proposals.add(proposalJson);
+    synchronized void recordSuccess(String tool, String result) {
+        succeeded.add(new ToolResult(tool, result));
+    }
+
+    public synchronized List<ToolResult> succeeded() {
+        return List.copyOf(succeeded);
     }
 
     public synchronized List<String> proposals() {
-        return List.copyOf(proposals);
+        return succeeded.stream().filter(call -> "propose_order".equals(call.tool())).map(ToolResult::result).toList();
     }
 }
