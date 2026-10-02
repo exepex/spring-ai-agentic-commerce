@@ -19,11 +19,22 @@ spring:
   flyway:
     default-schema: payments
     schemas: payments
+  kafka:
+    bootstrap-servers: localhost:9092
+    template:
+      observation-enabled: true
+    producer:
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      properties:
+        # The event is a JSON contract between services, not a Java type: leave class names out of the headers.
+        spring.json.add.type.headers: false
   mvc:
     problemdetails:
       enabled: true
 
 commerce:
+  topics:
+    payment-events: payment.events
   payments:
     # Leave empty to use the built-in simulated gateway; set a Stripe test-mode key (sk_test_...) to use Stripe.
     stripe-secret-key: ${AGENTIC_COMMERCE_STRIPE_SECRET_KEY:}

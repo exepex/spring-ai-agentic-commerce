@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.mcp.governance;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -24,4 +25,14 @@ interface RefundRequestRepository extends JpaRepository<RefundRequest, UUID> {
     @Transactional
     @Query("update RefundRequest r set r.status = :to where r.id = :id and r.status = :from")
     int moveStatus(@Param("id") UUID id, @Param("from") RefundRequest.Status from, @Param("to") RefundRequest.Status to);
+
+    /** Marks an executed refund failed in one statement; 0 if it was not executed (or is already failed). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update RefundRequest r set r.status = io.github.exepex.commerce.mcp.governance.RefundRequest.Status.FAILED,
+                r.failure = :failure, r.updatedAt = :now
+            where r.idempotencyKey = :idempotencyKey
+              and r.status = io.github.exepex.commerce.mcp.governance.RefundRequest.Status.EXECUTED""")
+    int failExecuted(@Param("idempotencyKey") String idempotencyKey, @Param("failure") String failure,
+            @Param("now") Instant now);
 }
