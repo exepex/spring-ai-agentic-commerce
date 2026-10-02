@@ -16,16 +16,14 @@ public record AgentProperties(Agents agents, Slack slack, ServiceNow servicenow)
     /**
      * @param mcpUrl the commerce MCP server
      * @param shoppingAssistant the shopping assistant's credentials
-     * @param orderExceptionsAgent the order-exceptions agent's credentials
      * @param incidentAgent the incident agent's credentials
      */
-    public record Agents(String mcpUrl, Agent shoppingAssistant, Agent orderExceptionsAgent, Agent incidentAgent) {
+    public record Agents(String mcpUrl, Agent shoppingAssistant, Agent incidentAgent) {
 
         /** The bearer token the given agent presents to the MCP servers. */
         public String tokenOf(String agentId) {
             return switch (agentId) {
                 case AgentSwitchboard.SHOPPING_ASSISTANT -> shoppingAssistant.token();
-                case AgentSwitchboard.ORDER_EXCEPTIONS_AGENT -> orderExceptionsAgent.token();
                 case AgentSwitchboard.INCIDENT_AGENT -> incidentAgent.token();
                 default -> throw new IllegalArgumentException("Unknown agent " + agentId);
             };

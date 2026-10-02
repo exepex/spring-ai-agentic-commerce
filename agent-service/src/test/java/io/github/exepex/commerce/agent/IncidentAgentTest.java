@@ -26,6 +26,10 @@ import org.springframework.ai.chat.prompt.Prompt;
 class IncidentAgentTest {
 
     private static final AgentDefinitions DEFINITIONS = AgentDefinitions.load();
+    private static final AgentProperties PROPERTIES = new AgentProperties(
+            new AgentProperties.Agents("http://localhost:8085", new AgentProperties.Agent("token"),
+                    new AgentProperties.Agent("token")),
+            new AgentProperties.Slack("", "", ""), new AgentProperties.ServiceNow("http://localhost:8087"));
     private static final String INCIDENT = "INC0010001";
 
     private final McpToolboxes toolboxes = mock(McpToolboxes.class);
@@ -86,11 +90,31 @@ class IncidentAgentTest {
         assertThat(IncidentAgent.isFinished(INCIDENT, run)).isTrue();
     }
 
+    @Test
+    void anOrderMayOnlyChangeWhileTheIncidentIsStillTheAgentsAndStillLinksToIt() {
+        String orderA = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        String orderB = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+        IncidentAgent agent = agent(mock(ChatModel.class), true);
+
+        when(toolboxes.callAsIncidentAgent(eq("get_incident"), any()))
+                .thenReturn(result("{\"number\": \"INC0010001\", \"linkedOrderId\": \"" + orderA + "\"}", false));
+        assertThat(agent.stillLinksTo(INCIDENT, orderA.toUpperCase())).isTrue();
+
+        // The service desk corrected the incident's Correlation ID from order A to order B during the run.
+        when(toolboxes.callAsIncidentAgent(eq("get_incident"), any()))
+                .thenReturn(result("{\"number\": \"INC0010001\", \"linkedOrderId\": \"" + orderB + "\"}", false));
+        assertThat(agent.stillLinksTo(INCIDENT, orderA)).isFalse();
+
+        when(toolboxes.callAsIncidentAgent(eq("get_incident"), any()))
+                .thenReturn(result("Refused: Incident INC0010001 is not yours to change", true));
+        assertThat(agent.stillLinksTo(INCIDENT, orderB)).isFalse();
+    }
+
     private IncidentAgent agent(ChatModel model, boolean switchedOn) {
         AgentSwitchesApi switches = mock(AgentSwitchesApi.class);
         when(switches.all()).thenReturn(Map.of(AgentSwitchboard.INCIDENT_AGENT, switchedOn));
         return new IncidentAgent(model, toolboxes, new AgentSwitchboard(switches), mock(DecisionRecorder.class),
-                DEFINITIONS, OrderExceptionsAgentTest.PROPERTIES);
+                DEFINITIONS, PROPERTIES);
     }
 
     private static McpSchema.CallToolResult result(String text, boolean error) {

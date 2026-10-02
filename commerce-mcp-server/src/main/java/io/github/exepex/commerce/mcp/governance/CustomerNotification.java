@@ -29,12 +29,17 @@ public class CustomerNotification {
     @Column(name = "created_at")
     private Instant createdAt;
 
+    @Column(name = "idempotency_key")
+    private String idempotencyKey;
+
     protected CustomerNotification() {
         // for JPA
     }
 
-    CustomerNotification(UUID orderId, String customerEmail, String message, String sentBy, Instant createdAt) {
+    CustomerNotification(UUID orderId, String customerEmail, String message, String sentBy, Instant createdAt,
+            String idempotencyKey) {
         this.id = UUID.randomUUID();
+        this.idempotencyKey = idempotencyKey;
         this.orderId = orderId;
         this.customerEmail = customerEmail;
         this.message = message;

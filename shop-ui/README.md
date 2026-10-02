@@ -1,7 +1,7 @@
 # shop-ui
 
 The demo's Angular app: the shop with the shopping assistant, the orders with their audit timeline, and the
-operations console (approvals, escalations, the agents' kill switches and demo controls).
+operations console (approvals, failed refunds, cases, the agents' kill switches and demo controls).
 
 ```bash
 npm ci

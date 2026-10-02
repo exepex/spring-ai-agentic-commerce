@@ -6,8 +6,9 @@ import io.github.exepex.commerce.mcp.downstream.DownstreamException;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
 import io.github.exepex.commerce.mcp.downstream.ShippingApi;
+import io.github.exepex.commerce.mcp.cases.CaseService;
+import io.github.exepex.commerce.mcp.cases.CaseType;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
-import io.github.exepex.commerce.mcp.governance.EscalationService;
 import io.github.exepex.commerce.mcp.governance.NotificationService;
 import io.github.exepex.commerce.mcp.governance.ProposalService;
 import io.github.exepex.commerce.mcp.governance.RefundRequest;
@@ -73,11 +74,11 @@ class CommerceTools {
     private final ProposalService proposals;
     private final RefundService refunds;
     private final NotificationService notifications;
-    private final EscalationService escalations;
+    private final CaseService cases;
 
     CommerceTools(ToolGuard guard, CatalogApi catalog, OrderApi orders, PaymentApi payments, ShippingApi shipping,
             ProposalService proposals, RefundService refunds, NotificationService notifications,
-            EscalationService escalations) {
+            CaseService cases) {
         this.guard = guard;
         this.catalog = catalog;
         this.orders = orders;
@@ -86,7 +87,7 @@ class CommerceTools {
         this.proposals = proposals;
         this.refunds = refunds;
         this.notifications = notifications;
-        this.escalations = escalations;
+        this.cases = cases;
     }
 
     @McpTool(name = "search_products", description = """
@@ -203,34 +204,43 @@ class CommerceTools {
         });
     }
 
-    @McpTool(name = "notify_customer", description = "Send the customer of an order a short message, for example to explain a cancellation and refund.")
+    @McpTool(name = "notify_customer", description = """
+            Send the customer of an order a short message, for example to explain a cancellation and refund. With an \
+            idempotency key the message is sent once: sending again with the same key sends nothing.""")
     Acknowledgement notifyCustomer(McpTransportContext context,
             @McpToolParam(description = "The order id") String orderId,
-            @McpToolParam(description = "The message, written to the customer") String message) {
+            @McpToolParam(description = "The message, written to the customer") String message,
+            @McpToolParam(description = "A key that identifies this message; reuse it only to repeat the same message",
+                    required = false) String idempotencyKey) {
         UUID id = ToolGuard.parseOrderId(orderId);
         return guard.run(context, "notify_customer", id, "Notified the customer", true, agentId -> {
             OrderApi.Order order = Downstream.call("order service", () -> orders.getOrder(id));
-            return new Acknowledgement(notifications.notifyCustomer(agentId, id, order.customerEmail(), message).getId(),
-                    "The customer was notified");
+            NotificationService.Sent sent = notifications.notifyCustomer(agentId, id, order.customerEmail(), message,
+                    idempotencyKey == null || idempotencyKey.isBlank() ? null : idempotencyKey);
+            return new Acknowledgement(sent.notification().getId(), sent.now() ? "The customer was notified"
+                    : "The customer was already told about this at " + sent.notification().getCreatedAt()
+                            + "; nothing was sent again");
         });
     }
 
     @McpTool(name = "escalate_to_human", description = """
-            Hand a problem to the operations team when you cannot or should not resolve it yourself, for example \
-            when a service keeps failing. Say what happened, what you already did, and what you recommend.""")
+            Hand a problem to the support team when you cannot or should not resolve it yourself, for example when a \
+            service keeps failing. It becomes a ServiceNow incident: the incident agent looks into it first and passes \
+            it to the right team when a person is needed. Say what happened, what you already did, and what you \
+            recommend.""")
     Acknowledgement escalateToHuman(McpTransportContext context,
             @McpToolParam(description = "The order id, if the problem is about one order", required = false) String orderId,
             @McpToolParam(description = "What happened, what you already did, and what you recommend") String summary,
             @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
         UUID id = orderId == null || orderId.isBlank() ? null : ToolGuard.parseOrderId(orderId);
-        return guard.run(context, "escalate_to_human", id, "Escalated to a human", true, agentId -> {
+        return guard.run(context, "escalate_to_human", id, "Handed to the support team", true, agentId -> {
             // Only a customer-scoped agent's order is looked up, so handing work to a person never depends on the
             // order service being up.
             if (id != null && guard.isCustomerScoped(agentId)) {
                 guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
             }
-            return new Acknowledgement(escalations.escalate(AuditEvent.ActorType.AGENT, agentId, id, summary).getId(),
-                    "The operations team has the escalation and will take it from here");
+            return new Acknowledgement(cases.raise(CaseType.HANDOFF, id, summary, AuditEvent.ActorType.AGENT, agentId).getId(),
+                    "The support team has it as a ServiceNow incident and will take it from here");
         });
     }
 
@@ -260,7 +270,7 @@ class CommerceTools {
             case PENDING_APPROVAL -> "This refund is above the approval limit and is waiting for a human to approve it. "
                     + "Do not retry it. Tell the customer it is being reviewed.";
             case FAILED -> "The refund did not go through: " + request.getFailure() + " Retrying with the same "
-                    + "idempotency key is safe. If it keeps failing, escalate to a human.";
+                    + "idempotency key is safe. If it keeps failing, hand it to a person instead of guessing.";
             case REJECTED -> "A human rejected this refund: " + request.getDecisionNote();
         };
     }

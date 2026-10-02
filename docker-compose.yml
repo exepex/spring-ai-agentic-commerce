@@ -1,4 +1,5 @@
-# The whole demo: infrastructure, the seven services, the UI and (with --profile slack) the Slack MCP server.
+# The whole demo: infrastructure, the seven services, the UI, and with --profile slack the Slack MCP server or with
+# --profile simulator the ServiceNow simulator.
 # Start it with ./start-demo.sh. For development, start only the infrastructure:
 #   docker compose up -d postgres kafka jaeger
 # and run the services from your IDE or with mvn spring-boot:run.
@@ -107,7 +108,6 @@ services:
       SPRING_HTTP_SERVICECLIENT_PAYMENT_BASEURL: http://payment-service:8083
       SPRING_HTTP_SERVICECLIENT_SHIPPING_BASEURL: http://shipping-service:8084
       AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:-dev-shopping-assistant-token}
-      AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:-dev-order-exceptions-agent-token}
       AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:-dev-incident-agent-token}
     ports:
       - "8085:8085"
@@ -131,6 +131,18 @@ services:
     ports:
       - "8087:8087"
 
+  servicenow-simulator:
+    # A stand-in for the part of ServiceNow's Table API the demo uses, for trying the cases and running the scenario
+    # suite without an instance. Started by ./start-demo.sh --simulator, which points the demo at it.
+    profiles: [simulator]
+    build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: servicenow-simulator } }
+    restart: unless-stopped
+    environment:
+      AGENTIC_COMMERCE_SERVICENOW_USERNAME: ${AGENTIC_COMMERCE_SERVICENOW_USERNAME:-trailhead.agent}
+      AGENTIC_COMMERCE_SERVICENOW_PASSWORD: ${AGENTIC_COMMERCE_SERVICENOW_PASSWORD:-simulator}
+    ports:
+      - "8088:8088"
+
   agent-service:
     <<: *service
     build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: agent-service } }
@@ -141,7 +153,6 @@ services:
       COMMERCE_AGENTS_MCPURL: http://commerce-mcp-server:8085
       AGENTIC_COMMERCE_ANTHROPIC_API_KEY: ${AGENTIC_COMMERCE_ANTHROPIC_API_KEY:-}
       AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:-dev-shopping-assistant-token}
-      AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:-dev-order-exceptions-agent-token}
       AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:-dev-incident-agent-token}
       # The incident agent only listens when a ServiceNow instance is configured.
       AGENTIC_COMMERCE_SERVICENOW_MCP_URL: ${AGENTIC_COMMERCE_SERVICENOW_INSTANCE_URL:+http://servicenow-mcp-server:8087}

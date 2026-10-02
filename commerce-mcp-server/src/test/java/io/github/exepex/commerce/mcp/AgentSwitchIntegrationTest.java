@@ -1,7 +1,5 @@
 package io.github.exepex.commerce.mcp;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.get;
-import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
@@ -11,7 +9,9 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
  * The agents' kill switches are kept in the database, and the MCP server enforces them on every tool call: a
@@ -21,26 +21,29 @@ class AgentSwitchIntegrationTest extends McpServerTestSupport {
 
     private static final String OPERATOR = "ana@trailhead.example";
 
+    @Autowired
+    private JdbcClient jdbc;
+
     @AfterEach
     void switchEveryAgentBackOn() {
         switchAgent("shopping-assistant", true, OPERATOR);
-        switchAgent("order-exceptions-agent", true, OPERATOR);
+        switchAgent("incident-agent", true, OPERATOR);
     }
 
     @Test
-    void aSwitchedOffAgentCanOnlyHandWorkToAHuman() {
+    void aSwitchedOffAgentCanOnlyHandWorkToPeople() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
-        SERVICES.stubFor(get("/api/products").willReturn(okJson("[]")));
-        switchAgent("order-exceptions-agent", false, OPERATOR);
+        switchAgent("shopping-assistant", false, OPERATOR);
 
-        McpSchema.CallToolResult lookup = call(exceptionsAgent, "get_order", Map.of("orderId", orderId.toString()));
-        McpSchema.CallToolResult handOff = call(exceptionsAgent, "escalate_to_human",
-                Map.of("orderId", orderId.toString(), "summary", "Stock-out; the agent is switched off."));
+        McpSchema.CallToolResult lookup = call(assistant, "get_order",
+                Map.of("orderId", orderId.toString(), "customerEmail", "ada@example.com"));
+        McpSchema.CallToolResult handOff = call(assistant, "escalate_to_human", Map.of("orderId", orderId.toString(),
+                "summary", "The customer wants to talk to a person.", "customerEmail", "ada@example.com"));
 
         assertThat(lookup.isError()).isTrue();
         assertThat(text(lookup)).contains("switched off");
         assertThat(handOff.isError()).isFalse();
-        assertThat(call(assistant, "search_products", Map.of("query", "headlamp")).isError())
+        assertThat(call(incidentAgent, "get_order", Map.of("orderId", orderId.toString())).isError())
                 .as("the other agent is not affected").isFalse();
         List<String> denied = JsonPath.read(timeline(orderId), "$[?(@.outcome == 'DENIED')].action");
         assertThat(denied).containsExactly("get_order");
@@ -50,12 +53,27 @@ class AgentSwitchIntegrationTest extends McpServerTestSupport {
     void aSwitchIsKeptAndWhoChangedItIsAudited() {
         Map<String, Object> switches = switchAgent("shopping-assistant", false, OPERATOR);
 
-        assertThat(switches).containsEntry("shopping-assistant", false).containsEntry("order-exceptions-agent", true);
+        assertThat(switches).containsEntry("shopping-assistant", false).containsEntry("incident-agent", true);
         assertThat(rest().get().uri("/api/agent-switches").retrieve().body(String.class))
                 .contains("\"shopping-assistant\":false");
         String audit = rest().get().uri("/api/audit-events").retrieve().body(String.class);
         List<String> by = JsonPath.read(audit, "$[?(@.action == 'switch_off_agent')].actor");
         assertThat(by).contains(OPERATOR);
+    }
+
+    @Test
+    void twoFirstChangesOfASwitchAtOnceBothSucceedAndTheLastOneWins() throws Exception {
+        // A fresh database has no row for the switch yet: both changes try to create it.
+        jdbc.sql("delete from governance.agent_switch where agent_id = 'shopping-assistant'").update();
+
+        List<Integer> statuses = runTogether(
+                () -> switchStatus("shopping-assistant", Map.of("enabled", false, "by", OPERATOR)),
+                () -> switchStatus("shopping-assistant", Map.of("enabled", false, "by", "ben@trailhead.example")));
+        switchAgent("shopping-assistant", true, OPERATOR);
+
+        assertThat(statuses).containsExactly(200, 200);
+        assertThat(rest().get().uri("/api/agent-switches").retrieve().body(String.class))
+                .contains("\"shopping-assistant\":true");
     }
 
     @Test

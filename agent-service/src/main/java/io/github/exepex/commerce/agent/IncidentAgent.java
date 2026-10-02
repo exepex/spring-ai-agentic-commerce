@@ -7,6 +7,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -67,9 +68,9 @@ public class IncidentAgent {
             return;
         }
         Instant started = Instant.now();
-        ToolRun run = new ToolRun(null, definition.toolCallBudget(),
+        ToolRun run = new ToolRun(null, definition.toolCallBudget(), number,
                 linkedOrderId == null || linkedOrderId.isBlank() ? Set.of() : Set.of(linkedOrderId),
-                () -> stillOwns(number));
+                orderId -> stillLinksTo(number, orderId));
         ChatResponse response;
         try {
             response = chatClient.prompt()
@@ -86,7 +87,7 @@ public class IncidentAgent {
             return;
         }
         String summary = ClaudeReply.textOf(response);
-        decisions.record(AgentSwitchboard.INCIDENT_AGENT, null, "Incident " + number + ": " + summary,
+        decisions.record(AgentSwitchboard.INCIDENT_AGENT, orderOf(linkedOrderId), "Incident " + number + ": " + summary,
                 "Triggered by ServiceNow incident " + number + ": " + incidentEvent, response,
                 Duration.between(started, Instant.now()));
         if (!isFinished(number, run)) {
@@ -95,15 +96,31 @@ public class IncidentAgent {
         }
     }
 
-    /**
-     * Whether the incident is still the agent's: the ServiceNow MCP server lets it read only incidents assigned to it
-     * and in progress. When ServiceNow cannot be reached the answer is no, so no order changes on a guess.
-     */
-    private boolean stillOwns(String number) {
+    /** The linked order, so the decision shows on its timeline; null when the incident names no valid order id. */
+    private static UUID orderOf(String linkedOrderId) {
         try {
-            return !Boolean.TRUE.equals(toolboxes.callAsIncidentAgent("get_incident", Map.of("number", number)).isError());
+            return linkedOrderId == null || linkedOrderId.isBlank() ? null : UUID.fromString(linkedOrderId.strip());
+        } catch (IllegalArgumentException notAnOrderId) {
+            return null;
+        }
+    }
+
+    /**
+     * Whether the incident is still the agent's and still linked to the order: the ServiceNow MCP server lets it read
+     * only incidents assigned to it and in progress, and the service desk may have corrected the linked order since the
+     * run started. When ServiceNow cannot be reached the answer is no, so no order changes on a guess.
+     */
+    boolean stillLinksTo(String number, String orderId) {
+        try {
+            McpSchema.CallToolResult incident = toolboxes.callAsIncidentAgent("get_incident", Map.of("number", number));
+            if (Boolean.TRUE.equals(incident.isError())) {
+                return false;
+            }
+            UUID linked = orderOf(JSON.readTree(textOf(incident)).path("linkedOrderId").asString(""));
+            return linked != null && linked.equals(orderOf(orderId));
         } catch (RuntimeException unavailable) {
-            LOGGER.warn("Could not check that incident {} is still the agent's", number, unavailable);
+            LOGGER.warn("Could not check that incident {} is still the agent's and about order {}", number, orderId,
+                    unavailable);
             return false;
         }
     }

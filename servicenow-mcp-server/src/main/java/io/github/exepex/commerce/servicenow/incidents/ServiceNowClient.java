@@ -9,6 +9,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -24,10 +26,12 @@ class ServiceNowClient {
     static final String STATE_NEW = "1";
     static final String STATE_IN_PROGRESS = "2";
     static final String STATE_RESOLVED = "6";
+    /** Resolved, closed and cancelled: the incident needs nothing more. */
+    static final Set<String> STATES_FINISHED = Set.of(STATE_RESOLVED, "7", "8");
 
     private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String INCIDENT_FIELDS = "sys_id,number,short_description,description,state,assignment_group,"
-            + "assigned_to,caller_id,correlation_id,sys_updated_on";
+            + "assigned_to,caller_id,correlation_id,correlation_display,sys_created_on,sys_updated_on";
     /** How many of an incident's latest work notes and comments are read. */
     private static final int JOURNAL_LIMIT = 50;
 
@@ -50,11 +54,12 @@ class ServiceNowClient {
 
     /**
      * An incident as the tools and the poller see it. {@code orderId} is the shop order it is about, taken from its
-     * Correlation ID field; empty when it names none.
+     * Correlation ID field; empty when it names none. {@code caseId} is the shop's case it was opened for, from its
+     * Correlation display field; empty for an incident the service desk raised.
      */
     record Incident(String sysId, String number, String shortDescription, String description, String state,
             String stateName, String assignmentGroup, String assignedToSysId, String assignedTo, String caller,
-            String orderId, Instant updatedAt) {
+            String orderId, String caseId, Instant openedAt, Instant updatedAt) {
 
         boolean isAssigned() {
             return assignedToSysId != null && !assignedToSysId.isBlank();
@@ -66,6 +71,34 @@ class ServiceNowClient {
 
     Optional<Incident> findByNumber(String number) {
         return query("number=" + number, 1).stream().findFirst();
+    }
+
+    /** The incident opened for a shop case, if one was, so a case never gets two. */
+    Optional<Incident> findByCaseId(UUID caseId) {
+        return query("correlation_display=" + caseId, 1).stream().findFirst();
+    }
+
+    /**
+     * Opens an incident. Fields are given as a person sees them, such as the assignment group by its name.
+     *
+     * @return the incident as created
+     */
+    Incident create(Map<String, String> fields) {
+        JsonNode body = restClient.post()
+                .uri(uri -> uri.path("/api/now/table/incident")
+                        .queryParam("sysparm_input_display_value", true)
+                        .queryParam("sysparm_fields", INCIDENT_FIELDS)
+                        .queryParam("sysparm_display_value", "all")
+                        .build())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(fields)
+                .retrieve().body(JsonNode.class);
+        return incidentOf(body.path("result"));
+    }
+
+    /** Where a person opens the incident in ServiceNow. */
+    String linkTo(Incident incident) {
+        return properties.instanceUrl().replaceAll("/+$", "") + "/incident.do?sys_id=" + incident.sysId();
     }
 
     /** New incidents in the agent's group that nobody has taken yet. */
@@ -147,12 +180,17 @@ class ServiceNowClient {
                 .retrieve().body(JsonNode.class);
         List<Incident> incidents = new ArrayList<>();
         for (JsonNode row : body.path("result")) {
-            incidents.add(new Incident(value(row, "sys_id"), value(row, "number"), value(row, "short_description"),
-                    value(row, "description"), value(row, "state"), display(row, "state"),
-                    display(row, "assignment_group"), value(row, "assigned_to"), display(row, "assigned_to"),
-                    display(row, "caller_id"), value(row, "correlation_id").strip(), utc(value(row, "sys_updated_on"))));
+            incidents.add(incidentOf(row));
         }
         return incidents;
+    }
+
+    private static Incident incidentOf(JsonNode row) {
+        return new Incident(value(row, "sys_id"), value(row, "number"), value(row, "short_description"),
+                value(row, "description"), value(row, "state"), display(row, "state"), display(row, "assignment_group"),
+                value(row, "assigned_to"), display(row, "assigned_to"), display(row, "caller_id"),
+                value(row, "correlation_id").strip(), value(row, "correlation_display").strip(),
+                utc(value(row, "sys_created_on")), utc(value(row, "sys_updated_on")));
     }
 
     private static String value(JsonNode row, String field) {

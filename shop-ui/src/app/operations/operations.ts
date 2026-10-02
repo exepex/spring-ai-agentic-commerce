@@ -3,12 +3,12 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
-import { AgentsView, Api, AuditEvent, CarrierOutcome, Escalation, Product, RefundRequest, Shipment } from '../api';
+import { AgentsView, Api, AuditEvent, CarrierOutcome, Product, RefundRequest, Shipment, SupportCase } from '../api';
 import { refreshWhileOpen } from '../polling';
 import { OPERATORS, Session } from '../session';
 import { Timeline } from '../timeline';
 
-/** The operations team's console: approvals, escalations, shipping, the agents' kill switches, and demo controls. */
+/** The operations team's console: approvals, failed refunds, cases, shipping, the agents' kill switches, and demo controls. */
 @Component({
   selector: 'app-operations',
   imports: [FormsModule, CurrencyPipe, DatePipe, RouterLink, Timeline],
@@ -24,7 +24,9 @@ export class Operations {
 
   protected readonly refunds = signal<RefundRequest[]>([]);
   protected readonly pendingRefunds = computed(() => this.refunds().filter((refund) => refund.status === 'PENDING_APPROVAL'));
-  protected readonly escalations = signal<Escalation[]>([]);
+  protected readonly failedRefunds = computed(() => this.refunds().filter((refund) => refund.status === 'FAILED'));
+  /** Open cases first, then the most recently resolved ones. */
+  protected readonly cases = signal<SupportCase[]>([]);
   /** Parcels still to ship, and parcels on their way that the carrier has not reported on. */
   protected readonly shipments = signal<Shipment[]>([]);
   protected readonly agents = signal<AgentsView | null>(null);
@@ -51,30 +53,12 @@ export class Operations {
     this.notes.update((notes) => ({ ...notes, [id]: note }));
   }
 
-  /** {@code card} is the card the button sits on: it is busy meanwhile and shows a refusal. */
-  protected decide(refund: RefundRequest, decision: 'approve' | 'reject' | 'retry', card: string = refund.id): void {
-    this.busy.set(card);
+  protected decide(refund: RefundRequest, decision: 'approve' | 'reject' | 'retry'): void {
+    this.busy.set(refund.id);
     this.api.decideRefund(refund.id, decision, this.session.operator(), this.noteFor(refund.id)).subscribe({
-      next: () => this.done(card),
-      error: (failure) => this.done(card, failure),
+      next: () => this.done(refund.id),
+      error: (failure) => this.done(refund.id, failure),
     });
-  }
-
-  protected failedRefundFor(escalation: Escalation): RefundRequest | undefined {
-    return this.refunds().find((refund) => refund.orderId === escalation.orderId && refund.status === 'FAILED');
-  }
-
-  protected act(escalation: Escalation, action: 'assign' | 'hand-back' | 'resolve'): void {
-    this.busy.set(escalation.id);
-    const note = this.noteFor(escalation.id) || (action === 'resolve' ? 'Handled' : '');
-    this.api.actOnEscalation(escalation.id, action, this.session.operator(), note).subscribe({
-      next: () => this.done(escalation.id),
-      error: (failure) => this.done(escalation.id, failure),
-    });
-  }
-
-  protected isMine(escalation: Escalation): boolean {
-    return escalation.status === 'ASSIGNED' && escalation.assignedTo === this.session.operator();
   }
 
   protected ship(shipment: Shipment): void {
@@ -117,7 +101,7 @@ export class Operations {
       next: (updated) =>
         this.writeOffResult.set(
           updated.reserved > updated.onHand
-            ? `${updated.name}: ${updated.onHand} on hand for ${updated.reserved} reserved. Stock-out published: the order-exceptions agent takes over.`
+            ? `${updated.name}: ${updated.onHand} on hand for ${updated.reserved} reserved. Stock-out published: a case goes to ServiceNow for the incident agent.`
             : `${updated.name}: ${updated.onHand} on hand, ${updated.reserved} reserved. No order is affected.`,
         ),
       error: (failure) => this.writeOffResult.set(failure.error?.detail ?? 'The write-off failed'),
@@ -135,13 +119,12 @@ export class Operations {
     forkJoin({
       pending: this.api.refundRequests({ status: 'PENDING_APPROVAL' }),
       failed: this.api.refundRequests({ status: 'FAILED' }),
-      open: this.api.escalations('OPEN'),
-      assigned: this.api.escalations('ASSIGNED'),
-      recent: this.api.escalations(),
+      open: this.api.cases({ open: true }),
+      recent: this.api.cases(),
       activity: this.api.recentActivity(),
-    }).subscribe(({ pending, failed, open, assigned, recent, activity }) => {
+    }).subscribe(({ pending, failed, open, recent, activity }) => {
       this.refunds.set([...pending, ...failed]);
-      this.escalations.set([...open, ...assigned, ...recent.filter((escalation) => escalation.status === 'RESOLVED')]);
+      this.cases.set([...open, ...recent.filter((supportCase) => supportCase.status === 'RESOLVED')]);
       this.activity.set(activity);
     });
     this.api.shipments(['PREPARING', 'SHIPPED']).subscribe((shipments) => this.shipments.set(shipments));

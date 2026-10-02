@@ -18,10 +18,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The governance API: the UI reads the audit trail and acts on approvals, proposals, escalations and the agents' kill
- * switches; agents record
- * their decisions under {@code /api/agent}, authenticated with their bearer token. The UI side has no login in this
- * demo; in production it would sit behind the organisation's identity provider.
+ * The governance API: the UI reads the audit trail and acts on approvals, proposals and the agents' kill switches;
+ * agents record their decisions under {@code /api/agent}, authenticated with their bearer token. The UI side has no
+ * login in this demo; in production it would sit behind the organisation's identity provider.
  */
 @RestController
 class GovernanceController {
@@ -47,16 +46,14 @@ class GovernanceController {
     private final RefundService refunds;
     private final ProposalService proposals;
     private final NotificationService notifications;
-    private final EscalationService escalations;
     private final AgentSwitches switches;
 
     GovernanceController(AuditTrail audit, RefundService refunds, ProposalService proposals,
-            NotificationService notifications, EscalationService escalations, AgentSwitches switches) {
+            NotificationService notifications, AgentSwitches switches) {
         this.audit = audit;
         this.refunds = refunds;
         this.proposals = proposals;
         this.notifications = notifications;
-        this.escalations = escalations;
         this.switches = switches;
     }
 
@@ -113,27 +110,6 @@ class GovernanceController {
         return orderId == null ? notifications.recent() : notifications.forOrder(orderId);
     }
 
-    @GetMapping("/api/escalations")
-    List<Escalation> escalations(@RequestParam(required = false) Escalation.Status status) {
-        return status == null ? escalations.recent() : escalations.withStatus(status);
-    }
-
-    @PostMapping("/api/escalations/{escalationId}/assign")
-    Escalation assignEscalation(@PathVariable UUID escalationId, @Valid @RequestBody Decision decision) {
-        return escalations.assign(escalationId, decision.by());
-    }
-
-    @PostMapping("/api/escalations/{escalationId}/hand-back")
-    Escalation handBackEscalation(@PathVariable UUID escalationId, @Valid @RequestBody Decision decision) {
-        return escalations.handBack(escalationId, decision.by(), decision.note());
-    }
-
-    @PostMapping("/api/escalations/{escalationId}/resolve")
-    Escalation resolveEscalation(@PathVariable UUID escalationId, @Valid @RequestBody Decision decision) {
-        return escalations.resolve(escalationId, decision.by(), decision.note());
-    }
-
-    /** Each agent's kill switch: whether it is on. */
     @GetMapping("/api/agent-switches")
     Map<String, Boolean> agentSwitches() {
         return switches.all();

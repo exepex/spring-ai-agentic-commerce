@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -29,6 +30,9 @@ public class RefundRequest {
     @Id
     private UUID id;
 
+    @Version
+    private Long version;
+
     @Column(name = "order_id")
     private UUID orderId;
 
@@ -51,6 +55,10 @@ public class RefundRequest {
     private String providerReference;
 
     private String failure;
+
+    /** The card processor failed the refund after accepting it; no later answer from the payment service undoes that. */
+    @Column(name = "failed_at_processor")
+    private boolean failedAtProcessor;
 
     @Column(name = "decided_by")
     private String decidedBy;
@@ -91,6 +99,7 @@ public class RefundRequest {
 
     void markExecuted(String reference, Instant now) {
         status = Status.EXECUTED;
+        failedAtProcessor = false;
         providerReference = reference;
         failure = null;
         updatedAt = now;
@@ -152,6 +161,10 @@ public class RefundRequest {
 
     public String getFailure() {
         return failure;
+    }
+
+    public boolean isFailedAtProcessor() {
+        return failedAtProcessor;
     }
 
     public String getDecidedBy() {

@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.mcp.governance;
 
+import io.github.exepex.commerce.mcp.cases.CaseService;
+import io.github.exepex.commerce.mcp.cases.CaseType;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
@@ -10,18 +12,21 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Adds what the commerce services announce on Kafka to the audit trail, so an order's timeline shows the system's
- * steps next to the agents' and the humans'. Each event is recorded once, however often Kafka delivers it. Events are
- * read as plain JSON: the topics are contracts, not shared Java types.
+ * steps next to the agents' and the humans', and opens a case for each problem that needs handling: a stock-out, a
+ * delivery that failed, a lost parcel. Each event is recorded, and raises its case, once per order, however often
+ * Kafka delivers it. Events are read as plain JSON: the topics are contracts, not shared Java types.
  */
 @Component
 class SystemEventRecorder {
 
     private final AuditTrail audit;
+    private final CaseService cases;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
-    SystemEventRecorder(AuditTrail audit, JsonMapper jsonMapper, Clock clock) {
+    SystemEventRecorder(AuditTrail audit, CaseService cases, JsonMapper jsonMapper, Clock clock) {
         this.audit = audit;
+        this.cases = cases;
         this.jsonMapper = jsonMapper;
         this.clock = clock;
     }
@@ -52,8 +57,17 @@ class SystemEventRecorder {
             case "SHIPMENT_LOST" -> parcel + " lost by the carrier: " + problem;
             default -> "Shipment event " + type;
         };
-        audit.recordSystemEvent(eventId(event), occurredAt(event), UUID.fromString(event.path("orderId").asString()),
-                "shipping-service", type, summary, null);
+        UUID orderId = UUID.fromString(event.path("orderId").asString());
+        audit.recordSystemEvent(eventId(event), occurredAt(event), orderId, "shipping-service", type, summary, null);
+        CaseType caseType = switch (type) {
+            case "SHIPMENT_DELIVERY_FAILED" -> CaseType.DELIVERY_FAILED;
+            case "SHIPMENT_LOST" -> CaseType.PARCEL_LOST;
+            default -> null;
+        };
+        if (caseType != null) {
+            cases.raiseFor(eventId(event), caseType, orderId, summary + ". The customer did not receive order "
+                    + orderId + ".", "shipping-service");
+        }
     }
 
     @KafkaListener(topics = "${commerce.topics.stock-out}")
@@ -62,9 +76,11 @@ class SystemEventRecorder {
         String summary = "Stock-out on " + event.path("sku").asString() + ": " + event.path("onHand").asInt()
                 + " on hand for " + event.path("reserved").asInt() + " reserved (" + event.path("reason").asString()
                 + "). This order can no longer be fulfilled as placed.";
-        for (JsonNode orderId : event.path("affectedOrderIds")) {
-            audit.recordSystemEvent(eventId(event), occurredAt(event), UUID.fromString(orderId.asString()),
-                    "catalog-service", "STOCK_OUT", summary, json);
+        for (JsonNode affected : event.path("affectedOrderIds")) {
+            UUID orderId = UUID.fromString(affected.asString());
+            audit.recordSystemEvent(eventId(event), occurredAt(event), orderId, "catalog-service", "STOCK_OUT", summary,
+                    json);
+            cases.raiseFor(eventId(event), CaseType.STOCK_OUT, orderId, summary, "catalog-service");
         }
     }
 
