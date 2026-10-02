@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.mcp;
 
+import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.github.exepex.commerce.mcp.downstream.CatalogApi;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
@@ -21,6 +22,11 @@ public class CommerceMcpServerApplication {
 
     public static void main(String[] arguments) {
         SpringApplication.run(CommerceMcpServerApplication.class, arguments);
+    }
+
+    @Bean
+    AgentDefinitions agentDefinitions() {
+        return AgentDefinitions.load();
     }
 
     @Bean

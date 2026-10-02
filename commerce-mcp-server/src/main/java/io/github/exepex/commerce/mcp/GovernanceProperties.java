@@ -1,23 +1,19 @@
 package io.github.exepex.commerce.mcp;
 
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * The governance rules, set in {@code commerce.governance}.
+ * The governance rules, set in {@code commerce.governance}. What each agent may do (its tools, whether it is
+ * customer-scoped) comes from its definition in the agent-definitions module; only its secret is configured here.
  *
  * @param refundApprovalThreshold refunds above this amount wait for a human to approve them
- * @param agents each agent, by agent id
+ * @param agents each agent's credentials, by agent id
  */
 @ConfigurationProperties("commerce.governance")
 public record GovernanceProperties(BigDecimal refundApprovalThreshold, Map<String, Agent> agents) {
 
-    /**
-     * @param token the bearer token the agent authenticates with
-     * @param tools the only tools the agent may call
-     * @param customerScoped whether the agent acts for one customer, and may only touch that customer's orders
-     */
-    public record Agent(String token, List<String> tools, boolean customerScoped) {}
+    /** @param token the bearer token the agent authenticates with */
+    public record Agent(String token) {}
 }

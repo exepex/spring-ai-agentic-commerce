@@ -19,6 +19,7 @@
     <description>Governed AI agents on top of Spring Boot commerce microservices</description>
 
     <modules>
+        <module>agent-definitions</module>
         <module>catalog-service</module>
         <module>order-service</module>
         <module>payment-service</module>
