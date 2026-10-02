@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import java.util.function.BooleanSupplier;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -16,6 +17,8 @@ import tools.jackson.databind.node.ObjectNode;
  *       removed from the schema the model sees and filled in from the signed-in customer on every call.</li>
  *   <li><b>Every run has a tool-call budget.</b> Once it is spent, further calls are refused, so a confused agent
  *       cannot loop.</li>
+ *   <li><b>A switched-off agent stops.</b> A third-party MCP server, such as Slack's, cannot enforce the kill switch,
+ *       so its tools check the switch before every call. The commerce MCP server enforces it itself.</li>
  * </ul>
  */
 final class AgentToolCallback implements ToolCallback {
@@ -26,11 +29,13 @@ final class AgentToolCallback implements ToolCallback {
 
     private final ToolCallback mcpTool;
     private final boolean injectsCustomer;
+    private final BooleanSupplier agentSwitchedOn;
     private final ToolDefinition definition;
 
-    AgentToolCallback(ToolCallback mcpTool, boolean injectsCustomer) {
+    AgentToolCallback(ToolCallback mcpTool, boolean injectsCustomer, BooleanSupplier agentSwitchedOn) {
         this.mcpTool = mcpTool;
         this.injectsCustomer = injectsCustomer;
+        this.agentSwitchedOn = agentSwitchedOn;
         this.definition = injectsCustomer ? withoutCustomerParameter(mcpTool.getToolDefinition()) : mcpTool.getToolDefinition();
     }
 
@@ -50,6 +55,9 @@ final class AgentToolCallback implements ToolCallback {
         if (!run.takeCall()) {
             return "Refused: this run has used its tool-call budget. Stop calling tools; summarise what you did and, "
                     + "if work is left, say that a human must finish it.";
+        }
+        if (!agentSwitchedOn.getAsBoolean()) {
+            return "Refused: this agent has been switched off. Stop calling tools; a human will take over.";
         }
         String input = toolInput;
         if (injectsCustomer) {

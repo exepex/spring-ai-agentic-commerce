@@ -29,7 +29,7 @@ class AgentController {
     record AgentsView(boolean modelConfigured, boolean slackConfigured, List<AgentView> agents) {}
 
     /** {@code by} is the person switching, for the audit trail. */
-    record Switch(boolean enabled, @NotBlank @Size(max = 320) String by) {}
+    record Switch(boolean enabled, @NotBlank @Size(max = 100) String by) {}
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AgentController.class);
 

@@ -7,6 +7,6 @@ create unique index audit_event_source on audit_event (source_event_id, order_id
 create table agent_switch (
     agent_id    varchar(100) primary key,
     enabled     boolean      not null,
-    changed_by  varchar(320) not null,
+    changed_by  varchar(100) not null,
     changed_at  timestamptz  not null
 );

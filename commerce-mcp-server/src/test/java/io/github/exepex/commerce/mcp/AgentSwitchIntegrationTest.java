@@ -59,9 +59,10 @@ class AgentSwitchIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
-    void refusesAnUnknownAgentOrASwitchWithoutAPerson() {
+    void refusesAnUnknownAgentOrASwitchWithoutAPersonTheAuditCanRecord() {
         assertThat(switchStatus("no-such-agent", Map.of("enabled", false, "by", OPERATOR))).isEqualTo(404);
         assertThat(switchStatus("shopping-assistant", Map.of("enabled", false))).isEqualTo(400);
+        assertThat(switchStatus("shopping-assistant", Map.of("enabled", false, "by", "x".repeat(101)))).isEqualTo(400);
         assertThat(rest().get().uri("/api/agent-switches").retrieve().body(String.class))
                 .contains("\"shopping-assistant\":true");
     }

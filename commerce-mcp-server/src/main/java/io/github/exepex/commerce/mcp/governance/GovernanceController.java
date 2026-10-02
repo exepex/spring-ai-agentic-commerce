@@ -30,7 +30,8 @@ class GovernanceController {
 
     record Confirmation(String paymentMethod) {}
 
-    record SwitchChange(@NotNull Boolean enabled, @NotBlank @Size(max = 320) String by) {}
+    /** {@code by} is recorded as the audit entry's actor, which holds 100 characters. */
+    record SwitchChange(@NotNull Boolean enabled, @NotBlank @Size(max = 100) String by) {}
 
     record AgentDecision(UUID orderId, @NotBlank String summary, String reasoning, String model, Long inputTokens,
             Long outputTokens, Long durationMillis) {}
