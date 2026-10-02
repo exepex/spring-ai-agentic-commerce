@@ -77,8 +77,9 @@ public class ProposalService {
     public Proposal confirm(UUID proposalId, String paymentMethod) {
         OrderProposal proposal = proposals.findById(proposalId)
                 .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Order proposal " + proposalId + " does not exist"));
-        if (proposal.getStatus() != OrderProposal.Status.PROPOSED) {
-            return view(proposal);
+        // Claimed in one statement, so a double click or a retried request cannot place and charge the order twice.
+        if (proposals.moveStatus(proposalId, OrderProposal.Status.PROPOSED, OrderProposal.Status.CONFIRMING) == 0) {
+            return get(proposalId);
         }
         List<OrderApi.RequestedLine> lines = linesOf(proposal).stream()
                 .map(line -> new OrderApi.RequestedLine(line.productId(), line.quantity()))

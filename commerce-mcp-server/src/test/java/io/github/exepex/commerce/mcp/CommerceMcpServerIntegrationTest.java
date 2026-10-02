@@ -20,9 +20,15 @@ import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTranspor
 import io.modelcontextprotocol.spec.McpSchema;
 import java.net.http.HttpRequest;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -158,6 +164,59 @@ class CommerceMcpServerIntegrationTest {
     }
 
     @Test
+    void splittingARefundDoesNotGetAroundTheApprovalLimit() {
+        UUID orderId = stubOrder("ada@example.com", "129.90");
+        stubRefundSucceeds(orderId);
+
+        String first = text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 65, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId + "-1")));
+        String second = text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 64.90, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId + "-2")));
+
+        assertThat((String) JsonPath.read(first, "$.status")).isEqualTo("EXECUTED");
+        assertThat((String) JsonPath.read(second, "$.status")).isEqualTo("PENDING_APPROVAL");
+        SERVICES.verify(1, postRequestedFor(urlEqualTo("/api/payments/" + orderId + "/refunds")));
+    }
+
+    @Test
+    void twoPeopleDecidingOnTheSameRefundAtOnceCannotBothAct() throws Exception {
+        UUID orderId = stubOrder("ada@example.com", "129.90");
+        SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(201)
+                .withFixedDelay(500).withHeader("Content-Type", "application/json")
+                .withBody("""
+                        {"id": "%s", "amount": 129.90, "reason": "item out of stock", "providerReference": "re_test"}"""
+                        .formatted(UUID.randomUUID()))));
+        String requestId = JsonPath.read(text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 129.90, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId))), "$.refundRequestId");
+
+        List<Integer> statuses = runTogether(
+                () -> decide(requestId, "approve"), () -> decide(requestId, "reject"));
+
+        assertThat(statuses).containsExactlyInAnyOrder(200, 409);
+        String decided = rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve().body(String.class);
+        String status = JsonPath.read(decided, "$[0].status");
+        SERVICES.verify(status.equals("EXECUTED") ? 1 : 0, postRequestedFor(urlEqualTo("/api/payments/" + orderId + "/refunds")));
+        assertThat(status).isIn("EXECUTED", "REJECTED");
+    }
+
+    @Test
+    void confirmingTheSameProposalTwiceAtOncePlacesOneOrder() throws Exception {
+        UUID productId = UUID.randomUUID();
+        SERVICES.stubFor(get("/api/products").willReturn(okJson("""
+                [{"id": "%s", "sku": "HEADLAMP-400", "name": "Headlamp", "description": "", "price": 39.50,
+                  "currency": "EUR", "onHand": 5, "reserved": 0, "available": 5}]""".formatted(productId))));
+        SERVICES.stubFor(post("/api/orders").willReturn(okJson("""
+                {"id": "%s", "customerEmail": "ada@example.com", "status": "CONFIRMED", "total": 39.50, "currency": "EUR",
+                 "createdAt": "2026-10-02T10:00:00Z", "lines": []}""".formatted(UUID.randomUUID())).withFixedDelay(500)));
+        String proposalId = JsonPath.read(text(call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
+                "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1))))), "$.id");
+
+        runTogether(() -> confirm(proposalId), () -> confirm(proposalId));
+
+        SERVICES.verify(1, postRequestedFor(urlEqualTo("/api/orders")));
+    }
+
+    @Test
     void aRefundThatFailedBecausePaymentsWereDownSucceedsWhenRetriedWithTheSameKey() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
@@ -219,6 +278,39 @@ class CommerceMcpServerIntegrationTest {
         assertThat((String) JsonPath.read(confirmed, "$.status")).isEqualTo("FAILED");
         assertThat(rest().get().uri("/api/orders/{orderId}/timeline", failedOrderId).retrieve().body(String.class))
                 .contains("confirm_order", "FAILED", "Your card was declined.");
+    }
+
+    private int decide(String requestId, String decision) {
+        return rest().post().uri("/api/refund-requests/{id}/" + decision, requestId)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("by", "ops@example.com"))
+                .exchange((request, response) -> response.getStatusCode().value());
+    }
+
+    private int confirm(String proposalId) {
+        return rest().post().uri("/api/order-proposals/{id}/confirm", proposalId)
+                .contentType(MediaType.APPLICATION_JSON).body(Map.of("paymentMethod", "pm_card_visa"))
+                .exchange((request, response) -> response.getStatusCode().value());
+    }
+
+    /** Sends both requests at the same moment and returns their HTTP statuses. */
+    @SafeVarargs
+    private static List<Integer> runTogether(Callable<Integer>... requests) throws Exception {
+        try (ExecutorService threads = Executors.newFixedThreadPool(requests.length)) {
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<Integer>> results = new ArrayList<>();
+            for (Callable<Integer> request : requests) {
+                results.add(threads.submit(() -> {
+                    start.await();
+                    return request.call();
+                }));
+            }
+            start.countDown();
+            List<Integer> statuses = new ArrayList<>();
+            for (Future<Integer> result : results) {
+                statuses.add(result.get());
+            }
+            return statuses;
+        }
     }
 
     private McpSyncClient connect(String token) {

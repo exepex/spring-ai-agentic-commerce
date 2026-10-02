@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class NotificationService {
@@ -19,6 +20,8 @@ public class NotificationService {
         this.clock = clock;
     }
 
+    /** The notification and its audit entry are saved together or not at all. */
+    @Transactional
     public CustomerNotification notifyCustomer(String sentBy, UUID orderId, String customerEmail, String message) {
         CustomerNotification notification = notifications.save(
                 new CustomerNotification(orderId, customerEmail, message, sentBy, Instant.now(clock)));

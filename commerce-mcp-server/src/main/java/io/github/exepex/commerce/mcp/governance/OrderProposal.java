@@ -20,6 +20,8 @@ public class OrderProposal {
 
     public enum Status {
         PROPOSED,
+        /** A confirmation claimed it and is placing the order; a second confirmation finds it taken. */
+        CONFIRMING,
         CONFIRMED,
         FAILED
     }

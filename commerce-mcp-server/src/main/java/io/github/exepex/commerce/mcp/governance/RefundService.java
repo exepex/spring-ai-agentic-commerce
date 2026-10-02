@@ -19,7 +19,8 @@ import org.springframework.stereotype.Service;
  *
  * <ul>
  *   <li>a refund can never exceed what is still refundable on the order;</li>
- *   <li>refunds above the approval threshold wait for a human;</li>
+ *   <li>refunds that take an order's refunds above the approval threshold wait for a human, so splitting a refund
+ *       into smaller ones does not get around it;</li>
  *   <li>every refund carries an idempotency key, so a retried request never pays out twice.</li>
  * </ul>
  */
@@ -79,7 +80,8 @@ public class RefundService {
         String currency = payment != null
                 ? payment.currency()
                 : Downstream.call("order service", () -> orders.getOrder(orderId)).currency();
-        boolean needsApproval = amount.compareTo(approvalThreshold) > 0;
+        BigDecimal refundedOrAsked = amount.add(requestedBefore(orderId));
+        boolean needsApproval = refundedOrAsked.compareTo(approvalThreshold) > 0;
         // Saved before the payment service is called. Until it confirms, the request counts as FAILED: if this
         // process stops in between, a retry with the same key is safe and the processor pays out at most once.
         RefundRequest request = requests.save(new RefundRequest(orderId, amount, currency, reason,
@@ -87,8 +89,8 @@ public class RefundService {
                 needsApproval ? RefundRequest.Status.PENDING_APPROVAL : RefundRequest.Status.FAILED, Instant.now(clock)));
         if (needsApproval) {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, "issue_refund", AuditEvent.Outcome.PENDING_APPROVAL,
-                    "Refund of " + amount + " " + currency + " is above the " + approvalThreshold
-                            + " limit and waits for a human to approve it",
+                    "Refund of " + amount + " " + currency + " takes this order's refunds to " + refundedOrAsked
+                            + ", above the " + approvalThreshold + " limit, and waits for a human to approve it",
                     reason);
             return request;
         }
@@ -96,10 +98,8 @@ public class RefundService {
     }
 
     public RefundRequest approve(UUID requestId, String decidedBy, String note) {
-        RefundRequest request = find(requestId);
-        if (request.getStatus() != RefundRequest.Status.PENDING_APPROVAL) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + request.getStatus() + ", not pending approval");
-        }
+        // Approved requests count as FAILED until the payment service confirms, as when an agent's request runs.
+        RefundRequest request = claimPending(requestId, RefundRequest.Status.FAILED);
         request.recordDecision(decidedBy, note, Instant.now(clock));
         audit.record(request.getOrderId(), AuditEvent.ActorType.HUMAN, decidedBy, "approve_refund",
                 AuditEvent.Outcome.SUCCEEDED, "Approved a refund of " + request.getAmount() + " " + request.getCurrency(), note);
@@ -107,10 +107,7 @@ public class RefundService {
     }
 
     public RefundRequest reject(UUID requestId, String decidedBy, String note) {
-        RefundRequest request = find(requestId);
-        if (request.getStatus() != RefundRequest.Status.PENDING_APPROVAL) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + request.getStatus() + ", not pending approval");
-        }
+        RefundRequest request = claimPending(requestId, RefundRequest.Status.REJECTED);
         request.reject(decidedBy, note, Instant.now(clock));
         audit.record(request.getOrderId(), AuditEvent.ActorType.HUMAN, decidedBy, "reject_refund",
                 AuditEvent.Outcome.REJECTED, "Rejected a refund of " + request.getAmount() + " " + request.getCurrency(), note);
@@ -136,6 +133,27 @@ public class RefundService {
 
     public List<RefundRequest> forOrder(UUID orderId) {
         return requests.findByOrderIdOrderByCreatedAt(orderId);
+    }
+
+    /** What was already refunded or asked for on the order, except refunds a person turned down. */
+    private BigDecimal requestedBefore(UUID orderId) {
+        return requests.findByOrderIdOrderByCreatedAt(orderId).stream()
+                .filter(request -> request.getStatus() != RefundRequest.Status.REJECTED)
+                .map(RefundRequest::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * Takes a pending request out of the approval queue in one statement, so two people deciding at once cannot both
+     * act on it: the second one gets a conflict.
+     */
+    private RefundRequest claimPending(UUID requestId, RefundRequest.Status decided) {
+        RefundRequest request = find(requestId);
+        if (requests.moveStatus(requestId, RefundRequest.Status.PENDING_APPROVAL, decided) == 0) {
+            throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + find(requestId).getStatus()
+                    + ", not pending approval");
+        }
+        return request;
     }
 
     private RefundRequest execute(RefundRequest request, String actor) {
