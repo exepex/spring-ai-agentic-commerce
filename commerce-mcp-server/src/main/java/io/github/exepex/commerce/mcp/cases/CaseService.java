@@ -64,6 +64,27 @@ public class CaseService {
     @Transactional
     public SupportCase raise(CaseType type, UUID orderId, String details, AuditEvent.ActorType raisedByType,
             String raisedBy) {
+        return openOrAddTo(type, orderId, details, raisedByType, raisedBy);
+    }
+
+    /**
+     * Raises the case for an event another service announced, once per order however often Kafka delivers the event.
+     */
+    @Transactional
+    public void raiseFor(UUID sourceEventId, CaseType type, UUID orderId, String details, String service) {
+        int firstTime = jdbc.sql("insert into governance.case_event (source_event_id, order_id) values (:eventId, :orderId) "
+                        + "on conflict do nothing")
+                .param("eventId", sourceEventId)
+                .param("orderId", orderId)
+                .update();
+        if (firstTime == 1) {
+            openOrAddTo(type, orderId, details, AuditEvent.ActorType.SYSTEM, service);
+        }
+    }
+
+    /** Opens the case or adds to the open one, within the caller's transaction. */
+    private SupportCase openOrAddTo(CaseType type, UUID orderId, String details, AuditEvent.ActorType raisedByType,
+            String raisedBy) {
         String text = fit(details);
         Instant now = Instant.now(clock);
         if (orderId != null) {
@@ -88,29 +109,16 @@ public class CaseService {
     }
 
     /**
-     * Raises the case for an event another service announced, once per order however often Kafka delivers the event.
-     */
-    @Transactional
-    public void raiseFor(UUID sourceEventId, CaseType type, UUID orderId, String details, String service) {
-        int firstTime = jdbc.sql("insert into governance.case_event (source_event_id, order_id) values (:eventId, :orderId) "
-                        + "on conflict do nothing")
-                .param("eventId", sourceEventId)
-                .param("orderId", orderId)
-                .update();
-        if (firstTime == 1) {
-            raise(type, orderId, details, AuditEvent.ActorType.SYSTEM, service);
-        }
-    }
-
-    /**
      * Agents leave an order alone while a team has one of its incidents: the people working it may be paying the
      * customer back another way.
      */
     public void ensureNotWithTeam(UUID orderId) {
-        for (SupportCase withTeam : cases.findByOrderIdAndStatus(orderId, SupportCase.Status.WITH_TEAM)) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "This order is with the " + withTeam.getAssignmentGroup()
-                    + " team in ServiceNow" + incidentOf(withTeam) + ", who will finish it. Do not retry; tell the "
-                    + "customer a person is looking into it.");
+        Optional<SupportCase> withTeam = cases.findByOrderIdAndStatus(orderId, SupportCase.Status.WITH_TEAM).stream()
+                .findFirst();
+        if (withTeam.isPresent()) {
+            throw new GovernanceException(HttpStatus.CONFLICT, "This order is with the "
+                    + withTeam.get().getAssignmentGroup() + " team in ServiceNow" + incidentOf(withTeam.get())
+                    + ", who will finish it. Do not retry; tell the customer a person is looking into it.");
         }
     }
 
