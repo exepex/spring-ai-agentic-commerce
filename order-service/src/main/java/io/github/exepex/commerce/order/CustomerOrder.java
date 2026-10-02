@@ -77,8 +77,12 @@ public class CustomerOrder {
         paymentFailure = reason;
     }
 
+    /**
+     * Only a confirmed order can be cancelled. A placed order is still in checkout with its payment in flight, so
+     * only checkout itself changes it: a cancellation then could be overwritten by the confirmation that follows.
+     */
     boolean isCancellable() {
-        return status == OrderStatus.PLACED || status == OrderStatus.CONFIRMED;
+        return status == OrderStatus.CONFIRMED;
     }
 
     void cancel(String reason, Instant now) {

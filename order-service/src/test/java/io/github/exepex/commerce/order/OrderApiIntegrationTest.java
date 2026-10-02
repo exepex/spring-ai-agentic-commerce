@@ -12,6 +12,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
@@ -22,6 +23,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -145,6 +149,22 @@ class OrderApiIntegrationTest {
     }
 
     @Test
+    void anOrderCannotBeCancelledWhileItsPaymentIsInFlight() throws Exception {
+        DEPENDENCIES.stubFor(post("/api/payments").willReturn(aResponse().withStatus(201).withFixedDelay(1500)));
+
+        try (ExecutorService checkout = Executors.newSingleThreadExecutor()) {
+            Future<MvcTestResult> placing = checkout.submit(() -> placeOrder("leslie@example.com", SHOE, 1));
+            String orderId = await().atMost(Duration.ofSeconds(5)).until(() -> placedOrderOf("leslie@example.com"),
+                    id -> id != null);
+
+            assertThat(cancel(orderId, "changed mind")).hasStatus(HttpStatus.CONFLICT);
+            assertThat(placing.get()).hasStatus(HttpStatus.CREATED);
+        }
+        assertThat(mockMvc.get().uri("/api/orders?customerEmail=leslie@example.com"))
+                .bodyJson().extractingPath("$[0].status").isEqualTo("CONFIRMED");
+    }
+
+    @Test
     void rejectsAnUnknownProduct() {
         assertThat(placeOrder("linus@example.com", UNKNOWN_PRODUCT, 1)).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
     }
@@ -222,6 +242,12 @@ class OrderApiIntegrationTest {
                 .content("""
                         {"customerEmail": "%s", "lines": [%s]}""".formatted(customerEmail, String.join(", ", lines)))
                 .exchange();
+    }
+
+    private String placedOrderOf(String customerEmail) throws Exception {
+        List<String> placed = JsonPath.read(mockMvc.get().uri("/api/orders?customerEmail={email}", customerEmail).exchange()
+                .getResponse().getContentAsString(), "$[?(@.status == 'PLACED')].id");
+        return placed.isEmpty() ? null : placed.getFirst();
     }
 
     private MvcTestResult cancel(String orderId, String reason) {
