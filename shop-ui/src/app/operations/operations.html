@@ -1,7 +1,14 @@
 <main class="page">
   <div class="spread">
     <h1>Operations</h1>
-    <span class="muted small">Acting as {{ operator }}</span>
+    <label class="row small">
+      <span class="muted">Acting as</span>
+      <select [ngModel]="session.operator()" (ngModelChange)="session.switchOperator($event)" aria-label="Operator">
+        @for (operator of operators; track operator) {
+          <option [value]="operator">{{ operator }}</option>
+        }
+      </select>
+    </label>
   </div>
 
   <div class="ops">
@@ -22,6 +29,9 @@
               <button class="primary" (click)="decide(refund, 'approve')" [disabled]="busy() === refund.id">Approve</button>
               <button class="danger" (click)="decide(refund, 'reject')" [disabled]="busy() === refund.id">Reject</button>
             </div>
+            @if (refusalFor(refund.id); as refusal) {
+              <div class="small error">{{ refusal }}</div>
+            }
           </div>
         } @empty {
           <p class="empty">Nothing waiting.</p>
@@ -43,18 +53,35 @@
               }
             </div>
             <div class="small">{{ escalation.summary }}</div>
-            @if (escalation.status === 'OPEN') {
-              <div class="row">
-                @if (failedRefundFor(escalation); as failed) {
-                  <button class="primary" (click)="decide(failed, 'retry')" [disabled]="busy() === failed.id">
-                    Retry refund of {{ failed.amount | currency: failed.currency }}
-                  </button>
+            @switch (escalation.status) {
+              @case ('OPEN') {
+                <div class="row">
+                  <button class="primary" (click)="act(escalation, 'assign')" [disabled]="busy() === escalation.id">Assign to me</button>
+                </div>
+              }
+              @case ('ASSIGNED') {
+                @if (isMine(escalation)) {
+                  <div class="small">Assigned to you</div>
+                  <div class="row">
+                    @if (failedRefundFor(escalation); as failed) {
+                      <button class="primary" (click)="decide(failed, 'retry')" [disabled]="busy() === failed.id">
+                        Retry refund of {{ failed.amount | currency: failed.currency }}
+                      </button>
+                    }
+                    <input class="note" placeholder="Note" [ngModel]="noteFor(escalation.id)" (ngModelChange)="setNote(escalation.id, $event)" />
+                    <button (click)="act(escalation, 'resolve')" [disabled]="busy() === escalation.id">Mark resolved</button>
+                    <button (click)="act(escalation, 'hand-back')" [disabled]="busy() === escalation.id">Hand back</button>
+                  </div>
+                } @else {
+                  <div class="small muted">Assigned to <strong>{{ escalation.assignedTo }}</strong>; only they can work on it.</div>
                 }
-                <input class="note" placeholder="Resolution note" [ngModel]="noteFor(escalation.id)" (ngModelChange)="setNote(escalation.id, $event)" />
-                <button (click)="resolve(escalation)" [disabled]="busy() === escalation.id">Mark resolved</button>
-              </div>
-            } @else {
-              <div class="small muted">Resolved by {{ escalation.resolvedBy }}@if (escalation.resolutionNote) {: {{ escalation.resolutionNote }}}</div>
+              }
+              @case ('RESOLVED') {
+                <div class="small muted">Resolved by {{ escalation.resolvedBy }}@if (escalation.resolutionNote) {: {{ escalation.resolutionNote }}}</div>
+              }
+            }
+            @if (refusalFor(escalation.id); as refusal) {
+              <div class="small error">{{ refusal }}</div>
             }
           </div>
         } @empty {

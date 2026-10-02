@@ -238,6 +238,7 @@ tr.clickable:hover td {
 .chip.PENDING_APPROVAL,
 .chip.PLACED,
 .chip.OPEN,
+.chip.ASSIGNED,
 .chip.PROPOSED {
   background: var(--warn-soft);
   color: var(--warn);

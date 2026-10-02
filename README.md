@@ -90,12 +90,16 @@ commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
 3. **Refund above the limit.** The same stock-out on a €129.90 order: the refund is held as *pending approval*. A
    person approves or rejects it in the operations console; the decision is recorded, and the refund runs once.
 4. **Payment service down.** With the simulated outage on, the agent's refund fails. It retries with the same
-   idempotency key, then escalates to a human instead of guessing. Once payments are back, a person clicks **Retry
-   refund**: it runs exactly once, with the same key.
+   idempotency key, then escalates to a human instead of guessing. Once payments are back, a person takes the
+   escalation with **Assign to me** and clicks **Retry refund**: it runs exactly once, with the same key.
 5. **Kill switch.** Switch the order-exceptions agent off: the next stock-out goes straight to the escalation queue,
    without calling the model.
 6. **Prompt injection.** Ask the assistant to cancel another customer's order. The customer's identity is injected
    by code and the MCP server checks ownership, so the attempt is refused and recorded as *denied*.
+7. **One person per escalation.** An escalation is open until someone assigns it to themselves; from then on only
+   they can retry its refund, resolve it, or hand it back to the queue. Switch the operator at the top of the
+   operations console: if two people try to take the same escalation, only one gets it and the other is told who
+   has it.
 
 ## Run it
 

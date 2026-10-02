@@ -101,6 +101,16 @@ class GovernanceController {
         return status == null ? escalations.recent() : escalations.withStatus(status);
     }
 
+    @PostMapping("/api/escalations/{escalationId}/assign")
+    Escalation assignEscalation(@PathVariable UUID escalationId, @Valid @RequestBody Decision decision) {
+        return escalations.assign(escalationId, decision.by());
+    }
+
+    @PostMapping("/api/escalations/{escalationId}/hand-back")
+    Escalation handBackEscalation(@PathVariable UUID escalationId, @Valid @RequestBody Decision decision) {
+        return escalations.handBack(escalationId, decision.by(), decision.note());
+    }
+
     @PostMapping("/api/escalations/{escalationId}/resolve")
     Escalation resolveEscalation(@PathVariable UUID escalationId, @Valid @RequestBody Decision decision) {
         return escalations.resolve(escalationId, decision.by(), decision.note());

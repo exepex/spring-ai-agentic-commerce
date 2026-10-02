@@ -135,7 +135,8 @@ export interface Escalation {
   orderId: string | null;
   raisedBy: string;
   summary: string;
-  status: 'OPEN' | 'RESOLVED';
+  status: 'OPEN' | 'ASSIGNED' | 'RESOLVED';
+  assignedTo: string | null;
   resolvedBy: string | null;
   resolutionNote: string | null;
   createdAt: string;
@@ -232,8 +233,9 @@ export class Api {
     return this.http.get<Escalation[]>(`${GOVERNANCE}/escalations${status ? `?status=${status}` : ''}`);
   }
 
-  resolveEscalation(escalationId: string, by: string, note: string): Observable<Escalation> {
-    return this.http.post<Escalation>(`${GOVERNANCE}/escalations/${escalationId}/resolve`, { by, note });
+  /** Acts on an escalation: take it, hand it back to the queue, or resolve it. */
+  actOnEscalation(escalationId: string, action: 'assign' | 'hand-back' | 'resolve', by: string, note: string): Observable<Escalation> {
+    return this.http.post<Escalation>(`${GOVERNANCE}/escalations/${escalationId}/${action}`, { by, note });
   }
 
   agents(): Observable<AgentsView> {

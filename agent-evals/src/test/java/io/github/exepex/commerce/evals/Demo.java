@@ -19,6 +19,7 @@ final class Demo {
     static final String HEADLAMP = "8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0004";
     static final String SHOE_42 = "8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0001";
     static final String ORDER_EXCEPTIONS_AGENT = "order-exceptions-agent";
+    static final String OPERATOR = "evals@trailhead.example";
 
     private static final Duration AGENT_TIMEOUT = Duration.ofMinutes(4);
 
@@ -75,9 +76,16 @@ final class Demo {
         return list(api.get().uri("/governance/api/notifications?orderId={id}", orderId).retrieve().body(JsonNode.class));
     }
 
-    JsonNode retryRefund(String refundRequestId) {
+    /** Takes the order's escalation, as a person would, then retries the refund: only the assignee may. */
+    JsonNode retryRefund(String orderId, String refundRequestId) {
+        for (JsonNode escalation : escalationsFor(orderId)) {
+            if ("OPEN".equals(escalation.path("status").asString())) {
+                api.post().uri("/governance/api/escalations/{id}/assign", escalation.path("id").asString())
+                        .body(Map.of("by", OPERATOR)).retrieve().toBodilessEntity();
+            }
+        }
         return api.post().uri("/governance/api/refund-requests/{id}/retry", refundRequestId)
-                .body(Map.of("by", "evals@trailhead.example")).retrieve().body(JsonNode.class);
+                .body(Map.of("by", OPERATOR)).retrieve().body(JsonNode.class);
     }
 
     void setAgentEnabled(String agentId, boolean enabled) {

@@ -59,6 +59,10 @@ class ToolGuard {
     }
 
     /** A customer-facing agent may only touch the orders of the customer it is talking to. */
+    boolean isCustomerScoped(String agentId) {
+        return agents.isCustomerScoped(agentId);
+    }
+
     void ensureCustomerOwns(String agentId, OrderApi.Order order, String customerEmail) {
         if (agents.isCustomerScoped(agentId)
                 && (customerEmail == null || !customerEmail.equalsIgnoreCase(order.customerEmail()))) {

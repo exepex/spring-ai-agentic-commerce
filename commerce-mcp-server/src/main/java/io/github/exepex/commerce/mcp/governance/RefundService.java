@@ -42,17 +42,20 @@ public class RefundService {
     private final PaymentApi payments;
     private final OrderApi orders;
     private final AuditTrail audit;
+    private final EscalationService escalations;
     private final BigDecimal approvalThreshold;
     private final TransactionTemplate transaction;
     private final JdbcClient jdbc;
     private final Clock clock;
 
     RefundService(RefundRequestRepository requests, PaymentApi payments, OrderApi orders, AuditTrail audit,
-            GovernanceProperties properties, TransactionTemplate transaction, JdbcClient jdbc, Clock clock) {
+            EscalationService escalations, GovernanceProperties properties, TransactionTemplate transaction,
+            JdbcClient jdbc, Clock clock) {
         this.requests = requests;
         this.payments = payments;
         this.orders = orders;
         this.audit = audit;
+        this.escalations = escalations;
         this.approvalThreshold = properties.refundApprovalThreshold();
         this.transaction = transaction;
         this.jdbc = jdbc;
@@ -149,9 +152,13 @@ public class RefundService {
         return requests.save(request);
     }
 
-    /** Runs a failed refund again with its original idempotency key. */
+    /**
+     * Runs a failed refund again with its original idempotency key. If the order was escalated, only the person the
+     * escalation is assigned to may do this.
+     */
     public RefundRequest retry(UUID requestId, String retriedBy) {
         RefundRequest request = find(requestId);
+        escalations.ensureWorkedBy(request.getOrderId(), retriedBy);
         if (request.getStatus() != RefundRequest.Status.FAILED) {
             throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + request.getStatus() + ", not failed");
         }

@@ -32,21 +32,58 @@ public class EscalationService {
         return escalation;
     }
 
-    /** The resolution and its audit entry are saved together, so the audit trail never shows one that did not happen. */
+    /** Takes an open escalation: from now on only this person works on it. A second person gets a conflict. */
     @Transactional
-    public Escalation resolve(UUID escalationId, String resolvedBy, String note) {
-        if (note != null && note.length() > MAX_NOTE_LENGTH) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
-                    "A resolution note can be at most " + MAX_NOTE_LENGTH + " characters");
+    public Escalation assign(UUID escalationId, String person) {
+        Escalation escalation = find(escalationId);
+        if (escalations.assign(escalationId, person, Instant.now(clock)) == 0) {
+            throw new GovernanceException(HttpStatus.CONFLICT, describe(find(escalationId)));
         }
-        Escalation escalation = escalations.findById(escalationId)
-                .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Escalation " + escalationId + " does not exist"));
-        if (escalation.getStatus() == Escalation.Status.OPEN) {
-            escalation.resolve(resolvedBy, note, Instant.now(clock));
-            audit.record(escalation.getOrderId(), AuditEvent.ActorType.HUMAN, resolvedBy, "resolve_escalation",
-                    AuditEvent.Outcome.SUCCEEDED, "Resolved the escalation", note);
+        audit.record(escalation.getOrderId(), AuditEvent.ActorType.HUMAN, person, "assign_escalation",
+                AuditEvent.Outcome.SUCCEEDED, "Took the escalation", null);
+        return find(escalationId);
+    }
+
+    /** Puts an escalation back in the queue for someone else. Only the person it is assigned to can do this. */
+    @Transactional
+    public Escalation handBack(UUID escalationId, String person, String note) {
+        requireNoteFits(note);
+        Escalation escalation = find(escalationId);
+        if (escalations.handBack(escalationId, person) == 0) {
+            throw new GovernanceException(HttpStatus.CONFLICT, describe(escalation));
         }
-        return escalations.save(escalation);
+        audit.record(escalation.getOrderId(), AuditEvent.ActorType.HUMAN, person, "hand_back_escalation",
+                AuditEvent.Outcome.SUCCEEDED, "Handed the escalation back to the queue", note);
+        return find(escalationId);
+    }
+
+    /**
+     * Closes an escalation. Only the person it is assigned to can do this, and the resolution and its audit entry are
+     * saved together.
+     */
+    @Transactional
+    public Escalation resolve(UUID escalationId, String person, String note) {
+        requireNoteFits(note);
+        Escalation escalation = find(escalationId);
+        if (escalations.resolve(escalationId, person, note, Instant.now(clock)) == 0) {
+            throw new GovernanceException(HttpStatus.CONFLICT, describe(escalation));
+        }
+        audit.record(escalation.getOrderId(), AuditEvent.ActorType.HUMAN, person, "resolve_escalation",
+                AuditEvent.Outcome.SUCCEEDED, "Resolved the escalation", note);
+        return find(escalationId);
+    }
+
+    /**
+     * Work on an escalated order, such as retrying its refund, is for the person the escalation is assigned to. An order
+     * without an unresolved escalation is not restricted.
+     */
+    public void ensureWorkedBy(UUID orderId, String person) {
+        for (Escalation escalation : escalations.findByOrderIdAndStatusIn(orderId,
+                List.of(Escalation.Status.OPEN, Escalation.Status.ASSIGNED))) {
+            if (!person.equals(escalation.getAssignedTo())) {
+                throw new GovernanceException(HttpStatus.CONFLICT, describe(escalation));
+            }
+        }
     }
 
     public List<Escalation> withStatus(Escalation.Status status) {
@@ -55,5 +92,26 @@ public class EscalationService {
 
     public List<Escalation> recent() {
         return escalations.findTop100ByOrderByCreatedAtDesc();
+    }
+
+    private Escalation find(UUID escalationId) {
+        return escalations.findById(escalationId).orElseThrow(
+                () -> new GovernanceException(HttpStatus.NOT_FOUND, "Escalation " + escalationId + " does not exist"));
+    }
+
+    private static void requireNoteFits(String note) {
+        if (note != null && note.length() > MAX_NOTE_LENGTH) {
+            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "A note can be at most " + MAX_NOTE_LENGTH + " characters");
+        }
+    }
+
+    /** Why someone cannot act on the escalation now, in words for the operations console. */
+    private static String describe(Escalation escalation) {
+        return switch (escalation.getStatus()) {
+            case OPEN -> "The escalation is not assigned to you; assign it to yourself first";
+            case ASSIGNED -> "The escalation is assigned to " + escalation.getAssignedTo();
+            case RESOLVED -> "The escalation was already resolved by " + escalation.getResolvedBy();
+        };
     }
 }
