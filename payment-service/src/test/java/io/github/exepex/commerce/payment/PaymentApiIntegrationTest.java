@@ -64,6 +64,21 @@ class PaymentApiIntegrationTest {
     }
 
     @Test
+    void rejectsARefundReasonLongerThanItCanStoreBeforeRefundingAnything() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "50.00", "pm_card_visa");
+
+        assertThat(mockMvc.post().uri("/api/payments/{orderId}/refunds", orderId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"amount": 10.00, "reason": "%s", "idempotencyKey": "long-reason-%s"}"""
+                        .formatted("x".repeat(501), orderId)))
+                .hasStatus(HttpStatus.BAD_REQUEST);
+        assertThat(mockMvc.get().uri("/api/payments/{orderId}", orderId))
+                .bodyJson().extractingPath("$.refundable").isEqualTo(50.0);
+    }
+
+    @Test
     void rejectsAReusedKeyForADifferentAmountAndARefundAboveWhatIsLeft() {
         UUID orderId = UUID.randomUUID();
         charge(orderId, "50.00", "pm_card_visa");

@@ -4,9 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -76,6 +81,28 @@ class CatalogApiIntegrationTest {
         assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)).hasStatus(HttpStatus.NO_CONTENT);
         assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)).hasStatus(HttpStatus.NO_CONTENT);
         assertThat(product(RAIN_JACKET)).bodyJson().extractingPath("$.reserved").isEqualTo(0);
+    }
+
+    @Test
+    void releasingTheSameOrderManyTimesAtOnceGivesItsUnitsBackOnce() throws Exception {
+        UUID released = UUID.randomUUID();
+        UUID kept = UUID.randomUUID();
+        reserve(RAIN_JACKET, released, 5);
+        reserve(RAIN_JACKET, kept, 3);
+
+        List<Callable<Integer>> releases = new ArrayList<>();
+        for (int attempt = 0; attempt < 8; attempt++) {
+            releases.add(() -> mockMvc.delete().uri("/api/orders/{orderId}/reservations", released).exchange()
+                    .getResponse().getStatus());
+        }
+        try (ExecutorService threads = Executors.newFixedThreadPool(releases.size())) {
+            for (Future<Integer> status : threads.invokeAll(releases)) {
+                assertThat(status.get()).isEqualTo(HttpStatus.NO_CONTENT.value());
+            }
+        }
+
+        assertThat(product(RAIN_JACKET)).bodyJson().extractingPath("$.reserved").isEqualTo(3);
+        mockMvc.delete().uri("/api/orders/{orderId}/reservations", kept).exchange();
     }
 
     @Test

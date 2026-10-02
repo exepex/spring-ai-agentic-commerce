@@ -61,9 +61,19 @@ export class Shop {
     this.draft.set('');
     this.sending.set(true);
     this.scrollToEnd();
-    this.api.chat(this.conversationId, this.session.customer(), text).subscribe({
-      next: (reply) => this.addAssistantMessage(reply.text, reply.proposals),
-      error: () => this.addAssistantMessage('The assistant could not be reached. Is the agent service running?', []),
+    // A reply that arrives after the customer switched belongs to the old conversation, so it is dropped.
+    const conversation = this.conversationId;
+    this.api.chat(conversation, this.session.customer(), text).subscribe({
+      next: (reply) => {
+        if (conversation === this.conversationId) {
+          this.addAssistantMessage(reply.text, reply.proposals);
+        }
+      },
+      error: () => {
+        if (conversation === this.conversationId) {
+          this.addAssistantMessage('The assistant could not be reached. Is the agent service running?', []);
+        }
+      },
     });
   }
 
@@ -100,6 +110,7 @@ export class Shop {
 
   private startNewConversation(): void {
     this.conversationId = crypto.randomUUID();
+    this.sending.set(false);
     this.messages.set([
       {
         from: 'assistant',

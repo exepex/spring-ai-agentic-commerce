@@ -64,9 +64,20 @@ class StripePaymentGateway implements PaymentGateway {
                 .build();
         try {
             Refund refund = stripe.v1().refunds().create(params, idempotent(idempotencyKey));
+            ensureAccepted(refund.getStatus());
             return refund.getId();
         } catch (StripeException failure) {
             throw new PaymentProviderUnavailableException(failure);
+        }
+    }
+
+    /**
+     * A refund Stripe reports as failed or cancelled did not return any money, so it must not count as refunded. A
+     * pending one has been accepted and completes on Stripe's side.
+     */
+    static void ensureAccepted(String refundStatus) {
+        if ("failed".equals(refundStatus) || "canceled".equals(refundStatus)) {
+            throw PaymentProblems.refundNotCompleted(refundStatus);
         }
     }
 

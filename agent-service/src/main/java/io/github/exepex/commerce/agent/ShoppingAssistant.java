@@ -25,6 +25,7 @@ public class ShoppingAssistant {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ShoppingAssistant.class);
     private static final int TOOL_CALL_BUDGET = 12;
+    private static final int MAX_CONVERSATIONS = 1_000;
 
     static final String SYSTEM_PROMPT = """
             You are the shopping assistant of Trailhead, an online shop for outdoor gear. You talk with one signed-in \
@@ -50,7 +51,10 @@ public class ShoppingAssistant {
 
     ShoppingAssistant(ChatModel chatModel, McpToolboxes toolboxes, AgentSwitchboard switchboard,
             DecisionRecorder decisions, AgentProperties properties) {
-        ChatMemory memory = MessageWindowChatMemory.builder().maxMessages(30).build();
+        ChatMemory memory = MessageWindowChatMemory.builder()
+                .chatMemoryRepository(new RecentConversations(MAX_CONVERSATIONS))
+                .maxMessages(30)
+                .build();
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultOptions(ClaudeOptions.forAgent(properties.agents().model(),
                         properties.agents().shoppingAssistant().effort()))

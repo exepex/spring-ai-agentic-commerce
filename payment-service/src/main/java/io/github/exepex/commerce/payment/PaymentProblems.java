@@ -20,6 +20,11 @@ final class PaymentProblems {
                 "Refund of " + requested + " exceeds the " + refundable + " still refundable");
     }
 
+    static ErrorResponseException refundNotCompleted(String providerStatus) {
+        return problem(HttpStatus.UNPROCESSABLE_CONTENT, "The card processor did not complete the refund (status "
+                + providerStatus + "); no money was returned");
+    }
+
     static ErrorResponseException idempotencyKeyReused(String idempotencyKey) {
         return problem(HttpStatus.CONFLICT,
                 "Idempotency key " + idempotencyKey + " was already used for a different refund");

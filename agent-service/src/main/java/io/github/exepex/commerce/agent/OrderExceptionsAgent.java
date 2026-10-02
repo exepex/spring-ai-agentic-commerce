@@ -91,11 +91,15 @@ public class OrderExceptionsAgent {
         }
     }
 
+    /**
+     * If not even the hand-off reaches the MCP server, the failure is passed on: Kafka then delivers the stock-out
+     * again, so the order is never left without an agent or a person handling it.
+     */
     private void handToHuman(UUID orderId, String summary) {
         try {
             toolboxes.callAsOrderExceptionsAgent("escalate_to_human", Map.of("orderId", orderId.toString(), "summary", summary));
         } catch (RuntimeException unavailable) {
-            LOGGER.error("Could not hand order {} to a human either: {}", orderId, summary, unavailable);
+            throw new IllegalStateException("Could not hand order " + orderId + " to a human: " + summary, unavailable);
         }
     }
 }

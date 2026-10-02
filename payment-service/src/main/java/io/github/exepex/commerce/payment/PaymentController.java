@@ -27,7 +27,9 @@ class PaymentController {
     record ChargeRequest(@NotNull UUID orderId, @NotBlank @Email String customerEmail, @NotNull @Positive BigDecimal amount,
             @NotBlank @Size(min = 3, max = 3) String currency, @NotBlank String paymentMethod) {}
 
-    record RefundRequest(@NotNull @Positive BigDecimal amount, @NotBlank String reason, @NotBlank String idempotencyKey) {}
+    /** The reason is stored with the refund, so it is limited to what that column holds. */
+    record RefundRequest(@NotNull @Positive BigDecimal amount, @NotBlank @Size(max = 500) String reason,
+            @NotBlank String idempotencyKey) {}
 
     record OutageRequest(boolean active) {}
 

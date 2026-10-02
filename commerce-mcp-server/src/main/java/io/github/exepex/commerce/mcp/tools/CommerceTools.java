@@ -202,11 +202,16 @@ class CommerceTools {
             when a service keeps failing. Say what happened, what you already did, and what you recommend.""")
     Acknowledgement escalateToHuman(McpTransportContext context,
             @McpToolParam(description = "The order id, if the problem is about one order", required = false) String orderId,
-            @McpToolParam(description = "What happened, what you already did, and what you recommend") String summary) {
+            @McpToolParam(description = "What happened, what you already did, and what you recommend") String summary,
+            @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
         UUID id = orderId == null || orderId.isBlank() ? null : ToolGuard.parseOrderId(orderId);
-        return guard.run(context, "escalate_to_human", id, "Escalated to a human", true, agentId ->
-                new Acknowledgement(escalations.escalate(agentId, id, summary).getId(),
-                        "The operations team has the escalation and will take it from here"));
+        return guard.run(context, "escalate_to_human", id, "Escalated to a human", true, agentId -> {
+            if (id != null) {
+                guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
+            }
+            return new Acknowledgement(escalations.escalate(agentId, id, summary).getId(),
+                    "The operations team has the escalation and will take it from here");
+        });
     }
 
     private PaymentSummary paymentOf(UUID orderId) {

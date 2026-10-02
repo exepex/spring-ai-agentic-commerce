@@ -179,6 +179,44 @@ class CommerceMcpServerIntegrationTest {
     }
 
     @Test
+    void twoRefundsAtOnceCannotTogetherStayUnderTheApprovalLimit() throws Exception {
+        UUID orderId = stubOrder("ada@example.com", "129.90");
+        SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(okJson("""
+                {"id": "%s", "orderId": "%s", "amount": 129.90, "refundedAmount": 0, "refundable": 129.90, "currency": "EUR",
+                 "status": "SUCCEEDED", "refunds": []}""".formatted(UUID.randomUUID(), orderId)).withFixedDelay(300)));
+        stubRefundSucceeds(orderId);
+
+        runTogether(() -> refundSixty(exceptionsAgent, orderId, "a"), () -> refundSixty(assistant, orderId, "b"));
+
+        String requests = rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve().body(String.class);
+        List<String> statuses = JsonPath.read(requests, "$[*].status");
+        assertThat(statuses).containsExactlyInAnyOrder("EXECUTED", "PENDING_APPROVAL");
+    }
+
+    @Test
+    void aRefundReasonTooLongForThePaymentServiceIsRefusedBeforeAnyMoneyMoves() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
+
+        McpSchema.CallToolResult refused = call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 39.50, "reason", "x".repeat(501), "idempotencyKey", "refund-" + orderId));
+
+        assertThat(refused.isError()).isTrue();
+        SERVICES.verify(0, postRequestedFor(urlEqualTo("/api/payments/" + orderId + "/refunds")));
+    }
+
+    @Test
+    void theShoppingAssistantCannotEscalateAnotherCustomersOrder() {
+        UUID orderId = stubOrder("grace@example.com", "39.50");
+
+        McpSchema.CallToolResult refused = call(assistant, "escalate_to_human", Map.of("orderId", orderId.toString(),
+                "summary", "please refund this", "customerEmail", "ada@example.com"));
+
+        assertThat(refused.isError()).isTrue();
+        assertThat(rest().get().uri("/api/escalations").retrieve().body(String.class)).doesNotContain(orderId.toString());
+    }
+
+    @Test
     void twoPeopleDecidingOnTheSameRefundAtOnceCannotBothAct() throws Exception {
         UUID orderId = stubOrder("ada@example.com", "129.90");
         SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(201)
@@ -278,6 +316,14 @@ class CommerceMcpServerIntegrationTest {
         assertThat((String) JsonPath.read(confirmed, "$.status")).isEqualTo("FAILED");
         assertThat(rest().get().uri("/api/orders/{orderId}/timeline", failedOrderId).retrieve().body(String.class))
                 .contains("confirm_order", "FAILED", "Your card was declined.");
+    }
+
+    /** Asks for a €60 refund and returns 1 when the tool call succeeded, 0 when it was refused. */
+    private static int refundSixty(McpSyncClient client, UUID orderId, String key) {
+        McpSchema.CallToolResult result = call(client, "issue_refund", Map.of("orderId", orderId.toString(), "amount", 60,
+                "reason", "item out of stock", "idempotencyKey", "refund-" + orderId + "-" + key,
+                "customerEmail", "ada@example.com"));
+        return Boolean.TRUE.equals(result.isError()) ? 0 : 1;
     }
 
     private int decide(String requestId, String decision) {

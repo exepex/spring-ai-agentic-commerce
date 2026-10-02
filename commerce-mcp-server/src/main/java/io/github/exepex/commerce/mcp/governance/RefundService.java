@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The refund policy, enforced in code rather than in a prompt:
@@ -27,20 +29,29 @@ import org.springframework.stereotype.Service;
 @Service
 public class RefundService {
 
+    private record NewRequest(RefundRequest request, BigDecimal refundedOrAsked) {}
+
+    /** The longest reason the payment service stores; longer ones are refused before any money moves. */
+    static final int MAX_REASON_LENGTH = 500;
+
     private final RefundRequestRepository requests;
     private final PaymentApi payments;
     private final OrderApi orders;
     private final AuditTrail audit;
     private final BigDecimal approvalThreshold;
+    private final TransactionTemplate transaction;
+    private final JdbcClient jdbc;
     private final Clock clock;
 
     RefundService(RefundRequestRepository requests, PaymentApi payments, OrderApi orders, AuditTrail audit,
-            GovernanceProperties properties, Clock clock) {
+            GovernanceProperties properties, TransactionTemplate transaction, JdbcClient jdbc, Clock clock) {
         this.requests = requests;
         this.payments = payments;
         this.orders = orders;
         this.audit = audit;
         this.approvalThreshold = properties.refundApprovalThreshold();
+        this.transaction = transaction;
+        this.jdbc = jdbc;
         this.clock = clock;
     }
 
@@ -63,6 +74,10 @@ public class RefundService {
     /** Asking again with the same idempotency key returns the first request, retrying it only if it had failed. */
     public RefundRequest requestRefund(String agentId, UUID orderId, BigDecimal amount, String reason,
             String idempotencyKey) {
+        if (reason != null && reason.length() > MAX_REASON_LENGTH) {
+            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "A refund reason can be at most " + MAX_REASON_LENGTH + " characters; say it in one sentence.");
+        }
         Optional<RefundRequest> earlier = requests.findByIdempotencyKey(idempotencyKey);
         if (earlier.isPresent()) {
             RefundRequest request = earlier.get();
@@ -80,16 +95,25 @@ public class RefundService {
         String currency = payment != null
                 ? payment.currency()
                 : Downstream.call("order service", () -> orders.getOrder(orderId)).currency();
-        BigDecimal refundedOrAsked = amount.add(requestedBefore(orderId));
-        boolean needsApproval = refundedOrAsked.compareTo(approvalThreshold) > 0;
         // Saved before the payment service is called. Until it confirms, the request counts as FAILED: if this
         // process stops in between, a retry with the same key is safe and the processor pays out at most once.
-        RefundRequest request = requests.save(new RefundRequest(orderId, amount, currency, reason,
-                idempotencyKey, agentId,
-                needsApproval ? RefundRequest.Status.PENDING_APPROVAL : RefundRequest.Status.FAILED, Instant.now(clock)));
-        if (needsApproval) {
+        NewRequest decided = transaction.execute(status -> {
+            // One new refund per order at a time, so two at once cannot each miss the other's amount and stay under
+            // the approval limit together.
+            jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:orderId, 0))")
+                    .param("orderId", orderId.toString())
+                    .query((row, number) -> number)
+                    .single();
+            BigDecimal refundedOrAsked = amount.add(requestedBefore(orderId));
+            boolean needsApproval = refundedOrAsked.compareTo(approvalThreshold) > 0;
+            return new NewRequest(requests.save(new RefundRequest(orderId, amount, currency, reason, idempotencyKey,
+                    agentId, needsApproval ? RefundRequest.Status.PENDING_APPROVAL : RefundRequest.Status.FAILED,
+                    Instant.now(clock))), refundedOrAsked);
+        });
+        RefundRequest request = decided.request();
+        if (request.getStatus() == RefundRequest.Status.PENDING_APPROVAL) {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, "issue_refund", AuditEvent.Outcome.PENDING_APPROVAL,
-                    "Refund of " + amount + " " + currency + " takes this order's refunds to " + refundedOrAsked
+                    "Refund of " + amount + " " + currency + " takes this order's refunds to " + decided.refundedOrAsked()
                             + ", above the " + approvalThreshold + " limit, and waits for a human to approve it",
                     reason);
             return request;
