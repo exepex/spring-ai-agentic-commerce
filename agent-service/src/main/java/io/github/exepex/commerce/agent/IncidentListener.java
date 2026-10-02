@@ -23,6 +23,6 @@ class IncidentListener {
     @KafkaListener(topics = "${commerce.topics.incidents}", autoStartup = "#{'${commerce.servicenow.mcp-url:}' != ''}")
     void onIncident(String json) {
         JsonNode event = jsonMapper.readTree(json);
-        agent.handleIncident(event.path("number").asString(), json);
+        agent.handleIncident(event.path("number").asString(), event.path("orderId").asString(""), json);
     }
 }

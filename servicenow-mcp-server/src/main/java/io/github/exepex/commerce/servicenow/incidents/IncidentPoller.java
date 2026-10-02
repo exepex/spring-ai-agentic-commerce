@@ -20,6 +20,10 @@ import org.springframework.stereotype.Component;
  * assigning it to the integration user, then announced on Kafka: a claimed incident is no longer new, so it is never
  * announced twice. ServiceNow offers no outbound call without a public URL, so the demo asks every poll interval.
  *
+ * <p>The Table API has no conditional update, so each incident is read again right before it is claimed or handed
+ * over, and left alone if a person took it or changed it meanwhile. That narrows the race with a person to the time
+ * between that read and the update.
+ *
  * <p>A claimed incident the agent has not finished within {@code commerce.servicenow.stale-after}, because
  * agent-service was down or its run stopped, is handed to the default team, so no incident waits for an agent that
  * is not coming.
@@ -64,7 +68,11 @@ public class IncidentPoller {
     }
 
     private void claimNewIncidents() {
-        for (ServiceNowClient.Incident incident : serviceNow.findNewForAgent()) {
+        for (ServiceNowClient.Incident found : serviceNow.findNewForAgent()) {
+            ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
+            if (incident == null || incident.isAssigned() || !ServiceNowClient.STATE_NEW.equals(incident.state())) {
+                continue;
+            }
             Map<String, String> claim = new LinkedHashMap<>();
             claim.put("assigned_to", serviceNow.integrationUserSysId());
             claim.put("state", ServiceNowClient.STATE_IN_PROGRESS);
@@ -72,15 +80,19 @@ public class IncidentPoller {
             serviceNow.update(incident.sysId(), claim);
             record("claim_incident", "Claimed " + incident.number() + ": " + incident.shortDescription());
             kafka.send(topic, incident.number(), new IncidentEvent(UUID.randomUUID(), incident.number(),
-                    incident.shortDescription(), Instant.now(clock)));
+                    incident.shortDescription(), incident.orderId(), Instant.now(clock)));
         }
     }
 
     private void handOverStaleClaims() {
         Instant staleBefore = Instant.now(clock).minus(properties.staleAfter());
         ServiceNowProperties.Team team = properties.teams().get(properties.defaultTeam());
-        for (ServiceNowClient.Incident incident : serviceNow.findClaimedByAgent()) {
-            if (incident.updatedAt() == null || !incident.updatedAt().isBefore(staleBefore)) {
+        for (ServiceNowClient.Incident found : serviceNow.findClaimedByAgent()) {
+            if (!isStaleClaim(found, staleBefore)) {
+                continue;
+            }
+            ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
+            if (incident == null || !isStaleClaim(incident, staleBefore)) {
                 continue;
             }
             Map<String, String> handOver = new LinkedHashMap<>();
@@ -92,6 +104,13 @@ public class IncidentPoller {
             serviceNow.updateByDisplayValue(incident.sysId(), handOver);
             record("assign_to_team", "Handed " + incident.number() + " to " + team.group() + " because the agent did not finish it");
         }
+    }
+
+    /** Still the agent's, still in progress, and untouched since before {@code staleBefore}. */
+    private boolean isStaleClaim(ServiceNowClient.Incident incident, Instant staleBefore) {
+        return serviceNow.integrationUserSysId().equals(incident.assignedToSysId())
+                && ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())
+                && incident.updatedAt() != null && incident.updatedAt().isBefore(staleBefore);
     }
 
     /** Recorded in the shared audit trail as the agent the poller works for. */

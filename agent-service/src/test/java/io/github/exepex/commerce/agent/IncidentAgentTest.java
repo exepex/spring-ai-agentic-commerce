@@ -35,7 +35,7 @@ class IncidentAgentTest {
         ChatModel model = mock(ChatModel.class);
         when(toolboxes.callAsIncidentAgent(eq("assign_to_team"), any())).thenReturn(result("Assigned", false));
 
-        agent(model, false).handleIncident(INCIDENT, "{}");
+        agent(model, false).handleIncident(INCIDENT, "", "{}");
 
         verify(toolboxes).callAsIncidentAgent(eq("assign_to_team"),
                 argThat(arguments -> INCIDENT.equals(arguments.get("number"))));
@@ -50,7 +50,7 @@ class IncidentAgentTest {
                 .thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("I looked at it.")))));
         when(toolboxes.callAsIncidentAgent(eq("assign_to_team"), any())).thenReturn(result("Assigned", false));
 
-        agent(model, true).handleIncident(INCIDENT, "{}");
+        agent(model, true).handleIncident(INCIDENT, "", "{}");
 
         verify(toolboxes).callAsIncidentAgent(eq("assign_to_team"), argThat(arguments ->
                 arguments.get("note").toString().contains("finished without resolving")));
@@ -61,17 +61,17 @@ class IncidentAgentTest {
         when(toolboxes.callAsIncidentAgent(eq("assign_to_team"), any()))
                 .thenReturn(result("Refused: Incident INC0010001 is not yours to change", true));
 
-        assertThatCode(() -> agent(mock(ChatModel.class), false).handleIncident(INCIDENT, "{}")).doesNotThrowAnyException();
+        assertThatCode(() -> agent(mock(ChatModel.class), false).handleIncident(INCIDENT, "", "{}")).doesNotThrowAnyException();
     }
 
     @Test
     void aHandOffServiceNowDidNotTakeIsDeliveredAgain() {
         when(toolboxes.callAsIncidentAgent(eq("assign_to_team"), any())).thenReturn(result("502 Bad Gateway", true));
-        assertThatThrownBy(() -> agent(mock(ChatModel.class), false).handleIncident(INCIDENT, "{}"))
+        assertThatThrownBy(() -> agent(mock(ChatModel.class), false).handleIncident(INCIDENT, "", "{}"))
                 .isInstanceOf(HandOffFailedException.class);
 
         when(toolboxes.callAsIncidentAgent(eq("assign_to_team"), any())).thenThrow(new IllegalStateException("down"));
-        assertThatThrownBy(() -> agent(mock(ChatModel.class), false).handleIncident(INCIDENT, "{}"))
+        assertThatThrownBy(() -> agent(mock(ChatModel.class), false).handleIncident(INCIDENT, "", "{}"))
                 .isInstanceOf(HandOffFailedException.class);
     }
 

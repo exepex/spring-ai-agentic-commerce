@@ -82,9 +82,9 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
 | `get_order` | ✅ (own orders) | ✅ | ✅ |
 | `track_shipment` | ✅ (own orders) | ✅ | ✅ |
 | `propose_order` | ✅ | | |
-| `cancel_order` | ✅ (own orders) | ✅ | ✅ |
-| `issue_refund` | ✅ (own orders, limit applies) | ✅ (limit applies) | ✅ (limit applies) |
-| `notify_customer` | | ✅ | ✅ |
+| `cancel_order` | ✅ (own orders) | ✅ | ✅ (linked order) |
+| `issue_refund` | ✅ (own orders, limit applies) | ✅ (limit applies) | ✅ (linked order, limit applies) |
+| `notify_customer` | | ✅ | ✅ (linked order) |
 | `escalate_to_human` | ✅ | ✅ | |
 | ServiceNow `get_incident`, `add_work_note`, `list_teams`, `resolve_incident` | | | ✅ (incidents it is working) |
 | ServiceNow `assign_to_team` | | | ✅ (also when switched off) |
@@ -116,7 +116,8 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    has it. An order has at most one open escalation, and once it is with a person, agents leave its failed refund to
    them.
 8. **Incident from ServiceNow.** The service desk raises an incident in the agent's assignment group, for example
-   "Order 6f0c… arrived broken, the customer wants their money back". The incident agent claims it, reads it, checks
+   "Order arrived broken, the customer wants their money back", with the order's id in the incident's Correlation ID
+   field. The incident agent claims it, reads it, checks
    the order, payment and shipment, refunds within its limit, tells the customer, writes what it found and did as
    work notes, and resolves the incident. When it cannot decide, it hands the incident to the team whose work it is
    (customer care, payments or fulfilment) with a note of what that team needs to do; ServiceNow notifies the team.
@@ -148,11 +149,14 @@ The incident agent needs a ServiceNow instance; a free developer instance (devel
 3. Set `AGENTIC_COMMERCE_SERVICENOW_INSTANCE_URL`, `_USERNAME` and `_PASSWORD` in `.env` to that instance and user.
    Other group names can be set with the variables in `servicenow-mcp-server`'s `application.yml`.
 
-Then raise an incident in the `Online Shop Agent` group, naming an order id or the customer's email. Within half a
-minute the agent claims it.
+Then raise an incident in the `Online Shop Agent` group, with the order's id in its Correlation ID field. Within half
+a minute the agent claims it. The agent may cancel, refund or notify the customer about that order only; an incident
+without one, or about another order, is investigated and handed to a team.
 
 For development, start only the infrastructure (`docker compose up -d postgres kafka jaeger`), run the services
-from your IDE or with `mvn spring-boot:run`, and the UI with `npm start` in `shop-ui`.
+from your IDE or with `mvn spring-boot:run`, and the UI with `npm start` in `shop-ui`. To work ServiceNow incidents
+this way, also run servicenow-mcp-server and start agent-service with
+`AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8087`.
 
 ## Tests
 
@@ -192,7 +196,10 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
   incident agent's incidents always end with an owner: resolved by the agent, or assigned to a team, by the agent, by
   code when its run fails or ends without either, or by the poller when a claimed incident is not finished in time.
 - **The agent only changes what it owns.** Every ServiceNow tool works only on an incident assigned to the agent's
-  integration user, so it cannot touch incidents that a person or another team owns.
+  integration user, so it cannot touch incidents that a person or another team owns. An incident run may change only
+  the order linked in the incident's Correlation ID, so text in the incident cannot steer it to another order. The
+  Table API has no conditional update, so the poller reads an incident again right before claiming or handing it
+  over; a person who takes it in the moment between that read and the update is overwritten.
 - **Stock changes lock the product row,** so concurrent reservations and write-offs never reserve more than exists.
 - **No database transaction is held open across remote calls.** Checkout saves the order before charging the card,
   and releases the stock if any step fails.

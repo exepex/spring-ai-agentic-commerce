@@ -27,7 +27,9 @@ class ServiceNowClient {
 
     private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String INCIDENT_FIELDS = "sys_id,number,short_description,description,state,assignment_group,"
-            + "assigned_to,caller_id,sys_updated_on";
+            + "assigned_to,caller_id,correlation_id,sys_updated_on";
+    /** How many of an incident's latest work notes and comments are read. */
+    private static final int JOURNAL_LIMIT = 50;
 
     private final ServiceNowProperties properties;
     private final RestClient restClient;
@@ -46,10 +48,13 @@ class ServiceNowClient {
                 .build();
     }
 
-    /** An incident as the tools and the poller see it. */
+    /**
+     * An incident as the tools and the poller see it. {@code orderId} is the shop order it is about, taken from its
+     * Correlation ID field; empty when it names none.
+     */
     record Incident(String sysId, String number, String shortDescription, String description, String state,
             String stateName, String assignmentGroup, String assignedToSysId, String assignedTo, String caller,
-            Instant updatedAt) {
+            String orderId, Instant updatedAt) {
 
         boolean isAssigned() {
             return assignedToSysId != null && !assignedToSysId.isBlank();
@@ -73,12 +78,13 @@ class ServiceNowClient {
         return query("assigned_to=" + integrationUserSysId() + "^state=" + STATE_IN_PROGRESS, 50);
     }
 
+    /** The incident's latest work notes and comments, oldest first. */
     List<JournalEntry> journalOf(String incidentSysId) {
         JsonNode body = restClient.get()
                 .uri(uri -> uri.path("/api/now/table/sys_journal_field")
-                        .queryParam("sysparm_query", "element_id=" + incidentSysId + "^ORDERBYsys_created_on")
+                        .queryParam("sysparm_query", "element_id=" + incidentSysId + "^ORDERBYDESCsys_created_on")
                         .queryParam("sysparm_fields", "sys_created_on,sys_created_by,element,value")
-                        .queryParam("sysparm_limit", 50)
+                        .queryParam("sysparm_limit", JOURNAL_LIMIT)
                         .build())
                 .retrieve().body(JsonNode.class);
         List<JournalEntry> entries = new ArrayList<>();
@@ -87,7 +93,7 @@ class ServiceNowClient {
                     entry.path("sys_created_by").asString(""), entry.path("element").asString(""),
                     entry.path("value").asString("")));
         }
-        return entries;
+        return entries.reversed();
     }
 
     /** Updates fields of an incident with their stored values: state codes and sys_ids. */
@@ -144,7 +150,7 @@ class ServiceNowClient {
             incidents.add(new Incident(value(row, "sys_id"), value(row, "number"), value(row, "short_description"),
                     value(row, "description"), value(row, "state"), display(row, "state"),
                     display(row, "assignment_group"), value(row, "assigned_to"), display(row, "assigned_to"),
-                    display(row, "caller_id"), utc(value(row, "sys_updated_on"))));
+                    display(row, "caller_id"), value(row, "correlation_id").strip(), utc(value(row, "sys_updated_on"))));
         }
         return incidents;
     }

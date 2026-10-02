@@ -6,6 +6,7 @@ import io.modelcontextprotocol.spec.McpSchema;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -26,6 +27,8 @@ public class IncidentAgent {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     /** How the ServiceNow MCP server marks a call its rules refuse, which asking again will not change. */
     private static final String REFUSED = "Refused: ";
+    /** The longest note the ServiceNow MCP server accepts. */
+    private static final int MAX_NOTE_LENGTH = 4000;
 
     private final ChatClient chatClient;
     private final McpToolboxes toolboxes;
@@ -46,7 +49,11 @@ public class IncidentAgent {
         this.systemPrompt = definition.systemPrompt(properties.slack().isConfigured() ? properties.slack().channelId() : null);
     }
 
-    public void handleIncident(String number, String incidentEvent) {
+    /**
+     * @param linkedOrderId the order the incident is about, from its Correlation ID field; empty when it names none,
+     *     and then the agent may investigate and hand over but not change any order
+     */
+    public void handleIncident(String number, String linkedOrderId, String incidentEvent) {
         boolean enabled;
         try {
             enabled = switchboard.isEnabled(AgentSwitchboard.INCIDENT_AGENT);
@@ -60,7 +67,8 @@ public class IncidentAgent {
             return;
         }
         Instant started = Instant.now();
-        ToolRun run = new ToolRun(null, definition.toolCallBudget());
+        ToolRun run = new ToolRun(null, definition.toolCallBudget(),
+                linkedOrderId == null || linkedOrderId.isBlank() ? Set.of() : Set.of(linkedOrderId));
         ChatResponse response;
         try {
             response = chatClient.prompt()
@@ -101,19 +109,26 @@ public class IncidentAgent {
     private void handToTeam(String number, String note) {
         McpSchema.CallToolResult result;
         try {
-            result = toolboxes.callAsIncidentAgent("assign_to_team", Map.of("number", number, "note", note));
+            result = toolboxes.callAsIncidentAgent("assign_to_team", Map.of("number", number, "note", abbreviate(note)));
         } catch (RuntimeException unavailable) {
             throw new HandOffFailedException("Could not hand incident " + number + " to a team: " + note, unavailable);
         }
         if (Boolean.TRUE.equals(result.isError())) {
             String message = textOf(result);
             if (message.startsWith(REFUSED)) {
+                // Usually a person took the incident meanwhile. Whatever the reason, an incident the agent still owns
+                // goes to the default team once its claim is stale, so it is never left without an owner.
                 LOGGER.warn("Incident {} was not handed to a team: {}", number, message);
                 return;
             }
             throw new HandOffFailedException("ServiceNow did not take the hand-off of incident " + number + ": " + message,
                     null);
         }
+    }
+
+    /** A hand-off note fits ServiceNow's limit, however long the agent's summary was. */
+    private static String abbreviate(String note) {
+        return note.length() <= MAX_NOTE_LENGTH ? note : note.substring(0, MAX_NOTE_LENGTH - 1) + "…";
     }
 
     private static String textOf(McpSchema.CallToolResult result) {

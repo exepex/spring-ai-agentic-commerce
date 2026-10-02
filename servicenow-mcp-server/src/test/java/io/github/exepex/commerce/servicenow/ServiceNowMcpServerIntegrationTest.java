@@ -5,6 +5,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.patch;
@@ -61,6 +62,7 @@ class ServiceNowMcpServerIntegrationTest {
 
     private static final String AGENT_TOKEN = "dev-incident-agent-token";
     private static final String AGENT_USER = "a1b2c3d4agentuser";
+    private static final String LINKED_ORDER = "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c";
     private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
             .withZone(ZoneOffset.UTC);
     private static final WireMockServer SERVICES = startWireMock();
@@ -87,9 +89,13 @@ class ServiceNowMcpServerIntegrationTest {
         SERVICES.resetAll();
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/sys_user"))
                 .willReturn(okJson("{\"result\": [{\"sys_id\": \"" + AGENT_USER + "\"}]}")));
-        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/sys_journal_field")).willReturn(okJson("""
-                {"result": [{"sys_created_on": "2026-10-02 09:00:00", "sys_created_by": "desk.ana", "element": "comments",
-                             "value": "The customer says order 6f0c is late."}]}""")));
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/sys_journal_field"))
+                .withQueryParam("sysparm_query", equalTo("element_id=sys-1^ORDERBYDESCsys_created_on"))
+                .willReturn(okJson("""
+                        {"result": [{"sys_created_on": "2026-10-02 09:05:00", "sys_created_by": "desk.ana",
+                                     "element": "work_notes", "value": "Asked the warehouse."},
+                                    {"sys_created_on": "2026-10-02 09:00:00", "sys_created_by": "desk.ana",
+                                     "element": "comments", "value": "The customer says order 6f0c is late."}]}""")));
         SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-1")).willReturn(okJson("{\"result\": {}}")));
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": true}")));
         SERVICES.stubFor(post("/api/agent/tool-calls").willReturn(aResponse().withStatus(200)));
@@ -121,18 +127,24 @@ class ServiceNowMcpServerIntegrationTest {
         String incident = text(call("get_incident", Map.of("number", "INC0010001")));
 
         assertThat((String) JsonPath.read(incident, "$.shortDescription")).isEqualTo("Order arrived broken");
-        assertThat((String) JsonPath.read(incident, "$.notes[0].text")).isEqualTo("The customer says order 6f0c is late.");
+        assertThat((String) JsonPath.read(incident, "$.linkedOrderId")).isEqualTo(LINKED_ORDER);
+        assertThat(JsonPath.<List<String>>read(incident, "$.notes[*].text"))
+                .containsExactly("The customer says order 6f0c is late.", "Asked the warehouse.");
         assertThat(call("get_incident", Map.of("number", "INC1^ORactive=true")).isError()).isTrue();
     }
 
     @Test
-    void theAgentChangesOnlyAnIncidentItIsWorking() {
+    void theAgentReadsAndChangesOnlyAnIncidentItIsWorking() {
         stubIncident("someone-else", "2");
 
+        McpSchema.CallToolResult read = call("get_incident", Map.of("number", "INC0010001"));
         McpSchema.CallToolResult refused = call("add_work_note", Map.of("number", "INC0010001", "note", "Checked the order."));
 
+        assertThat(read.isError()).isTrue();
+        assertThat(text(read)).contains("not yours to change");
         assertThat(refused.isError()).isTrue();
         assertThat(text(refused)).contains("not yours to change");
+        SERVICES.verify(0, getRequestedFor(urlPathEqualTo("/api/now/table/sys_journal_field")));
         SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/tool-calls"))
                 .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))
@@ -192,6 +204,7 @@ class ServiceNowMcpServerIntegrationTest {
                   "short_description": {"value": "Order arrived broken"}, "state": {"value": "1", "display_value": "New"},
                   "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
         stubClaimed("[]");
+        stubIncident("", "1");
 
         poller.poll();
 
@@ -199,8 +212,23 @@ class ServiceNowMcpServerIntegrationTest {
                 .withQueryParam("sysparm_input_display_value", equalTo("false"))
                 .withRequestBody(matchingJsonPath("$.assigned_to", equalTo(AGENT_USER)))
                 .withRequestBody(matchingJsonPath("$.state", equalTo("2"))));
-        assertThat(incidentEvents()).anySatisfy(event ->
-                assertThat((String) JsonPath.read(event, "$.number")).isEqualTo("INC0010001"));
+        assertThat(incidentEvents()).anySatisfy(event -> {
+            assertThat((String) JsonPath.read(event, "$.number")).isEqualTo("INC0010001");
+            assertThat((String) JsonPath.read(event, "$.orderId")).isEqualTo(LINKED_ORDER);
+        });
+    }
+
+    @Test
+    void anIncidentAPersonTookBeforeTheClaimIsLeftToThem() {
+        stubNewIncidents("""
+                [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "1"},
+                  "assigned_to": {"value": ""}}]""");
+        stubClaimed("[]");
+        stubIncident("desk.ana", "2");
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
     }
 
     @Test
@@ -210,6 +238,7 @@ class ServiceNowMcpServerIntegrationTest {
                 [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "2"},
                   "assigned_to": {"value": "%s"}, "sys_updated_on": {"value": "%s"}}]"""
                 .formatted(AGENT_USER, SERVICENOW_TIME.format(Instant.now().minus(Duration.ofHours(1)))));
+        stubIncident(AGENT_USER, "2", Instant.now().minus(Duration.ofHours(1)));
 
         poller.poll();
 
@@ -219,7 +248,25 @@ class ServiceNowMcpServerIntegrationTest {
                 .withRequestBody(matchingJsonPath("$.work_notes", containing("did not finish"))));
     }
 
+    @Test
+    void aClaimTheAgentWorkedOnSinceTheListingIsNotHandedOver() {
+        stubNewIncidents("[]");
+        stubClaimed("""
+                [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "2"},
+                  "assigned_to": {"value": "%s"}, "sys_updated_on": {"value": "%s"}}]"""
+                .formatted(AGENT_USER, SERVICENOW_TIME.format(Instant.now().minus(Duration.ofHours(1)))));
+        stubIncident(AGENT_USER, "2", Instant.now());
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
+    }
+
     private void stubIncident(String assignedTo, String state) {
+        stubIncident(assignedTo, state, Instant.now());
+    }
+
+    private void stubIncident(String assignedTo, String state, Instant updatedAt) {
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
                 .withQueryParam("sysparm_query", equalTo("number=INC0010001"))
                 .willReturn(okJson("""
@@ -228,8 +275,9 @@ class ServiceNowMcpServerIntegrationTest {
                           "state": {"value": "%s", "display_value": "In Progress"},
                           "assignment_group": {"display_value": "Online Shop Agent"},
                           "assigned_to": {"value": "%s", "display_value": "Incident Agent"},
-                          "caller_id": {"display_value": "Ada Lovelace"}, "sys_updated_on": {"value": "2026-10-02 09:00:00"}}]}"""
-                        .formatted(state, assignedTo))));
+                          "caller_id": {"display_value": "Ada Lovelace"}, "correlation_id": {"value": "%s"},
+                          "sys_updated_on": {"value": "%s"}}]}"""
+                        .formatted(state, assignedTo, LINKED_ORDER, SERVICENOW_TIME.format(updatedAt)))));
     }
 
     private void stubNewIncidents(String rows) {

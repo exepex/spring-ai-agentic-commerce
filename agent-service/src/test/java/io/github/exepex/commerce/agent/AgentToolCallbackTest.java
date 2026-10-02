@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ToolContext;
@@ -88,6 +89,36 @@ class AgentToolCallbackTest {
 
         assertThat(afterSwitchOff).startsWith("Refused").contains("switched off");
         assertThat(slackTool.inputs).hasSize(1);
+    }
+
+    @Test
+    void aRunLimitedToOneOrderMayChangeOnlyThatOrder() {
+        String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        RecordingTool refund = new RecordingTool("issue_refund");
+        AgentToolCallback tool = new AgentToolCallback(refund, false, () -> true);
+        ToolContext context = contextFor(new ToolRun(null, 5, Set.of(linkedOrder)));
+
+        String otherOrder = tool.call("{\"orderId\": \"7c9e6679-7425-40de-944b-e07fc1f90ae7\"}", context);
+        String sameOrderInCapitals = tool.call("{\"orderId\": \" " + linkedOrder.toUpperCase() + "\"}", context);
+
+        assertThat(otherOrder).startsWith("Refused").contains("only change the order linked to its incident");
+        assertThat(sameOrderInCapitals).doesNotStartWith("Refused");
+        assertThat(refund.inputs).hasSize(1);
+    }
+
+    @Test
+    void aRunWithNoLinkedOrderMayReadOrdersButChangeNone() {
+        ToolContext context = contextFor(new ToolRun(null, 5, Set.of()));
+
+        String lookup = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true)
+                .call("{\"orderId\": \"o-1\"}", context);
+        String cancel = new AgentToolCallback(new RecordingTool("cancel_order"), false, () -> true)
+                .call("{\"orderId\": \"o-1\"}", context);
+        String notify = new AgentToolCallback(new RecordingTool("notify_customer"), false, () -> true).call("{}", context);
+
+        assertThat(lookup).doesNotStartWith("Refused");
+        assertThat(cancel).startsWith("Refused");
+        assertThat(notify).startsWith("Refused");
     }
 
     @Test
