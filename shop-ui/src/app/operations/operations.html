@@ -64,7 +64,7 @@
                   <div class="small">Assigned to you</div>
                   <div class="row">
                     @if (failedRefundFor(escalation); as failed) {
-                      <button class="primary" (click)="decide(failed, 'retry')" [disabled]="busy() === failed.id">
+                      <button class="primary" (click)="decide(failed, 'retry', escalation.id)" [disabled]="busy() === escalation.id">
                         Retry refund of {{ failed.amount | currency: failed.currency }}
                       </button>
                     }

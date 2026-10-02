@@ -184,7 +184,12 @@ public class RefundService {
             throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
                     + " was already used for a different refund. Use a new key for a new refund.");
         }
-        return earlier.getStatus() == RefundRequest.Status.FAILED ? execute(earlier, agentId) : earlier;
+        if (earlier.getStatus() != RefundRequest.Status.FAILED) {
+            return earlier;
+        }
+        // A failed refund of an order handed to a person is theirs to retry, not the agent's.
+        escalations.ensureNotWithHuman(orderId);
+        return execute(earlier, agentId);
     }
 
     /** What was already refunded or asked for on the order, except refunds a person turned down. */
