@@ -268,6 +268,7 @@ class ServiceNowMcpServerIntegrationTest {
         stubNewIncidents("[]");
         stubClaimed("""
                 [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "2"},
+                  "assignment_group": {"display_value": "Online Shop Agent"},
                   "assigned_to": {"value": "%s"}, "sys_updated_on": {"value": "%s"}}]"""
                 .formatted(AGENT_USER, SERVICENOW_TIME.format(Instant.now().minus(Duration.ofHours(1)))));
         stubIncident(AGENT_USER, "2", Instant.now().minus(Duration.ofHours(1)));
@@ -285,6 +286,7 @@ class ServiceNowMcpServerIntegrationTest {
         stubNewIncidents("[]");
         stubClaimed("""
                 [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "2"},
+                  "assignment_group": {"display_value": "Online Shop Agent"},
                   "assigned_to": {"value": "%s"}, "sys_updated_on": {"value": "%s"}}]"""
                 .formatted(AGENT_USER, SERVICENOW_TIME.format(Instant.now().minus(Duration.ofHours(1)))));
         stubIncident(AGENT_USER, "2", Instant.now());

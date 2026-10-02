@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.servicenow.incidents;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -13,6 +14,7 @@ import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -27,6 +29,7 @@ class IncidentPollerTest {
             "customer-care", Map.of("customer-care", new ServiceNowProperties.Team("Customer Care", "everything else")));
     private static final ServiceNowClient.Incident NEW_INCIDENT = new ServiceNowClient.Incident("sys-1", "INC0010001",
             "Order arrived broken", "", ServiceNowClient.STATE_NEW, "New", "Online Shop Agent", "", "", "Ada", "", "", null, null);
+    private static final Instant NOW = Instant.parse("2026-10-02T12:00:00Z");
 
     private final ServiceNowClient serviceNow = mock(ServiceNowClient.class);
     private final GovernanceApi governance = mock(GovernanceApi.class);
@@ -89,5 +92,43 @@ class IncidentPollerTest {
                 mock(AgentRegistry.class), Clock.systemUTC()).poll();
 
         verify(serviceNow, never()).update("sys-1", Map.of("assigned_to", "", "state", ServiceNowClient.STATE_NEW));
+    }
+
+    @Test
+    void aStaleClaimStillInTheAgentGroupGoesToTheDefaultTeam() {
+        ServiceNowClient.Incident stale = claimedLongAgoIn("Online Shop Agent");
+        when(serviceNow.integrationUserSysId()).thenReturn("agent-sys-id");
+        when(serviceNow.findClaimedByAgent()).thenReturn(List.of(stale));
+        when(serviceNow.findByNumber("INC0010001")).thenReturn(Optional.of(stale));
+        when(serviceNow.findNewForAgent()).thenReturn(List.of());
+
+        pollAt(NOW);
+
+        verify(serviceNow).updateByDisplayValue(eq("sys-1"), anyMap());
+    }
+
+    @Test
+    void aStaleClaimAPersonMovedToAnotherGroupStaysThere() {
+        ServiceNowClient.Incident moved = claimedLongAgoIn("Payments");
+        when(serviceNow.integrationUserSysId()).thenReturn("agent-sys-id");
+        when(serviceNow.findClaimedByAgent()).thenReturn(List.of(moved));
+        when(serviceNow.findByNumber("INC0010001")).thenReturn(Optional.of(moved));
+        when(serviceNow.findNewForAgent()).thenReturn(List.of());
+
+        pollAt(NOW);
+
+        verify(serviceNow, never()).updateByDisplayValue(any(), anyMap());
+    }
+
+    /** In progress and assigned to the integration user, untouched for an hour, in the given group. */
+    private static ServiceNowClient.Incident claimedLongAgoIn(String group) {
+        return new ServiceNowClient.Incident("sys-1", "INC0010001", "Order arrived broken", "",
+                ServiceNowClient.STATE_IN_PROGRESS, "In Progress", group, "agent-sys-id", "Agent", "Ada", "", "", null,
+                NOW.minus(Duration.ofHours(1)));
+    }
+
+    private void pollAt(Instant now) {
+        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", governance,
+                mock(AgentRegistry.class), Clock.fixed(now, ZoneOffset.UTC)).poll();
     }
 }
