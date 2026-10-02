@@ -16,7 +16,7 @@ spring:
     consumer:
       group-id: agent-service
       # A stock-out published before this service first joined its group is still handled. A replayed one does not
-      # act twice: the agent finds the order already cancelled with its refund paid or waiting for approval.
+      # act twice: the agent checks which steps are already done and does only the others.
       auto-offset-reset: earliest
   http:
     clients:

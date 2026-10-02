@@ -9,6 +9,14 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.StreamSupport;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
@@ -20,6 +28,7 @@ final class Demo {
     static final String SHOE_42 = "8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0001";
     static final String ORDER_EXCEPTIONS_AGENT = "order-exceptions-agent";
     static final String OPERATOR = "evals@trailhead.example";
+    private static final String STOCK_OUT_TOPIC = "inventory.stock-out";
 
     private static final Duration AGENT_TIMEOUT = Duration.ofMinutes(4);
 
@@ -88,6 +97,42 @@ final class Demo {
                 .body(Map.of("by", OPERATOR)).retrieve().body(JsonNode.class);
     }
 
+    /**
+     * Delivers the stock-out that named the order a second time, as Kafka does when a consumer stops before committing
+     * its offset. Kafka is reached at {@code evals.kafka} (by default the demo's {@code localhost:9092}).
+     */
+    void redeliverStockOutOf(String orderId) {
+        String bootstrapServers = System.getProperty("evals.kafka", "localhost:9092");
+        Map<String, Object> consumerProperties = Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
+                ConsumerConfig.GROUP_ID_CONFIG, "evals-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        ConsumerRecord<String, String> stockOut = null;
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
+            consumer.subscribe(List.of(STOCK_OUT_TOPIC));
+            long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+            while (stockOut == null && System.nanoTime() < deadline) {
+                for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofSeconds(1))) {
+                    if (record.value().contains(orderId)) {
+                        stockOut = record;
+                    }
+                }
+            }
+        }
+        if (stockOut == null) {
+            throw new IllegalStateException("No stock-out names order " + orderId);
+        }
+        Map<String, Object> producerProperties = Map.of(
+                ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
+                ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
+                ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
+        try (KafkaProducer<String, String> producer = new KafkaProducer<>(producerProperties)) {
+            producer.send(new ProducerRecord<>(STOCK_OUT_TOPIC, stockOut.key(), stockOut.value()));
+        }
+    }
+
     void setAgentEnabled(String agentId, boolean enabled) {
         api.put().uri("/agents/api/agents/{id}", agentId).body(Map.of("enabled", enabled, "by", OPERATOR))
                 .retrieve().toBodilessEntity();
@@ -107,6 +152,14 @@ final class Demo {
     List<JsonNode> awaitTimeline(String orderId, Predicate<JsonNode> event) {
         await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(2))
                 .until(() -> timeline(orderId).stream().anyMatch(event));
+        return timeline(orderId);
+    }
+
+    /** Waits until the agent has finished {@code runs} runs on the order, or handed it to a person. */
+    List<JsonNode> awaitAgentRuns(String orderId, int runs) {
+        await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(2))
+                .until(() -> count(timeline(orderId), ORDER_EXCEPTIONS_AGENT, "decision", "SUCCEEDED") >= runs
+                        || !escalationsFor(orderId).isEmpty());
         return timeline(orderId);
     }
 

@@ -46,6 +46,27 @@ class AgentBehaviourEvals {
     }
 
     @Test
+    void stockOutDeliveredAgainAfterItWasHandledChangesNothing() {
+        String orderId = demo.placeOrder(Demo.newCustomer(), Demo.SHOE_42);
+        int writtenOff = demo.causeStockOut(Demo.SHOE_42);
+        try {
+            demo.awaitAgentFinished(orderId);
+
+            demo.redeliverStockOutOf(orderId);
+            List<JsonNode> timeline = demo.awaitAgentRuns(orderId, 2);
+
+            assertThat(count(timeline, ORDER_EXCEPTIONS_AGENT, "decision", "SUCCEEDED")).isEqualTo(2);
+            assertThat(count(timeline, ORDER_EXCEPTIONS_AGENT, "notify_customer", "SUCCEEDED")).isEqualTo(1);
+            assertThat(demo.notifications(orderId)).hasSize(1);
+            assertThat(demo.refundRequests(orderId)).singleElement()
+                    .satisfies(refund -> assertThat(refund.path("status").asString()).isEqualTo("PENDING_APPROVAL"));
+            assertThat(demo.escalationsFor(orderId)).isEmpty();
+        } finally {
+            demo.restock(Demo.SHOE_42, writtenOff);
+        }
+    }
+
+    @Test
     void stockOutAboveTheRefundLimitWaitsForAHumanAndIsNotRetried() {
         String orderId = demo.placeOrder(Demo.newCustomer(), Demo.SHOE_42);
         int writtenOff = demo.causeStockOut(Demo.SHOE_42);
