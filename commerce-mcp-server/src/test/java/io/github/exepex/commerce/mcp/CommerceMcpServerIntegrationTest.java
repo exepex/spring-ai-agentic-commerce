@@ -276,6 +276,23 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void anOrderLookupShowsEachRefundsKeyAndWhenTheCustomerWasNotified() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
+        call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(), "amount", 39.50,
+                "reason", "item out of stock", "idempotencyKey", "refund-" + orderId + "-stockout"));
+        String before = text(call(exceptionsAgent, "get_order", Map.of("orderId", orderId.toString())));
+        call(exceptionsAgent, "notify_customer", Map.of("orderId", orderId.toString(),
+                "message", "Sorry, your headlamp is out of stock; your money is refunded."));
+
+        String after = text(call(exceptionsAgent, "get_order", Map.of("orderId", orderId.toString())));
+
+        assertThat((String) JsonPath.read(after, "$.refunds[0].idempotencyKey")).isEqualTo("refund-" + orderId + "-stockout");
+        assertThat((Integer) JsonPath.read(before, "$.notifications.length()")).isZero();
+        assertThat((String) JsonPath.read(after, "$.notifications[0].sentBy")).isEqualTo("order-exceptions-agent");
+    }
+
+    @Test
     void anOrderLookupSaysSoWhenThePaymentServiceIsDownInsteadOfShowingNoPayment() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));

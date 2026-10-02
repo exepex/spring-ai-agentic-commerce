@@ -7,9 +7,11 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Decides, from the tool calls that succeeded in a run, whether the agent dealt with a stock-out order: it handed the
- * order to a person, or the order is cancelled and its refund paid or waiting for approval. Only calls made for that
- * order count, and the model's own summary is not trusted for this.
+ * Decides, from the tool calls that succeeded in a run, whether the agent dealt with a stock-out order. It did when it
+ * handed the order to a person, or when the order is cancelled, the stock-out's own refund (key
+ * {@code refund-<order id>-stockout}) is paid or waiting for approval, and the customer was notified. Each can have
+ * happened in this run or, for a replayed stock-out, an earlier one that {@code get_order} shows. Only calls made for
+ * that order count, and the model's own summary is not trusted for this.
  */
 final class StockOutSettlement {
 
@@ -18,19 +20,30 @@ final class StockOutSettlement {
 
     private StockOutSettlement() {}
 
+    static String refundKeyFor(UUID orderId) {
+        return "refund-" + orderId + "-stockout";
+    }
+
     static boolean isSettled(UUID orderId, List<ToolRun.ToolResult> allCalls) {
         List<ToolRun.ToolResult> calls = allCalls.stream()
                 .filter(call -> orderId.toString().equals(json(call.arguments()).path("orderId").asString("")))
                 .toList();
+        List<JsonNode> lookups = calls.stream().filter(call -> "get_order".equals(call.tool())).map(StockOutSettlement::json)
+                .toList();
+        String refundKey = refundKeyFor(orderId);
         boolean escalated = calls.stream().anyMatch(call -> "escalate_to_human".equals(call.tool()));
-        boolean cancelled = calls.stream().anyMatch(call -> ("cancel_order".equals(call.tool())
-                || "get_order".equals(call.tool())) && "CANCELLED".equals(json(call).path("status").asString("")));
+        boolean cancelled = calls.stream().anyMatch(call -> "cancel_order".equals(call.tool())
+                        && "CANCELLED".equals(json(call).path("status").asString("")))
+                || lookups.stream().anyMatch(order -> "CANCELLED".equals(order.path("status").asString("")));
         boolean refunded = calls.stream().anyMatch(call -> "issue_refund".equals(call.tool())
+                        && refundKey.equals(json(call.arguments()).path("idempotencyKey").asString(""))
                         && SETTLED_REFUNDS.contains(json(call).path("status").asString("")))
-                || calls.stream().filter(call -> "get_order".equals(call.tool()))
-                        .flatMap(call -> json(call).path("refunds").valueStream())
-                        .anyMatch(refund -> SETTLED_REFUNDS.contains(refund.path("status").asString("")));
-        return escalated || (cancelled && refunded);
+                || lookups.stream().flatMap(order -> order.path("refunds").valueStream())
+                        .anyMatch(refund -> refundKey.equals(refund.path("idempotencyKey").asString(""))
+                                && SETTLED_REFUNDS.contains(refund.path("status").asString("")));
+        boolean notified = calls.stream().anyMatch(call -> "notify_customer".equals(call.tool()))
+                || lookups.stream().anyMatch(order -> !order.path("notifications").isEmpty());
+        return escalated || (cancelled && refunded && notified);
     }
 
     private static JsonNode json(ToolRun.ToolResult call) {
