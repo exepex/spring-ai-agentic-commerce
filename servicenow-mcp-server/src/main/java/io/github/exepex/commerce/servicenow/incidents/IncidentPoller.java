@@ -29,9 +29,9 @@ import org.springframework.stereotype.Component;
  * announced twice. If Kafka does not take the announcement, the claim is given back, so the next poll claims and
  * announces the incident again. ServiceNow offers no outbound call without a public URL, so the demo asks every poll interval.
  *
- * <p>The Table API has no conditional update, so each incident is read again right before it is claimed or handed
- * over, and left alone if a person took it or changed it meanwhile. That narrows the race with a person to the time
- * between that read and the update.
+ * <p>The Table API has no conditional update, so each incident is read again right before it is claimed, given back
+ * or handed over, and left alone if a person took it or changed it meanwhile. That narrows the race with a person to
+ * the time between that read and the update.
  *
  * <p>A claimed incident the agent has not finished within {@code commerce.servicenow.stale-after}, because
  * agent-service was down or its run stopped, is handed to the default team, so no incident waits for an agent that
@@ -88,7 +88,8 @@ public class IncidentPoller {
     private void claimNewIncidents() {
         for (ServiceNowClient.Incident found : serviceNow.findNewForAgent()) {
             ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
-            if (incident == null || incident.isAssigned() || !ServiceNowClient.STATE_NEW.equals(incident.state())) {
+            if (incident == null || incident.isAssigned() || !ServiceNowClient.STATE_NEW.equals(incident.state())
+                    || !properties.agentGroup().equals(incident.assignmentGroup())) {
                 continue;
             }
             Map<String, String> claim = new LinkedHashMap<>();
@@ -97,10 +98,7 @@ public class IncidentPoller {
             claim.put("work_notes", "Picked up by the " + properties.agent() + ".");
             serviceNow.update(incident.sysId(), claim);
             if (!announce(incident)) {
-                Map<String, String> release = new LinkedHashMap<>();
-                release.put("assigned_to", "");
-                release.put("state", ServiceNowClient.STATE_NEW);
-                serviceNow.update(incident.sysId(), release);
+                giveBack(incident.number());
                 continue;
             }
             record("claim_incident", "Claimed " + incident.number() + ": " + incident.shortDescription());
@@ -120,6 +118,23 @@ public class IncidentPoller {
             LOGGER.warn("Could not announce incident {}; giving the claim back to try again", incident.number(), notSent);
             return false;
         }
+    }
+
+    /**
+     * Gives a claim back, so the next poll claims and announces the incident again: but only while it is still the
+     * agent's claim. A person who took the incident while Kafka was refusing the announcement keeps it.
+     */
+    private void giveBack(String number) {
+        ServiceNowClient.Incident incident = serviceNow.findByNumber(number).orElse(null);
+        if (incident == null || !serviceNow.integrationUserSysId().equals(incident.assignedToSysId())
+                || !ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())) {
+            LOGGER.info("Incident {} is no longer the agent's claim, so it is not given back", number);
+            return;
+        }
+        Map<String, String> release = new LinkedHashMap<>();
+        release.put("assigned_to", "");
+        release.put("state", ServiceNowClient.STATE_NEW);
+        serviceNow.update(incident.sysId(), release);
     }
 
     private void handOverStaleClaims() {

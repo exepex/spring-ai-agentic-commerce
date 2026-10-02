@@ -27,13 +27,6 @@ public class AgentSwitch {
         // for JPA
     }
 
-    AgentSwitch(String agentId, boolean enabled, String changedBy, Instant changedAt) {
-        this.agentId = agentId;
-        this.enabled = enabled;
-        this.changedBy = changedBy;
-        this.changedAt = changedAt;
-    }
-
     public boolean isEnabled() {
         return enabled;
     }

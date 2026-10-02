@@ -2,6 +2,7 @@ package io.github.exepex.commerce.agent;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jayway.jsonpath.JsonPath;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -96,7 +97,7 @@ class AgentToolCallbackTest {
         String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
         RecordingTool refund = new RecordingTool("issue_refund");
         AgentToolCallback tool = new AgentToolCallback(refund, false, () -> true);
-        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(linkedOrder), () -> true));
+        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(linkedOrder), orderId -> true));
 
         String otherOrder = tool.call("{\"orderId\": \"7c9e6679-7425-40de-944b-e07fc1f90ae7\"}", context);
         String sameOrderInCapitals = tool.call("{\"orderId\": \" " + linkedOrder.toUpperCase() + "\"}", context);
@@ -108,7 +109,7 @@ class AgentToolCallbackTest {
 
     @Test
     void aRunWithNoLinkedOrderMayReadOrdersButChangeNone() {
-        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(), () -> true));
+        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(), orderId -> true));
 
         String lookup = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true)
                 .call("{\"orderId\": \"o-1\"}", context);
@@ -127,7 +128,7 @@ class AgentToolCallbackTest {
         AtomicBoolean stillOwned = new AtomicBoolean(true);
         RecordingTool cancel = new RecordingTool("cancel_order");
         AgentToolCallback tool = new AgentToolCallback(cancel, false, () -> true);
-        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(linkedOrder), stillOwned::get));
+        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(linkedOrder), orderId -> stillOwned.get()));
 
         stillOwned.set(false);
         String afterTakeOver = tool.call("{\"orderId\": \"" + linkedOrder + "\"}", context);
@@ -143,7 +144,7 @@ class AgentToolCallbackTest {
     void anIncidentRunWorksOnlyItsOwnIncident() {
         RecordingTool resolve = new RecordingTool("resolve_incident");
         AgentToolCallback tool = new AgentToolCallback(resolve, false, () -> true);
-        ToolContext incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(), () -> true));
+        ToolContext incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(), orderId -> true));
 
         String other = tool.call("{\"number\": \"INC0010002\", \"resolution\": \"Done\"}", incidentRun);
         String own = tool.call("{\"number\": \"INC0010001\", \"resolution\": \"Done\"}", incidentRun);
@@ -151,6 +152,25 @@ class AgentToolCallbackTest {
         assertThat(other).startsWith("Refused").contains("INC0010002 is not it");
         assertThat(own).doesNotStartWith("Refused");
         assertThat(resolve.inputs).hasSize(1);
+    }
+
+    @Test
+    void anIncidentRunsMessageToTheCustomerCarriesAKeyThatCodeSets() {
+        String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        RecordingTool notify = new RecordingTool("notify_customer");
+        AgentToolCallback tool = new AgentToolCallback(notify, false, () -> true);
+        ToolContext incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(linkedOrder), orderId -> true));
+
+        tool.call("{\"orderId\": \"" + linkedOrder + "\", \"message\": \"Sorry\", \"idempotencyKey\": \"mine\"}",
+                incidentRun);
+        RecordingTool notifyOutsideAnIncident = new RecordingTool("notify_customer");
+        new AgentToolCallback(notifyOutsideAnIncident, false, () -> true)
+                .call("{\"orderId\": \"o-1\", \"idempotencyKey\": \"mine\"}", contextFor(new ToolRun(null, 5)));
+
+        assertThat(JsonPath.<String>read(notify.inputs.getFirst(), "$.idempotencyKey"))
+                .isEqualTo("notify-" + linkedOrder + "-INC0010001");
+        assertThat(notifyOutsideAnIncident.inputs.getFirst()).doesNotContain("idempotencyKey");
+        assertThat(tool.getToolDefinition().inputSchema()).doesNotContain("idempotencyKey");
     }
 
     @Test

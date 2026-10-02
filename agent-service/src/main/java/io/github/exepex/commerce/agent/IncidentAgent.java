@@ -70,7 +70,7 @@ public class IncidentAgent {
         Instant started = Instant.now();
         ToolRun run = new ToolRun(null, definition.toolCallBudget(), number,
                 linkedOrderId == null || linkedOrderId.isBlank() ? Set.of() : Set.of(linkedOrderId),
-                () -> stillOwns(number));
+                orderId -> stillLinksTo(number, orderId));
         ChatResponse response;
         try {
             response = chatClient.prompt()
@@ -106,14 +106,21 @@ public class IncidentAgent {
     }
 
     /**
-     * Whether the incident is still the agent's: the ServiceNow MCP server lets it read only incidents assigned to it
-     * and in progress. When ServiceNow cannot be reached the answer is no, so no order changes on a guess.
+     * Whether the incident is still the agent's and still linked to the order: the ServiceNow MCP server lets it read
+     * only incidents assigned to it and in progress, and the service desk may have corrected the linked order since the
+     * run started. When ServiceNow cannot be reached the answer is no, so no order changes on a guess.
      */
-    private boolean stillOwns(String number) {
+    boolean stillLinksTo(String number, String orderId) {
         try {
-            return !Boolean.TRUE.equals(toolboxes.callAsIncidentAgent("get_incident", Map.of("number", number)).isError());
+            McpSchema.CallToolResult incident = toolboxes.callAsIncidentAgent("get_incident", Map.of("number", number));
+            if (Boolean.TRUE.equals(incident.isError())) {
+                return false;
+            }
+            UUID linked = orderOf(JSON.readTree(textOf(incident)).path("linkedOrderId").asString(""));
+            return linked != null && linked.equals(orderOf(orderId));
         } catch (RuntimeException unavailable) {
-            LOGGER.warn("Could not check that incident {} is still the agent's", number, unavailable);
+            LOGGER.warn("Could not check that incident {} is still the agent's and about order {}", number, orderId,
+                    unavailable);
             return false;
         }
     }

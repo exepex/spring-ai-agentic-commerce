@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -169,14 +170,17 @@ public class RefundService {
     }
 
     /**
-     * The card processor reported an executed refund failed afterwards: the customer did not get the money. The
-     * request is marked failed and a case opened for the order, together and once, however often this is reported.
+     * The card processor reported a refund failed after accepting it: the customer did not get the money. The request
+     * is marked failed, with the processor's reason, and a case opened for the order, together and once per event
+     * however often Kafka delivers it. The request is usually executed; it is still failed when this server stopped
+     * after the payment service took the refund but before it recorded that, and then the failure is just as real.
      */
-    void recordFailedAtProcessor(UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
+    void recordFailedAtProcessor(UUID eventId, UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
         String failure = "The card processor reported the refund of " + amount + " " + currency
                 + " failed after accepting it; no money was returned.";
         transaction.executeWithoutResult(status -> {
-            if (requests.failExecuted(idempotencyKey, failure, Instant.now(clock)) == 0) {
+            if (requests.failAtProcessor(idempotencyKey, failure, Instant.now(clock)) == 0
+                    || !cases.isFirstDelivery(eventId, orderId)) {
                 return;
             }
             audit.record(orderId, AuditEvent.ActorType.SYSTEM, "payment-service", "refund_failed",
@@ -246,22 +250,55 @@ public class RefundService {
 
     private RefundRequest execute(RefundRequest request, String actor) {
         AuditEvent.ActorType actorType = actor.equals(request.getRequestedBy()) ? AuditEvent.ActorType.AGENT : AuditEvent.ActorType.HUMAN;
+        String providerReference = null;
+        String failure = null;
         try {
             PaymentApi.Refund refund = Downstream.call("payment service", () -> payments.refund(request.getOrderId(),
                     new PaymentApi.RefundRequest(request.getAmount(), request.getReason(), request.getIdempotencyKey())));
-            request.markExecuted(refund.providerReference(), Instant.now(clock));
-            audit.record(request.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.SUCCEEDED,
-                    "Refunded " + request.getAmount() + " " + request.getCurrency() + " (" + refund.providerReference() + ")",
-                    request.getReason());
-        } catch (DownstreamException failure) {
-            request.markFailed(failure.getMessage(), Instant.now(clock));
-            audit.record(request.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
-                    "Refund of " + request.getAmount() + " " + request.getCurrency() + " failed: " + failure.getMessage(),
-                    "Idempotency key " + request.getIdempotencyKey());
+            providerReference = refund.providerReference();
+        } catch (DownstreamException unavailable) {
+            failure = unavailable.getMessage();
         }
-        return requests.save(request);
+        RefundRequest outcome = saveOutcome(request, providerReference, failure);
+        String amount = outcome.getAmount() + " " + outcome.getCurrency();
+        if (providerReference == null) {
+            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
+                    "Refund of " + amount + " failed: " + failure, "Idempotency key " + outcome.getIdempotencyKey());
+        } else if (outcome.getStatus() == RefundRequest.Status.EXECUTED) {
+            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.SUCCEEDED,
+                    "Refunded " + amount + " (" + providerReference + ")", outcome.getReason());
+        } else {
+            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
+                    "The payment service took the refund of " + amount + ", but the card processor had already "
+                            + "reported it failed", "Idempotency key " + outcome.getIdempotencyKey());
+        }
+        return outcome;
     }
 
+    /**
+     * Saves what the payment service answered. Another answer about the same refund may have been saved meanwhile,
+     * for example by a second retry at the same moment: then a success still wins over a failure, since the money was
+     * returned, but nothing undoes a failure the card processor reported. Whatever is stored in the end is returned.
+     */
+    private RefundRequest saveOutcome(RefundRequest request, String providerReference, String failure) {
+        RefundRequest current = request;
+        while (true) {
+            if (providerReference != null) {
+                current.markExecuted(providerReference, Instant.now(clock));
+            } else {
+                current.markFailed(failure, Instant.now(clock));
+            }
+            try {
+                return requests.save(current);
+            } catch (ObjectOptimisticLockingFailureException changedMeanwhile) {
+                current = find(request.getId());
+                if (providerReference == null || current.isFailedAtProcessor()
+                        || current.getStatus() == RefundRequest.Status.EXECUTED) {
+                    return current;
+                }
+            }
+        }
+    }
     private RefundRequest find(UUID requestId) {
         return requests.findById(requestId)
                 .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Refund request " + requestId + " does not exist"));

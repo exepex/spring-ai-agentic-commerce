@@ -76,14 +76,22 @@ public class CaseService {
      */
     @Transactional
     public void raiseFor(UUID sourceEventId, CaseType type, UUID orderId, String details, String service) {
-        int firstTime = jdbc.sql("insert into governance.case_event (source_event_id, order_id) values (:eventId, :orderId) "
+        if (isFirstDelivery(sourceEventId, orderId)) {
+            openOrAddTo(type, orderId, details, AuditEvent.ActorType.SYSTEM, service);
+        }
+    }
+
+    /**
+     * Whether this is the first time the event is handled for the order. Kafka can deliver an event again; only the
+     * first delivery may raise a case. Runs in the caller's transaction, which raises the case too, so a delivery that
+     * fails raises nothing and counts as never handled.
+     */
+    public boolean isFirstDelivery(UUID sourceEventId, UUID orderId) {
+        return jdbc.sql("insert into governance.case_event (source_event_id, order_id) values (:eventId, :orderId) "
                         + "on conflict do nothing")
                 .param("eventId", sourceEventId)
                 .param("orderId", orderId)
-                .update();
-        if (firstTime == 1) {
-            openOrAddTo(type, orderId, details, AuditEvent.ActorType.SYSTEM, service);
-        }
+                .update() == 1;
     }
 
     /** Opens the case or adds to the open one, within the caller's transaction. */

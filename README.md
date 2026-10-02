@@ -240,8 +240,9 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
   case once per order, by the id its service gave it. A case's incident carries the case id in its Correlation display
   field, so a poller that stopped after creating it finds it again instead of opening a second one. An incident
   delivered to the agent again is worked again: the agent checks which steps are already done (`get_order` shows each
-  refund's idempotency key and status, and when the customer was notified) and does only the others, and its refund
-  for the incident carries a key made of the order and the incident, so it pays out once. Nothing records whether the
+  refund's idempotency key and status, and when the customer was notified) and does only the others. Its refund and
+  its message to the customer each carry a key made of the order and the incident, so the refund pays out once and the
+  customer is told once; code sets the message's key, not the model. Nothing records whether the
   Slack line was posted, so it may be posted twice, but is never missed.
 - **The demo UI has no login.** You pick which customer you are. In production the UI and the governance API would sit
   behind the organisation's identity provider.
