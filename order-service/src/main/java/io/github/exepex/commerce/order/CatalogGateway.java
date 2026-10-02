@@ -24,7 +24,7 @@ class CatalogGateway {
         } catch (HttpClientErrorException.NotFound notFound) {
             throw OrderRejectedException.unknownProduct(productId);
         } catch (RestClientException failure) {
-            throw new CatalogUnavailableException(failure);
+            throw new DependencyUnavailableException("catalog", failure);
         }
     }
 
@@ -34,7 +34,7 @@ class CatalogGateway {
         } catch (HttpClientErrorException.Conflict conflict) {
             throw OrderRejectedException.stockUnavailable(catalogDetail(conflict));
         } catch (RestClientException failure) {
-            throw new CatalogUnavailableException(failure);
+            throw new DependencyUnavailableException("catalog", failure);
         }
     }
 
@@ -42,7 +42,7 @@ class CatalogGateway {
         try {
             catalog.releaseOrderReservations(orderId);
         } catch (RestClientException failure) {
-            throw new CatalogUnavailableException(failure);
+            throw new DependencyUnavailableException("catalog", failure);
         }
     }
 

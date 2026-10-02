@@ -26,7 +26,14 @@ class OrderController {
 
     record LineRequest(@NotNull UUID productId, @Positive int quantity) {}
 
-    record PlaceOrderRequest(@NotBlank @Email String customerEmail, @NotEmpty List<@Valid LineRequest> lines) {}
+    /** {@code paymentMethod} is a Stripe test payment method; it defaults to the test Visa card. */
+    record PlaceOrderRequest(@NotBlank @Email String customerEmail, @NotEmpty List<@Valid LineRequest> lines,
+            String paymentMethod) {
+
+        String paymentMethodOrDefault() {
+            return paymentMethod == null || paymentMethod.isBlank() ? "pm_card_visa" : paymentMethod;
+        }
+    }
 
     record CancelOrderRequest(@NotBlank String reason) {}
 
@@ -40,12 +47,13 @@ class OrderController {
     }
 
     record OrderView(UUID id, String customerEmail, OrderStatus status, BigDecimal total, String currency,
-            Instant createdAt, Instant cancelledAt, String cancellationReason, List<LineView> lines) {
+            Instant createdAt, Instant cancelledAt, String cancellationReason, String paymentFailure,
+            List<LineView> lines) {
 
         static OrderView of(CustomerOrder order) {
             return new OrderView(order.getId(), order.getCustomerEmail(), order.getStatus(), order.getTotalAmount(),
                     order.getCurrency(), order.getCreatedAt(), order.getCancelledAt(), order.getCancellationReason(),
-                    order.getLines().stream().map(LineView::of).toList());
+                    order.getPaymentFailure(), order.getLines().stream().map(LineView::of).toList());
         }
     }
 
@@ -59,7 +67,7 @@ class OrderController {
     ResponseEntity<OrderView> placeOrder(@Valid @RequestBody PlaceOrderRequest request) {
         CustomerOrder order = orderService.placeOrder(request.customerEmail(), request.lines().stream()
                 .map(line -> new OrderService.RequestedLine(line.productId(), line.quantity()))
-                .toList());
+                .toList(), request.paymentMethodOrDefault());
         return ResponseEntity.created(URI.create("/api/orders/" + order.getId())).body(OrderView.of(order));
     }
 
@@ -68,9 +76,13 @@ class OrderController {
         return OrderView.of(orderService.getOrder(orderId));
     }
 
+    /** A customer's orders when {@code customerEmail} is given, otherwise the 100 most recent orders. */
     @GetMapping
-    List<OrderView> findOrders(@RequestParam String customerEmail) {
-        return orderService.findOrdersOf(customerEmail).stream().map(OrderView::of).toList();
+    List<OrderView> findOrders(@RequestParam(required = false) String customerEmail) {
+        List<CustomerOrder> found = customerEmail == null
+                ? orderService.findRecentOrders()
+                : orderService.findOrdersOf(customerEmail);
+        return found.stream().map(OrderView::of).toList();
     }
 
     @PostMapping("/{orderId}/cancellation")

@@ -43,6 +43,9 @@ public class CustomerOrder {
     @Column(name = "cancellation_reason")
     private String cancellationReason;
 
+    @Column(name = "payment_failure")
+    private String paymentFailure;
+
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @JoinColumn(name = "order_id", nullable = false)
     private List<OrderLine> lines = new ArrayList<>();
@@ -65,11 +68,20 @@ public class CustomerOrder {
         return new CustomerOrder(id, customerEmail, currency, lines, now);
     }
 
-    /** Cancelling an order that is already cancelled keeps the first reason and time. */
+    void confirm() {
+        status = OrderStatus.CONFIRMED;
+    }
+
+    void markPaymentFailed(String reason) {
+        status = OrderStatus.PAYMENT_FAILED;
+        paymentFailure = reason;
+    }
+
+    boolean isCancellable() {
+        return status == OrderStatus.PLACED || status == OrderStatus.CONFIRMED;
+    }
+
     void cancel(String reason, Instant now) {
-        if (status == OrderStatus.CANCELLED) {
-            return;
-        }
         status = OrderStatus.CANCELLED;
         cancellationReason = reason;
         cancelledAt = now;
@@ -105,6 +117,10 @@ public class CustomerOrder {
 
     public String getCancellationReason() {
         return cancellationReason;
+    }
+
+    public String getPaymentFailure() {
+        return paymentFailure;
     }
 
     public List<OrderLine> getLines() {

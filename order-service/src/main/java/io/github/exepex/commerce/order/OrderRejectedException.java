@@ -5,7 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.ErrorResponseException;
 
-/** The order cannot be placed as requested; nothing was reserved. */
+/** The order cannot be placed or changed as requested; any stock reserved for it was released. */
 class OrderRejectedException extends ErrorResponseException {
 
     private OrderRejectedException(HttpStatus status, String detail) {
@@ -23,6 +23,14 @@ class OrderRejectedException extends ErrorResponseException {
     static OrderRejectedException duplicateProduct(UUID productId) {
         return new OrderRejectedException(HttpStatus.UNPROCESSABLE_CONTENT,
                 "Product " + productId + " appears on more than one line; combine them into one");
+    }
+
+    static OrderRejectedException paymentDeclined(String reason) {
+        return new OrderRejectedException(HttpStatus.PAYMENT_REQUIRED, reason);
+    }
+
+    static OrderRejectedException notCancellable(UUID orderId, OrderStatus status) {
+        return new OrderRejectedException(HttpStatus.CONFLICT, "Order " + orderId + " is " + status + " and cannot be cancelled");
     }
 
     static OrderRejectedException mixedCurrencies() {

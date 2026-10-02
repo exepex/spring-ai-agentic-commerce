@@ -1,0 +1,39 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: payment-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/commerce
+    username: commerce
+    password: commerce
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: payments
+  flyway:
+    default-schema: payments
+    schemas: payments
+  mvc:
+    problemdetails:
+      enabled: true
+
+commerce:
+  payments:
+    # Leave empty to use the built-in simulated gateway; set a Stripe test-mode key (sk_test_...) to use Stripe.
+    stripe-secret-key: ${AGENTIC_COMMERCE_STRIPE_SECRET_KEY:}
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}

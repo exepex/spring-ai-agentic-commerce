@@ -26,6 +26,33 @@ spring:
     serviceclient:
       catalog:
         base-url: http://localhost:8081
+      payment:
+        base-url: http://localhost:8083
+  kafka:
+    bootstrap-servers: localhost:9092
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+    producer:
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      properties:
+        # The event is a JSON contract between services, not a Java type: leave class names out of the headers.
+        spring.json.add.type.headers: false
   mvc:
     problemdetails:
       enabled: true
+
+commerce:
+  topics:
+    order-events: order.events
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}

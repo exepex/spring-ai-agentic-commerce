@@ -19,3 +19,10 @@ services:
     image: apache/kafka:4.1.0
     ports:
       - "9092:9092"
+
+  jaeger:
+    # Collects OpenTelemetry traces (OTLP on 4318) and shows them at http://localhost:16686.
+    image: jaegertracing/jaeger:2.21.0
+    ports:
+      - "16686:16686"
+      - "4318:4318"

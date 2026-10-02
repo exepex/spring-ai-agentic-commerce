@@ -6,6 +6,7 @@ import org.springframework.web.service.registry.ImportHttpServices;
 
 @SpringBootApplication
 @ImportHttpServices(group = "catalog", types = CatalogHttpApi.class)
+@ImportHttpServices(group = "payment", types = PaymentHttpApi.class)
 public class OrderApplication {
 
     public static void main(String[] arguments) {
