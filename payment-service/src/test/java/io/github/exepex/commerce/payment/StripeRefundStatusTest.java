@@ -1,22 +1,22 @@
 package io.github.exepex.commerce.payment;
 
-import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.exepex.commerce.payment.PaymentGateway.RefundStatus;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.ErrorResponseException;
 
 class StripeRefundStatusTest {
 
     @Test
     void aFailedOrCancelledRefundDoesNotCountAsRefunded() {
-        assertThatThrownBy(() -> StripePaymentGateway.ensureAccepted("failed")).isInstanceOf(ErrorResponseException.class);
-        assertThatThrownBy(() -> StripePaymentGateway.ensureAccepted("canceled")).isInstanceOf(ErrorResponseException.class);
+        assertThat(StripePaymentGateway.statusOf("failed")).isEqualTo(RefundStatus.FAILED);
+        assertThat(StripePaymentGateway.statusOf("canceled")).isEqualTo(RefundStatus.FAILED);
     }
 
     @Test
-    void aSucceededOrPendingRefundIsAccepted() {
-        assertThatCode(() -> StripePaymentGateway.ensureAccepted("succeeded")).doesNotThrowAnyException();
-        assertThatCode(() -> StripePaymentGateway.ensureAccepted("pending")).doesNotThrowAnyException();
+    void aRefundThatIsNotFinalYetIsPending() {
+        assertThat(StripePaymentGateway.statusOf("pending")).isEqualTo(RefundStatus.PENDING);
+        assertThat(StripePaymentGateway.statusOf("requires_action")).isEqualTo(RefundStatus.PENDING);
+        assertThat(StripePaymentGateway.statusOf("succeeded")).isEqualTo(RefundStatus.SUCCEEDED);
     }
 }

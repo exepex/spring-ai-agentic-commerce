@@ -11,18 +11,28 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
-/** Runs against Postgres with the simulated card processor, which follows Stripe's test-card conventions. */
-@SpringBootTest(properties = "commerce.payments.stripe-secret-key=")
+/**
+ * Runs against Postgres with the simulated card processor, which follows Stripe's test-card conventions. Refunds are
+ * only checked with the processor when a test asks for it.
+ */
+@SpringBootTest(properties = {"commerce.payments.stripe-secret-key=", "commerce.payments.refund-check.interval=1h"})
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class PaymentApiIntegrationTest {
 
     @Autowired
     private MockMvcTester mockMvc;
+
+    @Autowired
+    private RefundReconciler refundReconciler;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @AfterEach
     void endAnyOutage() {
@@ -61,6 +71,68 @@ class PaymentApiIntegrationTest {
 
         assertThat(mockMvc.get().uri("/api/payments/{orderId}", orderId))
                 .bodyJson().extractingPath("$.refundable").isEqualTo(60.0);
+    }
+
+    @Test
+    void aRefundThatLaterFailsAtTheProcessorNoLongerCountsAsRefunded() throws Exception {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "100.00", "pm_card_refundFail");
+        MvcTestResult refunded = refund(orderId, "40.00", "refund-fails-" + orderId);
+        assertThat(refunded).bodyJson().extractingPath("$.status").isEqualTo("SUCCEEDED");
+
+        refundReconciler.reconcile();
+        refundReconciler.reconcile();
+
+        MvcTestResult payment = mockMvc.get().uri("/api/payments/{orderId}", orderId).exchange();
+        assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(100.0);
+        assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("FAILED");
+        assertThat(refund(orderId, "40.00", "refund-fails-" + orderId)).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
+    }
+
+    @Test
+    void aRefundPendingForLongerThanTheWatchIsStillWatchedOnceItSucceeds() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "100.00", "pm_card_refundFail");
+        refund(orderId, "40.00", "refund-pending-long-" + orderId);
+        // As if the processor had kept the refund pending for two hours.
+        jdbc.update("""
+                update payments.refund set status = 'PENDING', succeeded_at = null, created_at = now() - interval '2 hours'
+                where idempotency_key = ?""", "refund-pending-long-" + orderId);
+
+        refundReconciler.reconcile();
+        refundReconciler.reconcile();
+
+        MvcTestResult payment = mockMvc.get().uri("/api/payments/{orderId}", orderId).exchange();
+        assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("FAILED");
+        assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(100.0);
+    }
+
+    @Test
+    void onlyRefundsOfPaymentsTheCurrentProcessorTookAreChecked() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "100.00", "pm_card_refundFail");
+        refund(orderId, "40.00", "refund-other-processor-" + orderId);
+        // As if the payment had been taken through Stripe before the demo was switched to the simulator.
+        jdbc.update("update payments.payment set provider = 'stripe' where order_id = ?", orderId);
+
+        refundReconciler.reconcile();
+
+        MvcTestResult payment = mockMvc.get().uri("/api/payments/{orderId}", orderId).exchange();
+        assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(60.0);
+        assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void aRefundThatSucceededStaysRefundedWhenCheckedAgain() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "100.00", "pm_card_visa");
+        refund(orderId, "40.00", "refund-holds-" + orderId);
+
+        refundReconciler.reconcile();
+
+        MvcTestResult payment = mockMvc.get().uri("/api/payments/{orderId}", orderId).exchange();
+        assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(60.0);
+        assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("SUCCEEDED");
     }
 
     @Test

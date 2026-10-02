@@ -9,9 +9,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.type.TypeReference;
@@ -27,6 +30,9 @@ public class ProposalService {
 
     public record Proposal(UUID id, String customerEmail, List<ProposedLine> lines, BigDecimal total, String currency,
             OrderProposal.Status status, UUID orderId, String failure, Instant createdAt) {}
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ProposalService.class);
+    private static final Set<String> SETTLED_ORDER_STATUSES = Set.of("CONFIRMED", "CANCELLED");
 
     private final OrderProposalRepository proposals;
     private final CatalogApi catalog;
@@ -77,32 +83,51 @@ public class ProposalService {
         return view(proposal);
     }
 
-    /** The customer's confirmation: places the order, which reserves the stock and charges the card. */
+    /**
+     * The customer's confirmation: places the order, which reserves the stock and charges the card. If the order is
+     * not settled yet, because its payment is pending or the order service did not answer, the proposal stays
+     * {@code CONFIRMING} and {@link ProposalReconciler} settles it later.
+     */
     public Proposal confirm(UUID proposalId, String paymentMethod) {
-        OrderProposal proposal = proposals.findById(proposalId)
-                .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Order proposal " + proposalId + " does not exist"));
+        get(proposalId);
         // Claimed in one statement, so a double click or a retried request cannot place and charge the order twice.
-        if (proposals.moveStatus(proposalId, OrderProposal.Status.PROPOSED, OrderProposal.Status.CONFIRMING) == 0) {
+        if (proposals.claimForConfirmation(proposalId, paymentMethod, Instant.now(clock)) == 0) {
             return get(proposalId);
         }
+        settle(proposals.findById(proposalId).orElseThrow());
+        return get(proposalId);
+    }
+
+    /**
+     * Places the confirmed proposal's order, or asks for it again: the order's id is the proposal's id, so the order
+     * service returns the order it placed before instead of placing a second one. Only the request that ends the
+     * confirmation records it in the audit trail.
+     */
+    void settle(OrderProposal proposal) {
         List<OrderApi.RequestedLine> lines = linesOf(proposal).stream()
                 .map(line -> new OrderApi.RequestedLine(line.productId(), line.quantity()))
                 .toList();
         try {
-            OrderApi.Order order = Downstream.call("order service", () -> orders.placeOrder(
-                    new OrderApi.PlaceOrderRequest(proposal.getCustomerEmail(), lines, paymentMethod)));
-            proposal.markConfirmed(order.id());
-            audit.record(order.id(), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(), "confirm_order",
-                    AuditEvent.Outcome.SUCCEEDED, "Customer confirmed the proposed order and paid " + order.total() + " "
-                            + order.currency(),
-                    "Proposal " + proposal.getId());
+            OrderApi.Order order = Downstream.call("order service", () -> orders.placeOrder(new OrderApi.PlaceOrderRequest(
+                    proposal.getId(), proposal.getCustomerEmail(), lines, proposal.getPaymentMethod())));
+            // A cancelled order was placed and paid first; only an order still being placed or paid is pending.
+            if (!SETTLED_ORDER_STATUSES.contains(order.status())) {
+                proposals.linkPendingOrder(proposal.getId(), order.id());
+            } else if (proposals.settle(proposal.getId(), OrderProposal.Status.CONFIRMED, order.id(), null) == 1) {
+                audit.record(order.id(), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(), "confirm_order",
+                        AuditEvent.Outcome.SUCCEEDED, "Customer confirmed the proposed order and paid " + order.total()
+                                + " " + order.currency(),
+                        "Proposal " + proposal.getId());
+            }
         } catch (DownstreamException failure) {
-            proposal.markFailed(failure.getMessage());
-            audit.record(failedOrderId(failure), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(), "confirm_order",
-                    AuditEvent.Outcome.FAILED, "Order could not be placed: " + failure.getMessage(),
-                    "Proposal " + proposal.getId());
+            if (failure.isRetryable()) {
+                LOGGER.warn("The order for proposal {} is not settled yet; it will be asked for again", proposal.getId());
+            } else if (proposals.settle(proposal.getId(), OrderProposal.Status.FAILED, null, failure.getMessage()) == 1) {
+                audit.record(failedOrderId(failure), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(),
+                        "confirm_order", AuditEvent.Outcome.FAILED, "Order could not be placed: " + failure.getMessage(),
+                        "Proposal " + proposal.getId());
+            }
         }
-        return view(proposals.save(proposal));
     }
 
     public Proposal get(UUID proposalId) {

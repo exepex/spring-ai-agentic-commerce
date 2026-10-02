@@ -2,6 +2,8 @@ package io.github.exepex.commerce.payment;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,6 +28,12 @@ public class Refund {
     @Column(name = "provider_reference")
     private String providerReference;
 
+    @Enumerated(EnumType.STRING)
+    private PaymentGateway.RefundStatus status;
+
+    @Column(name = "succeeded_at")
+    private Instant succeededAt;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -33,15 +41,24 @@ public class Refund {
         // for JPA
     }
 
-    Refund(UUID paymentId, BigDecimal amount, String reason, String idempotencyKey, String providerReference,
-            Instant createdAt) {
+    Refund(UUID paymentId, BigDecimal amount, String reason, String idempotencyKey,
+            PaymentGateway.RefundResult result, Instant createdAt) {
         this.id = UUID.randomUUID();
         this.paymentId = paymentId;
         this.amount = amount;
         this.reason = reason;
         this.idempotencyKey = idempotencyKey;
-        this.providerReference = providerReference;
+        this.providerReference = result.reference();
+        this.status = result.status();
+        this.succeededAt = result.status() == PaymentGateway.RefundStatus.SUCCEEDED ? createdAt : null;
         this.createdAt = createdAt;
+    }
+
+    void updateStatus(PaymentGateway.RefundStatus latest, Instant now) {
+        if (latest == PaymentGateway.RefundStatus.SUCCEEDED && status != PaymentGateway.RefundStatus.SUCCEEDED) {
+            succeededAt = now;
+        }
+        status = latest;
     }
 
     public UUID getId() {
@@ -66,6 +83,10 @@ public class Refund {
 
     public String getProviderReference() {
         return providerReference;
+    }
+
+    public PaymentGateway.RefundStatus getStatus() {
+        return status;
     }
 
     public Instant getCreatedAt() {

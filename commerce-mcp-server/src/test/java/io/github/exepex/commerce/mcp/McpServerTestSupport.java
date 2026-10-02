@@ -33,9 +33,11 @@ import org.springframework.web.client.RestClient;
 
 /**
  * What the MCP server's integration tests share: the real server with Postgres and Kafka in containers, one
- * WireMock server standing in for the four commerce services, an MCP client per agent, and helpers.
+ * WireMock server standing in for the four commerce services, an MCP client per agent, and helpers. The reconciler
+ * never runs on its own schedule here; tests call it directly, and every confirmation counts as stalled at once.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = {"commerce.reconciliation.interval=1h", "commerce.reconciliation.settle-after=0s"})
 @Import(TestcontainersConfiguration.class)
 abstract class McpServerTestSupport {
 

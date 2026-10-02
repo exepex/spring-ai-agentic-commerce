@@ -36,11 +36,11 @@ class PaymentController {
     record OutageView(boolean active) {}
 
     record RefundView(UUID id, BigDecimal amount, String reason, String idempotencyKey, String providerReference,
-            Instant createdAt) {
+            String status, Instant createdAt) {
 
         static RefundView of(Refund refund) {
             return new RefundView(refund.getId(), refund.getAmount(), refund.getReason(), refund.getIdempotencyKey(),
-                    refund.getProviderReference(), refund.getCreatedAt());
+                    refund.getProviderReference(), refund.getStatus().name(), refund.getCreatedAt());
         }
     }
 

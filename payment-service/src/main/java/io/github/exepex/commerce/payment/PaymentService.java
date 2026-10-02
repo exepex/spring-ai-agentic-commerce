@@ -52,7 +52,8 @@ public class PaymentService {
     /**
      * Refunds part or all of the order's payment. The caller's idempotency key makes retries safe: repeating a
      * refund returns the first one, here and at the card processor. The payment row stays locked while the processor
-     * is called, so concurrent refunds cannot together exceed what was paid.
+     * is called, so concurrent refunds cannot together exceed what was paid. A pending refund counts as refunded
+     * until {@link RefundReconciler} learns that it failed. Repeating a refund that failed reports the failure.
      */
     @Transactional
     public Refund refund(UUID orderId, BigDecimal amount, String reason, String idempotencyKey) {
@@ -64,13 +65,16 @@ public class PaymentService {
             if (!refund.getPaymentId().equals(payment.getId()) || refund.getAmount().compareTo(amount) != 0) {
                 throw PaymentProblems.idempotencyKeyReused(idempotencyKey);
             }
+            if (refund.getStatus() == PaymentGateway.RefundStatus.FAILED) {
+                throw PaymentProblems.refundNotCompleted("failed");
+            }
             return refund;
         }
         if (amount.compareTo(payment.refundable()) > 0) {
             throw PaymentProblems.refundExceedsPayment(amount, payment.refundable());
         }
-        String reference = gateway.refund(payment.getProviderReference(), amount, idempotencyKey);
+        PaymentGateway.RefundResult result = gateway.refund(payment.getProviderReference(), amount, idempotencyKey);
         payment.recordRefund(amount);
-        return refunds.save(new Refund(payment.getId(), amount, reason, idempotencyKey, reference, Instant.now(clock)));
+        return refunds.save(new Refund(payment.getId(), amount, reason, idempotencyKey, result, Instant.now(clock)));
     }
 }

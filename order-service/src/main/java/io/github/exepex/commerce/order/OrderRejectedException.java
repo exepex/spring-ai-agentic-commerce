@@ -33,6 +33,10 @@ class OrderRejectedException extends ErrorResponseException {
         return new OrderRejectedException(HttpStatus.CONFLICT, "Order " + orderId + " is " + status + " and cannot be cancelled");
     }
 
+    static OrderRejectedException idTaken(UUID orderId) {
+        return new OrderRejectedException(HttpStatus.CONFLICT, "Order " + orderId + " already exists for another customer");
+    }
+
     static OrderRejectedException mixedCurrencies() {
         return new OrderRejectedException(HttpStatus.UNPROCESSABLE_CONTENT, "All products in an order must share a currency");
     }

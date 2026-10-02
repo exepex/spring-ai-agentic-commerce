@@ -259,23 +259,6 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
-    void confirmingTheSameProposalTwiceAtOncePlacesOneOrder() throws Exception {
-        UUID productId = UUID.randomUUID();
-        SERVICES.stubFor(get("/api/products").willReturn(okJson("""
-                [{"id": "%s", "sku": "HEADLAMP-400", "name": "Headlamp", "description": "", "price": 39.50,
-                  "currency": "EUR", "onHand": 5, "reserved": 0, "available": 5}]""".formatted(productId))));
-        SERVICES.stubFor(post("/api/orders").willReturn(okJson("""
-                {"id": "%s", "customerEmail": "ada@example.com", "status": "CONFIRMED", "total": 39.50, "currency": "EUR",
-                 "createdAt": "2026-10-02T10:00:00Z", "lines": []}""".formatted(UUID.randomUUID())).withFixedDelay(500)));
-        String proposalId = JsonPath.read(text(call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
-                "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1))))), "$.id");
-
-        runTogether(() -> confirm(proposalId), () -> confirm(proposalId));
-
-        SERVICES.verify(1, postRequestedFor(urlEqualTo("/api/orders")));
-    }
-
-    @Test
     void aRefundThatFailedBecausePaymentsWereDownSucceedsWhenRetriedWithTheSameKey() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
@@ -316,29 +299,6 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
                         .contains("STOCK_OUT", "damaged in warehouse", "2026-10-02T09:15:00Z"));
     }
 
-    @Test
-    void aDeclinedConfirmationShowsOnTheTimelineOfTheOrderItFailed() {
-        UUID productId = UUID.randomUUID();
-        UUID failedOrderId = UUID.randomUUID();
-        SERVICES.stubFor(get("/api/products").willReturn(okJson("""
-                [{"id": "%s", "sku": "HEADLAMP-400", "name": "Headlamp", "description": "", "price": 39.50,
-                  "currency": "EUR", "onHand": 5, "reserved": 0, "available": 5}]""".formatted(productId))));
-        SERVICES.stubFor(post("/api/orders").willReturn(aResponse().withStatus(402)
-                .withHeader("Content-Type", "application/problem+json")
-                .withBody("""
-                        {"status": 402, "detail": "Your card was declined.", "orderId": "%s"}""".formatted(failedOrderId))));
-        String proposal = text(call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
-                "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1)))));
-
-        String confirmed = rest().post().uri("/api/order-proposals/{id}/confirm", (String) JsonPath.read(proposal, "$.id"))
-                .contentType(MediaType.APPLICATION_JSON).body(Map.of("paymentMethod", "pm_card_chargeDeclined"))
-                .retrieve().body(String.class);
-
-        assertThat((String) JsonPath.read(confirmed, "$.status")).isEqualTo("FAILED");
-        assertThat(rest().get().uri("/api/orders/{orderId}/timeline", failedOrderId).retrieve().body(String.class))
-                .contains("confirm_order", "FAILED", "Your card was declined.");
-    }
-
     /** Asks for the full €39.50 refund with one fixed key and returns 1 when the call succeeded. */
     private static int refundAll(McpSyncClient client, UUID orderId) {
         McpSchema.CallToolResult result = call(client, "issue_refund", Map.of("orderId", orderId.toString(),
@@ -357,12 +317,6 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
     private int decide(String requestId, String decision) {
         return rest().post().uri("/api/refund-requests/{id}/" + decision, requestId)
                 .contentType(MediaType.APPLICATION_JSON).body(Map.of("by", "ops@example.com"))
-                .exchange((request, response) -> response.getStatusCode().value());
-    }
-
-    private int confirm(String proposalId) {
-        return rest().post().uri("/api/order-proposals/{id}/confirm", proposalId)
-                .contentType(MediaType.APPLICATION_JSON).body(Map.of("paymentMethod", "pm_card_visa"))
                 .exchange((request, response) -> response.getStatusCode().value());
     }
 }

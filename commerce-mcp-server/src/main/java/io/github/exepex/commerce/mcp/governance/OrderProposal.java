@@ -20,7 +20,10 @@ public class OrderProposal {
 
     public enum Status {
         PROPOSED,
-        /** A confirmation claimed it and is placing the order; a second confirmation finds it taken. */
+        /**
+         * The customer confirmed it and the order is being placed, or its payment is not settled yet. A second
+         * confirmation finds it taken; {@link ProposalReconciler} places the same order again until it settles.
+         */
         CONFIRMING,
         CONFIRMED,
         FAILED
@@ -47,6 +50,12 @@ public class OrderProposal {
 
     private String failure;
 
+    @Column(name = "payment_method")
+    private String paymentMethod;
+
+    @Column(name = "confirming_since")
+    private Instant confirmingSince;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -62,17 +71,6 @@ public class OrderProposal {
         this.currency = currency;
         this.status = Status.PROPOSED;
         this.createdAt = createdAt;
-    }
-
-    void markConfirmed(UUID placedOrderId) {
-        status = Status.CONFIRMED;
-        orderId = placedOrderId;
-        failure = null;
-    }
-
-    void markFailed(String message) {
-        status = Status.FAILED;
-        failure = message;
     }
 
     public UUID getId() {
@@ -105,6 +103,10 @@ public class OrderProposal {
 
     public String getFailure() {
         return failure;
+    }
+
+    public String getPaymentMethod() {
+        return paymentMethod;
     }
 
     public Instant getCreatedAt() {

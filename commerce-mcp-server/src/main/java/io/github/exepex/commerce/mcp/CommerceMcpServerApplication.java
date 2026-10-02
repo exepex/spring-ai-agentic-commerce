@@ -10,10 +10,12 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Bean;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.web.service.registry.ImportHttpServices;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
+@EnableScheduling
 @ImportHttpServices(group = "catalog", types = CatalogApi.class)
 @ImportHttpServices(group = "order", types = OrderApi.class)
 @ImportHttpServices(group = "payment", types = PaymentApi.class)

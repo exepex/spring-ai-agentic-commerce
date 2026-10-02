@@ -22,7 +22,8 @@ public interface OrderApi {
 
     record RequestedLine(UUID productId, int quantity) {}
 
-    record PlaceOrderRequest(String customerEmail, List<RequestedLine> lines, String paymentMethod) {}
+    /** Placing is idempotent by {@code orderId}: asking again returns the order placed the first time. */
+    record PlaceOrderRequest(UUID orderId, String customerEmail, List<RequestedLine> lines, String paymentMethod) {}
 
     record CancelOrderRequest(String reason) {}
 
@@ -32,6 +33,7 @@ public interface OrderApi {
     @GetExchange
     List<Order> findOrders(@RequestParam(required = false) String customerEmail);
 
+    /** The order comes back {@code CONFIRMED}, or not settled yet when its payment is still pending. */
     @PostExchange
     Order placeOrder(@RequestBody PlaceOrderRequest request);
 
