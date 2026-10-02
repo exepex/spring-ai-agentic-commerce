@@ -78,7 +78,17 @@
           <h2>Shipment</h2>
           @if (shipment(); as shipment) {
             <div class="spread"><span class="mono">{{ shipment.trackingNumber }}</span><span class="chip {{ shipment.status }}">{{ shipment.status }}</span></div>
-            <div class="muted small">Estimated delivery {{ shipment.estimatedDelivery | date: 'MMM d' }}</div>
+            @if (shipment.deliveredAt) {
+              <div class="muted small">Delivered {{ shipment.deliveredAt | date: 'MMM d, HH:mm:ss' }}</div>
+            } @else {
+              <div class="muted small">Estimated delivery {{ shipment.estimatedDelivery | date: 'MMM d' }}</div>
+            }
+            @if (shipment.shippedAt) {
+              <div class="muted small">Shipped {{ shipment.shippedAt | date: 'MMM d, HH:mm:ss' }}</div>
+            }
+            @if (shipment.deliveryProblem) {
+              <div class="small error">{{ shipment.deliveryProblem }}</div>
+            }
           } @else {
             <p class="empty">No shipment.</p>
           }

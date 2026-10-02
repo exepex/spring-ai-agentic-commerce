@@ -78,6 +78,12 @@ class CatalogController {
         stock.releaseOrder(orderId);
     }
 
+    @PostMapping("/orders/{orderId}/dispatch")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    void dispatchOrder(@PathVariable UUID orderId) {
+        stock.dispatchOrder(orderId);
+    }
+
     @PostMapping("/products/{productId}/stock-adjustments")
     ProductView adjustStock(@PathVariable UUID productId, @Valid @RequestBody AdjustStockRequest request) {
         return ProductView.of(stock.adjustStock(productId, request.delta(), request.reason()));

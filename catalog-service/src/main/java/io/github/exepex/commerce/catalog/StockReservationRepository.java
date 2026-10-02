@@ -12,11 +12,12 @@ interface StockReservationRepository extends JpaRepository<StockReservation, UUI
     Optional<StockReservation> findByOrderIdAndProductId(UUID orderId, UUID productId);
 
     /**
-     * Locks the rows it returns, so a concurrent release of the same order waits and then no longer finds them
-     * reserved: each reservation's units are given back once.
+     * Locks the rows it returns, so a concurrent release or dispatch of the same order waits and then sees what the
+     * other did: each reservation's units are given back or dispatched once. Ordered by product, so two orders lock
+     * their products in the same order.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    List<StockReservation> findByOrderIdAndStatus(UUID orderId, StockReservation.Status status);
+    List<StockReservation> findByOrderIdOrderByProductId(UUID orderId);
 
     List<StockReservation> findByProductIdAndStatusOrderByCreatedAtDesc(
             UUID productId, StockReservation.Status status);

@@ -114,6 +114,18 @@ class OrderProposalIntegrationTest extends McpServerTestSupport {
         assertThat((String) JsonPath.read(proposal(proposalId), "$.orderId")).isEqualTo(proposalId);
     }
 
+    @Test
+    void aConfirmationWhoseOrderShippedMeanwhileEndsAsConfirmed() {
+        String proposalId = propose();
+        SERVICES.stubFor(post("/api/orders").willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+        confirm(proposalId);
+
+        stubPlacedOrder(proposalId, "SHIPPED", 201);
+        reconciler.reconcile();
+
+        assertThat(status(proposalId)).isEqualTo("CONFIRMED");
+    }
+
     private String propose() {
         return JsonPath.read(text(call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
                 "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1))))), "$.id");

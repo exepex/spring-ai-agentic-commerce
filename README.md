@@ -43,7 +43,7 @@ flowchart LR
     kafka[("Kafka")]
     jaeger["Jaeger<br/>(traces)"]
 
-    ui --> orders & catalog & agent & mcp
+    ui --> orders & catalog & shipping & agent & mcp
     agent -- "MCP (per-agent token)" --> mcp
     agent -- MCP --> slack
     agent -- "MCP (per-agent token)" --> snmcp
@@ -53,18 +53,19 @@ flowchart LR
     mcp --> catalog & orders & payments & shipping
     orders --> catalog & payments
     orders -- order.events --> kafka
+    shipping -- shipment.events --> kafka
     payments -- payment.events --> kafka
     catalog -- inventory.stock-out --> kafka
-    kafka --> shipping & agent & mcp
+    kafka --> orders & shipping & agent & mcp
     agent & mcp & catalog & orders & payments & shipping -.-> jaeger
 ```
 
 | Service | Port | What it does |
 |---|---|---|
-| catalog-service | 8081 | Products and stock (on hand and reserved). A write-off below the reserved units publishes `inventory.stock-out`, naming the orders that can no longer be fulfilled. |
-| order-service | 8082 | Checkout: reserves stock, saves the order, charges the card, publishes `order.events`. Cancellation releases the stock. |
+| catalog-service | 8081 | Products and stock (on hand and reserved). A write-off below the reserved units publishes `inventory.stock-out`, naming the orders that can no longer be fulfilled. A shipped order's units leave the stock. |
+| order-service | 8082 | Checkout: reserves stock, saves the order, charges the card, publishes `order.events`. Ships an order once the catalog hands over its stock, and follows its parcel from `shipment.events`. Cancellation releases the stock. |
 | payment-service | 8083 | Card payments and idempotent refunds through Stripe test mode (or a built-in simulator without a key). Publishes `payment.events` when a refund fails after it was made. Has a simulated-outage switch for the demo. |
-| shipping-service | 8084 | Creates and cancels shipments from order events. |
+| shipping-service | 8084 | Shipments from order events, and a simulated carrier: a shipped parcel is delivered, not delivered or lost, and each report is published on `shipment.events`. |
 | commerce-mcp-server | 8085 | Nine MCP tools over the services, plus the governance API: audit trail, refund approvals, order proposals, customer notifications, escalations. |
 | servicenow-mcp-server | 8087 | Five MCP tools over ServiceNow incidents, governed like the commerce tools. Claims new incidents for the incident agent and publishes `servicenow.incidents`. |
 | agent-service | 8086 | The three agents, each with its own MCP connections, allowlist, prompt and effort level. |
@@ -122,6 +123,11 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    work notes, and resolves the incident. When it cannot decide, it hands the incident to the team whose work it is
    (customer care, payments or fulfilment) with a note of what that team needs to do; ServiceNow notifies the team.
    It needs a ServiceNow instance; see "ServiceNow incidents" below.
+9. **Shipping and delivery.** In the operations console, **Ship** sends a paid order: the catalog takes its units
+   out of the warehouse and the order becomes *shipped*. From then on it can no longer be cancelled, by a person or an
+   agent. An order that a stock-out left without stock cannot ship. Playing the carrier, an operator then reports the
+   parcel *delivered*, *delivery failed* or *lost*; the order follows, and its timeline shows each step.
+   `track_shipment` shows the agents where the parcel is and what went wrong.
 
 ## Run it
 
@@ -201,6 +207,10 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
   incident cannot steer it to another order and a person who takes the incident over stops it. The
   Table API has no conditional update, so the poller reads an incident again right before claiming or handing it
   over; a person who takes it in the moment between that read and the update is overwritten.
+- **One service decides between shipping and cancelling.** Shipping goes through the order service, which marks an
+  order shipped only while it is still confirmed, the same check a cancellation makes, so an order is never both. The
+  catalog hands over the stock just before; if the order is cancelled at that moment, the cancellation's stock release
+  puts the units back on the shelf.
 - **Stock changes lock the product row,** so concurrent reservations and write-offs never reserve more than exists.
 - **No database transaction is held open across remote calls.** Checkout saves the order before charging the card,
   and releases the stock if any step fails.

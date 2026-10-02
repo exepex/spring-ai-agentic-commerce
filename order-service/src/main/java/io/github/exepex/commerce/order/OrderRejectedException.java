@@ -33,6 +33,14 @@ class OrderRejectedException extends ErrorResponseException {
         return new OrderRejectedException(HttpStatus.CONFLICT, "Order " + orderId + " is " + status + " and cannot be cancelled");
     }
 
+    static OrderRejectedException notShippable(UUID orderId, OrderStatus status) {
+        return notShippable("Order " + orderId + " is " + status + " and cannot ship");
+    }
+
+    static OrderRejectedException notShippable(String detail) {
+        return new OrderRejectedException(HttpStatus.CONFLICT, detail);
+    }
+
     static OrderRejectedException idTaken(UUID orderId) {
         return new OrderRejectedException(HttpStatus.CONFLICT, "Order " + orderId + " already exists for another customer");
     }

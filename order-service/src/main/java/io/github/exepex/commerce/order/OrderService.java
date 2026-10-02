@@ -151,6 +151,51 @@ public class OrderService {
         return cancelled;
     }
 
+    /**
+     * Ships a confirmed order: the catalog takes its stock out of the warehouse, then the order is marked shipped and
+     * announced, and the shipping service hands the parcel to the carrier. This order service decides between shipping
+     * and cancelling, so an order is never both: whichever change saves first wins, and the other is refused. If the
+     * order is cancelled after its stock was dispatched, the cancellation's stock release puts the units back.
+     * Shipping twice changes nothing.
+     */
+    public CustomerOrder shipOrder(UUID orderId) {
+        CustomerOrder order = getOrder(orderId);
+        if (order.hasShipped()) {
+            return order;
+        }
+        if (!order.isShippable()) {
+            throw OrderRejectedException.notShippable(orderId, order.getStatus());
+        }
+        catalog.dispatchOrder(orderId);
+        CustomerOrder shipped = change(order, () -> {
+            order.ship();
+            events.publishEvent(OrderEvent.of(OrderEvent.Type.ORDER_SHIPPED, order, Instant.now(clock)));
+        }, null);
+        if (!shipped.hasShipped()) {
+            throw OrderRejectedException.notShippable(orderId, shipped.getStatus());
+        }
+        return shipped;
+    }
+
+    /**
+     * Records what the carrier reported for a shipped order. The carrier reports each parcel once, but Kafka may
+     * deliver the report again: an order that already has the outcome is left as it is.
+     */
+    void recordCarrierOutcome(UUID orderId, OrderStatus outcome) {
+        CustomerOrder order = getOrder(orderId);
+        if (order.getStatus() == outcome) {
+            return;
+        }
+        if (order.getStatus() != OrderStatus.SHIPPED) {
+            LOGGER.warn("Ignoring carrier outcome {} for order {}, which is {}", outcome, orderId, order.getStatus());
+            return;
+        }
+        transaction.executeWithoutResult(status -> {
+            order.recordCarrierOutcome(outcome);
+            orders.save(order);
+        });
+    }
+
     /** Checkout's answer for an order it placed now or before. */
     private static CustomerOrder outcomeOf(CustomerOrder order, String customerEmail) {
         if (!order.getCustomerEmail().equalsIgnoreCase(customerEmail)) {

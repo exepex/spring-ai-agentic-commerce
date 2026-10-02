@@ -358,6 +358,44 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         assertThat(actions).containsExactly("ORDER_CONFIRMED", "ORDER_CANCELLED");
     }
 
+    @Test
+    void theOrderTimelineShowsTheShipmentAndWhatTheCarrierReportedOnce() {
+        UUID orderId = UUID.randomUUID();
+        String failed = """
+                {"eventId": "%s", "type": "SHIPMENT_DELIVERY_FAILED", "orderId": "%s", "customerEmail": "ada@example.com",
+                 "trackingNumber": "ACTEST000001", "deliveryProblem": "Nobody home, parcel returned",
+                 "occurredAt": "2026-10-02T11:00:00Z"}""".formatted(UUID.randomUUID(), orderId);
+
+        kafka.send("order.events", orderId.toString(), """
+                {"eventId": "%s", "type": "ORDER_SHIPPED", "orderId": "%s", "customerEmail": "ada@example.com",
+                 "occurredAt": "2026-10-02T10:00:00Z"}""".formatted(UUID.randomUUID(), orderId)).join();
+        kafka.send("shipment.events", orderId.toString(), failed).join();
+        kafka.send("shipment.events", orderId.toString(), failed).join();
+
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
+                assertThat(timeline(orderId)).contains("SHIPMENT_DELIVERY_FAILED"));
+        List<String> actions = JsonPath.read(timeline(orderId), "$[*].action");
+        assertThat(actions).containsExactly("ORDER_SHIPPED", "SHIPMENT_DELIVERY_FAILED");
+        assertThat(timeline(orderId)).contains("Parcel ACTEST000001 could not be delivered: Nobody home, parcel returned");
+    }
+
+    @Test
+    void trackingAShipmentShowsWhatTheCarrierReported() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        SERVICES.stubFor(get("/api/shipments/" + orderId).willReturn(okJson("""
+                {"id": "%s", "orderId": "%s", "trackingNumber": "ACTEST000002", "status": "DELIVERY_FAILED",
+                 "estimatedDelivery": "2026-10-05", "createdAt": "2026-10-02T10:00:00Z",
+                 "shippedAt": "2026-10-02T12:00:00Z", "deliveredAt": null,
+                 "deliveryProblem": "Address not found", "cancelledAt": null}""".formatted(UUID.randomUUID(), orderId))));
+
+        String shipment = text(call(assistant, "track_shipment",
+                Map.of("orderId", orderId.toString(), "customerEmail", "ada@example.com")));
+
+        assertThat((String) JsonPath.read(shipment, "$.status")).isEqualTo("DELIVERY_FAILED");
+        assertThat((String) JsonPath.read(shipment, "$.shippedAt")).isEqualTo("2026-10-02T12:00:00Z");
+        assertThat((String) JsonPath.read(shipment, "$.deliveryProblem")).isEqualTo("Address not found");
+    }
+
     private static String stockOut(UUID eventId, String reason, UUID... affectedOrderIds) {
         String orderIds = String.join(", ", Arrays.stream(affectedOrderIds).map(id -> "\"" + id + "\"").toList());
         return """

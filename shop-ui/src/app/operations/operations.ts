@@ -3,12 +3,12 @@ import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
-import { AgentsView, Api, AuditEvent, Escalation, Product, RefundRequest } from '../api';
+import { AgentsView, Api, AuditEvent, CarrierOutcome, Escalation, Product, RefundRequest, Shipment } from '../api';
 import { refreshWhileOpen } from '../polling';
 import { OPERATORS, Session } from '../session';
 import { Timeline } from '../timeline';
 
-/** The operations team's console: approvals, escalations, the agents' kill switches, and demo controls. */
+/** The operations team's console: approvals, escalations, shipping, the agents' kill switches, and demo controls. */
 @Component({
   selector: 'app-operations',
   imports: [FormsModule, CurrencyPipe, DatePipe, RouterLink, Timeline],
@@ -25,6 +25,8 @@ export class Operations {
   protected readonly refunds = signal<RefundRequest[]>([]);
   protected readonly pendingRefunds = computed(() => this.refunds().filter((refund) => refund.status === 'PENDING_APPROVAL'));
   protected readonly escalations = signal<Escalation[]>([]);
+  /** Parcels still to ship, and parcels on their way that the carrier has not reported on. */
+  protected readonly shipments = signal<Shipment[]>([]);
   protected readonly agents = signal<AgentsView | null>(null);
   protected readonly products = signal<Product[]>([]);
   protected readonly activity = signal<AuditEvent[]>([]);
@@ -73,6 +75,22 @@ export class Operations {
 
   protected isMine(escalation: Escalation): boolean {
     return escalation.status === 'ASSIGNED' && escalation.assignedTo === this.session.operator();
+  }
+
+  protected ship(shipment: Shipment): void {
+    this.busy.set(shipment.id);
+    this.api.shipOrder(shipment.orderId).subscribe({
+      next: () => this.done(shipment.id),
+      error: (failure) => this.done(shipment.id, failure),
+    });
+  }
+
+  protected report(shipment: Shipment, outcome: CarrierOutcome): void {
+    this.busy.set(shipment.id);
+    this.api.reportFromCarrier(shipment.orderId, outcome, this.noteFor(shipment.id)).subscribe({
+      next: () => this.done(shipment.id),
+      error: (failure) => this.done(shipment.id, failure),
+    });
   }
 
   protected refusalFor(id: string): string | undefined {
@@ -126,6 +144,7 @@ export class Operations {
       this.escalations.set([...open, ...assigned, ...recent.filter((escalation) => escalation.status === 'RESOLVED')]);
       this.activity.set(activity);
     });
+    this.api.shipments(['PREPARING', 'SHIPPED']).subscribe((shipments) => this.shipments.set(shipments));
     this.api.agents().subscribe({ next: (agents) => this.agents.set(agents), error: () => this.agents.set(null) });
     this.api.paymentOutage().subscribe((outage) => this.paymentOutage.set(outage));
     this.api.products().subscribe((products) => {

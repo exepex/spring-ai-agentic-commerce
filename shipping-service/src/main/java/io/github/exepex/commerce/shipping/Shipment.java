@@ -9,12 +9,25 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
 
+/**
+ * An order's parcel: prepared when the order is confirmed, handed to the carrier when the order ships, then delivered,
+ * not delivered, or lost, as the carrier reports. A parcel that has not shipped yet is cancelled with its order.
+ */
 @Entity
 public class Shipment {
 
     enum Status {
         PREPARING,
-        CANCELLED
+        SHIPPED,
+        DELIVERED,
+        DELIVERY_FAILED,
+        LOST,
+        CANCELLED;
+
+        /** What the carrier can report about a shipped parcel. */
+        boolean isCarrierOutcome() {
+            return this == DELIVERED || this == DELIVERY_FAILED || this == LOST;
+        }
     }
 
     @Id
@@ -41,6 +54,16 @@ public class Shipment {
     @Column(name = "cancelled_at")
     private Instant cancelledAt;
 
+    @Column(name = "shipped_at")
+    private Instant shippedAt;
+
+    @Column(name = "delivered_at")
+    private Instant deliveredAt;
+
+    /** Why the carrier could not deliver the parcel, or that it lost it. */
+    @Column(name = "delivery_problem")
+    private String deliveryProblem;
+
     protected Shipment() {
         // for JPA
     }
@@ -55,10 +78,27 @@ public class Shipment {
         this.createdAt = createdAt;
     }
 
+    /** The order service refuses to cancel an order that has shipped, so only a parcel being prepared is cancelled. */
     void cancel(Instant now) {
-        if (status != Status.CANCELLED) {
+        if (status == Status.PREPARING) {
             status = Status.CANCELLED;
             cancelledAt = now;
+        }
+    }
+
+    void ship(Instant now) {
+        if (status == Status.PREPARING) {
+            status = Status.SHIPPED;
+            shippedAt = now;
+        }
+    }
+
+    void recordCarrierOutcome(Status outcome, String problem, Instant now) {
+        status = outcome;
+        if (outcome == Status.DELIVERED) {
+            deliveredAt = now;
+        } else {
+            deliveryProblem = problem;
         }
     }
 
@@ -92,5 +132,17 @@ public class Shipment {
 
     public Instant getCancelledAt() {
         return cancelledAt;
+    }
+
+    public Instant getShippedAt() {
+        return shippedAt;
+    }
+
+    public Instant getDeliveredAt() {
+        return deliveredAt;
+    }
+
+    public String getDeliveryProblem() {
+        return deliveryProblem;
     }
 }

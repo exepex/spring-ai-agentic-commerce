@@ -12,5 +12,13 @@ public enum OrderStatus {
     CONFIRMED,
     /** The card was declined; the stock is released. */
     PAYMENT_FAILED,
-    CANCELLED
+    CANCELLED,
+    /** The parcel left the warehouse with the carrier. From here on the order can no longer be cancelled. */
+    SHIPPED,
+    /** The carrier delivered the parcel. */
+    DELIVERED,
+    /** The carrier could not deliver the parcel. */
+    DELIVERY_FAILED,
+    /** The carrier lost the parcel. */
+    LOST
 }

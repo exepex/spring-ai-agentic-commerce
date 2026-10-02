@@ -32,7 +32,8 @@ public class ProposalService {
             OrderProposal.Status status, UUID orderId, String failure, Instant createdAt) {}
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ProposalService.class);
-    private static final Set<String> SETTLED_ORDER_STATUSES = Set.of("CONFIRMED", "CANCELLED");
+    /** An order in these is still being placed or paid; in any other it was placed and paid first. */
+    private static final Set<String> UNSETTLED_ORDER_STATUSES = Set.of("PLACED", "PAYMENT_PENDING");
 
     private final OrderProposalRepository proposals;
     private final CatalogApi catalog;
@@ -110,8 +111,7 @@ public class ProposalService {
         try {
             OrderApi.Order order = Downstream.call("order service", () -> orders.placeOrder(new OrderApi.PlaceOrderRequest(
                     proposal.getId(), proposal.getCustomerEmail(), lines, proposal.getPaymentMethod())));
-            // A cancelled order was placed and paid first; only an order still being placed or paid is pending.
-            if (!SETTLED_ORDER_STATUSES.contains(order.status())) {
+            if (UNSETTLED_ORDER_STATUSES.contains(order.status())) {
                 proposals.linkPendingOrder(proposal.getId(), order.id());
             } else if (proposals.settle(proposal.getId(), OrderProposal.Status.CONFIRMED, order.id(), null) == 1) {
                 audit.record(order.id(), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(), "confirm_order",

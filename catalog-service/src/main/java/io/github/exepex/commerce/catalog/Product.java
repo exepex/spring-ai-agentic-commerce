@@ -53,6 +53,17 @@ public class Product {
         reserved -= quantity;
     }
 
+    /** Reserved units leave the warehouse with a shipped order: they are no longer on hand or reserved. */
+    void dispatch(int quantity) {
+        reserved -= quantity;
+        onHand -= quantity;
+    }
+
+    /** Units that were picked for an order which did not ship go back on the shelf. */
+    void restock(int quantity) {
+        onHand += quantity;
+    }
+
     void adjustOnHand(int delta) {
         if (onHand + delta < 0) {
             throw new InvalidStockAdjustmentException(sku, onHand, delta);
