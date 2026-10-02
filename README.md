@@ -197,7 +197,8 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
   code when its run fails or ends without either, or by the poller when a claimed incident is not finished in time.
 - **The agent only changes what it owns.** Every ServiceNow tool works only on an incident assigned to the agent's
   integration user, so it cannot touch incidents that a person or another team owns. An incident run may change only
-  the order linked in the incident's Correlation ID, so text in the incident cannot steer it to another order. The
+  the order linked in the incident's Correlation ID, and only while the incident is still the agent's, so text in the
+  incident cannot steer it to another order and a person who takes the incident over stops it. The
   Table API has no conditional update, so the poller reads an incident again right before claiming or handing it
   over; a person who takes it in the moment between that read and the update is overwritten.
 - **Stock changes lock the product row,** so concurrent reservations and write-offs never reserve more than exists.

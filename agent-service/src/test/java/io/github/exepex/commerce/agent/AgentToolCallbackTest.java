@@ -96,7 +96,7 @@ class AgentToolCallbackTest {
         String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
         RecordingTool refund = new RecordingTool("issue_refund");
         AgentToolCallback tool = new AgentToolCallback(refund, false, () -> true);
-        ToolContext context = contextFor(new ToolRun(null, 5, Set.of(linkedOrder)));
+        ToolContext context = contextFor(new ToolRun(null, 5, Set.of(linkedOrder), () -> true));
 
         String otherOrder = tool.call("{\"orderId\": \"7c9e6679-7425-40de-944b-e07fc1f90ae7\"}", context);
         String sameOrderInCapitals = tool.call("{\"orderId\": \" " + linkedOrder.toUpperCase() + "\"}", context);
@@ -108,7 +108,7 @@ class AgentToolCallbackTest {
 
     @Test
     void aRunWithNoLinkedOrderMayReadOrdersButChangeNone() {
-        ToolContext context = contextFor(new ToolRun(null, 5, Set.of()));
+        ToolContext context = contextFor(new ToolRun(null, 5, Set.of(), () -> true));
 
         String lookup = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true)
                 .call("{\"orderId\": \"o-1\"}", context);
@@ -119,6 +119,24 @@ class AgentToolCallbackTest {
         assertThat(lookup).doesNotStartWith("Refused");
         assertThat(cancel).startsWith("Refused");
         assertThat(notify).startsWith("Refused");
+    }
+
+    @Test
+    void aRunWhoseIncidentWasTakenOverChangesNoOrder() {
+        String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        AtomicBoolean stillOwned = new AtomicBoolean(true);
+        RecordingTool cancel = new RecordingTool("cancel_order");
+        AgentToolCallback tool = new AgentToolCallback(cancel, false, () -> true);
+        ToolContext context = contextFor(new ToolRun(null, 5, Set.of(linkedOrder), stillOwned::get));
+
+        stillOwned.set(false);
+        String afterTakeOver = tool.call("{\"orderId\": \"" + linkedOrder + "\"}", context);
+        String lookup = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true)
+                .call("{\"orderId\": \"" + linkedOrder + "\"}", context);
+
+        assertThat(afterTakeOver).startsWith("Refused").contains("no longer this agent's");
+        assertThat(cancel.inputs).isEmpty();
+        assertThat(lookup).doesNotStartWith("Refused");
     }
 
     @Test

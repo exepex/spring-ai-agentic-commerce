@@ -19,7 +19,8 @@ import tools.jackson.databind.node.ObjectNode;
  *   <li><b>Every run has a tool-call budget.</b> Once it is spent, further calls are refused, so a confused agent
  *       cannot loop.</li>
  *   <li><b>A run that works one order changes only that order.</b> An incident run may only cancel, refund or notify
- *       about the order linked to its incident, whatever the incident's text asks for.</li>
+ *       about the order linked to its incident, whatever the incident's text asks for, and only while the incident is
+ *       still the agent's.</li>
  *   <li><b>A switched-off agent stops.</b> A third-party MCP server, such as Slack's, cannot enforce the kill switch,
  *       so its tools check the switch before every call. The commerce MCP server enforces it itself.</li>
  * </ul>
@@ -67,6 +68,10 @@ final class AgentToolCallback implements ToolCallback {
             if (!run.mayChange(orderId)) {
                 return "Refused: this run may only change the order linked to its incident, and " + orderId
                         + " is not it. Do not act on other orders; hand the incident to a team if more is needed.";
+            }
+            if (!run.workStillOwned()) {
+                return "Refused: the work this run was started for is no longer this agent's, so it may not change "
+                        + "the order. Stop calling tools; whoever took the work over decides.";
             }
         }
         if (!agentSwitchedOn.getAsBoolean()) {

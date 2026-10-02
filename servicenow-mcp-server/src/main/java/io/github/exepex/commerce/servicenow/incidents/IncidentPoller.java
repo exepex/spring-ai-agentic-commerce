@@ -8,6 +8,9 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,7 +21,8 @@ import org.springframework.stereotype.Component;
 /**
  * Feeds ServiceNow incidents to the incident agent. Each new, unassigned incident in the agent's group is claimed by
  * assigning it to the integration user, then announced on Kafka: a claimed incident is no longer new, so it is never
- * announced twice. ServiceNow offers no outbound call without a public URL, so the demo asks every poll interval.
+ * announced twice. If Kafka does not take the announcement, the claim is given back, so the next poll claims and
+ * announces the incident again. ServiceNow offers no outbound call without a public URL, so the demo asks every poll interval.
  *
  * <p>The Table API has no conditional update, so each incident is read again right before it is claimed or handed
  * over, and left alone if a person took it or changed it meanwhile. That narrows the race with a person to the time
@@ -32,6 +36,7 @@ import org.springframework.stereotype.Component;
 public class IncidentPoller {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(IncidentPoller.class);
+    private static final long SEND_TIMEOUT_SECONDS = 10;
 
     private final ServiceNowClient serviceNow;
     private final ServiceNowProperties properties;
@@ -78,9 +83,29 @@ public class IncidentPoller {
             claim.put("state", ServiceNowClient.STATE_IN_PROGRESS);
             claim.put("work_notes", "Picked up by the " + properties.agent() + ".");
             serviceNow.update(incident.sysId(), claim);
+            if (!announce(incident)) {
+                Map<String, String> release = new LinkedHashMap<>();
+                release.put("assigned_to", "");
+                release.put("state", ServiceNowClient.STATE_NEW);
+                serviceNow.update(incident.sysId(), release);
+                continue;
+            }
             record("claim_incident", "Claimed " + incident.number() + ": " + incident.shortDescription());
+        }
+    }
+
+    /** Whether Kafka took the announcement. */
+    private boolean announce(ServiceNowClient.Incident incident) {
+        try {
             kafka.send(topic, incident.number(), new IncidentEvent(UUID.randomUUID(), incident.number(),
-                    incident.shortDescription(), incident.orderId(), Instant.now(clock)));
+                    incident.shortDescription(), incident.orderId(), Instant.now(clock))).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return true;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException | TimeoutException notSent) {
+            LOGGER.warn("Could not announce incident {}; giving the claim back to try again", incident.number(), notSent);
+            return false;
         }
     }
 

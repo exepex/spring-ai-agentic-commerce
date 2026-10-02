@@ -84,7 +84,8 @@ class IncidentTools {
             do. The team is notified by ServiceNow; the incident is no longer yours afterwards.""")
     Acknowledgement assignToTeam(McpTransportContext context,
             @McpToolParam(description = "The incident number") String number,
-            @McpToolParam(description = "The team, as listed by list_teams") String team,
+            @McpToolParam(description = "The team, as listed by list_teams; the default team when left out",
+                    required = false) String team,
             @McpToolParam(description = "What you found, what you did, and what the team needs to do") String note) {
         return guard.run(context, ToolGuard.HAND_TO_TEAM, "Assigned " + number + " to team " + team, agentId -> {
             String teamKey = team == null || team.isBlank() ? properties.defaultTeam() : team;

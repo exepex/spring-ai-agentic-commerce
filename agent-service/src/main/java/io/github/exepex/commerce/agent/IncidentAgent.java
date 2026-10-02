@@ -68,7 +68,8 @@ public class IncidentAgent {
         }
         Instant started = Instant.now();
         ToolRun run = new ToolRun(null, definition.toolCallBudget(),
-                linkedOrderId == null || linkedOrderId.isBlank() ? Set.of() : Set.of(linkedOrderId));
+                linkedOrderId == null || linkedOrderId.isBlank() ? Set.of() : Set.of(linkedOrderId),
+                () -> stillOwns(number));
         ChatResponse response;
         try {
             response = chatClient.prompt()
@@ -91,6 +92,19 @@ public class IncidentAgent {
         if (!isFinished(number, run)) {
             handToTeam(number, "The incident agent finished without resolving this incident or handing it to a team, "
                     + "so a person must finish it. The agent said: " + summary);
+        }
+    }
+
+    /**
+     * Whether the incident is still the agent's: the ServiceNow MCP server lets it read only incidents assigned to it
+     * and in progress. When ServiceNow cannot be reached the answer is no, so no order changes on a guess.
+     */
+    private boolean stillOwns(String number) {
+        try {
+            return !Boolean.TRUE.equals(toolboxes.callAsIncidentAgent("get_incident", Map.of("number", number)).isError());
+        } catch (RuntimeException unavailable) {
+            LOGGER.warn("Could not check that incident {} is still the agent's", number, unavailable);
+            return false;
         }
     }
 

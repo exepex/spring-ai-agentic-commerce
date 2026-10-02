@@ -171,6 +171,18 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void aHandOffWithoutATeamGoesToTheDefaultTeam() {
+        stubIncident(AGENT_USER, "2");
+
+        McpSchema.CallToolResult handed = call("assign_to_team", Map.of("number", "INC0010001",
+                "note", "The incident agent failed, so a person must finish this."));
+
+        assertThat(handed.isError()).isFalse();
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withRequestBody(matchingJsonPath("$.assignment_group", equalTo("Customer Care"))));
+    }
+
+    @Test
     void resolvesWithTheStoredStateCodeAndCloseCode() {
         stubIncident(AGENT_USER, "2");
 
