@@ -34,7 +34,7 @@ interface RefundRequestRepository extends JpaRepository<RefundRequest, UUID> {
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update RefundRequest r set r.status = io.github.exepex.commerce.mcp.governance.RefundRequest.Status.FAILED,
-                r.failure = :failure, r.updatedAt = :now, r.version = r.version + 1
+                r.failure = :failure, r.failedAtProcessor = true, r.updatedAt = :now, r.version = r.version + 1
             where r.idempotencyKey = :idempotencyKey
               and r.status in (io.github.exepex.commerce.mcp.governance.RefundRequest.Status.EXECUTED,
                                io.github.exepex.commerce.mcp.governance.RefundRequest.Status.FAILED)""")

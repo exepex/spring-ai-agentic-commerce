@@ -251,34 +251,54 @@ public class RefundService {
     private RefundRequest execute(RefundRequest request, String actor) {
         AuditEvent.ActorType actorType = actor.equals(request.getRequestedBy()) ? AuditEvent.ActorType.AGENT : AuditEvent.ActorType.HUMAN;
         String providerReference = null;
+        String failure = null;
         try {
             PaymentApi.Refund refund = Downstream.call("payment service", () -> payments.refund(request.getOrderId(),
                     new PaymentApi.RefundRequest(request.getAmount(), request.getReason(), request.getIdempotencyKey())));
             providerReference = refund.providerReference();
-            request.markExecuted(providerReference, Instant.now(clock));
-        } catch (DownstreamException failure) {
-            request.markFailed(failure.getMessage(), Instant.now(clock));
+        } catch (DownstreamException unavailable) {
+            failure = unavailable.getMessage();
         }
-        RefundRequest saved;
-        try {
-            saved = requests.save(request);
-        } catch (ObjectOptimisticLockingFailureException failedAtProcessorMeanwhile) {
-            // The card processor reported the refund failed while the payment service's answer was on its way; that
-            // failure, already recorded with its case, is the outcome.
-            return find(request.getId());
-        }
-        if (saved.getStatus() == RefundRequest.Status.EXECUTED) {
-            audit.record(saved.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.SUCCEEDED,
-                    "Refunded " + saved.getAmount() + " " + saved.getCurrency() + " (" + providerReference + ")",
-                    saved.getReason());
+        RefundRequest outcome = saveOutcome(request, providerReference, failure);
+        String amount = outcome.getAmount() + " " + outcome.getCurrency();
+        if (providerReference == null) {
+            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
+                    "Refund of " + amount + " failed: " + failure, "Idempotency key " + outcome.getIdempotencyKey());
+        } else if (outcome.getStatus() == RefundRequest.Status.EXECUTED) {
+            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.SUCCEEDED,
+                    "Refunded " + amount + " (" + providerReference + ")", outcome.getReason());
         } else {
-            audit.record(saved.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
-                    "Refund of " + saved.getAmount() + " " + saved.getCurrency() + " failed: " + saved.getFailure(),
-                    "Idempotency key " + saved.getIdempotencyKey());
+            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
+                    "The payment service took the refund of " + amount + ", but the card processor had already "
+                            + "reported it failed", "Idempotency key " + outcome.getIdempotencyKey());
         }
-        return saved;
+        return outcome;
     }
 
+    /**
+     * Saves what the payment service answered. Another answer about the same refund may have been saved meanwhile,
+     * for example by a second retry at the same moment: then a success still wins over a failure, since the money was
+     * returned, but nothing undoes a failure the card processor reported. Whatever is stored in the end is returned.
+     */
+    private RefundRequest saveOutcome(RefundRequest request, String providerReference, String failure) {
+        RefundRequest current = request;
+        while (true) {
+            if (providerReference != null) {
+                current.markExecuted(providerReference, Instant.now(clock));
+            } else {
+                current.markFailed(failure, Instant.now(clock));
+            }
+            try {
+                return requests.save(current);
+            } catch (ObjectOptimisticLockingFailureException changedMeanwhile) {
+                current = find(request.getId());
+                if (providerReference == null || current.isFailedAtProcessor()
+                        || current.getStatus() == RefundRequest.Status.EXECUTED) {
+                    return current;
+                }
+            }
+        }
+    }
     private RefundRequest find(UUID requestId) {
         return requests.findById(requestId)
                 .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Refund request " + requestId + " does not exist"));

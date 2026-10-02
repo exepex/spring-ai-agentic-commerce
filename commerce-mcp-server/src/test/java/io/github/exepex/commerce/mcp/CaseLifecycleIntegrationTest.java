@@ -3,6 +3,7 @@ package io.github.exepex.commerce.mcp;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.stubbing.Scenario.STARTED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
@@ -160,6 +161,32 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
         assertThat((List<String>) JsonPath.read(cases(orderId), "$[*].type")).containsExactly("REFUND_FAILED");
         assertThat((List<String>) JsonPath.read(timeline(orderId), "$[?(@.action == 'issue_refund')].outcome"))
                 .doesNotContain("SUCCEEDED");
+    }
+
+    @Test
+    void whenTwoPeopleRetryARefundAtOnceAndOnlyOneGetsThroughTheRefundCountsAsPaid() throws Exception {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
+        SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(503)));
+        String refundRequestId = JsonPath.read(text(call(incidentAgent, "issue_refund", Map.of("orderId",
+                orderId.toString(), "amount", 39.50, "reason", "item out of stock", "idempotencyKey",
+                "refund-" + orderId))), "$.refundRequestId");
+        // The first retry gets through, but its answer is slow; the second fails at once and is saved first.
+        SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").inScenario("retries").whenScenarioStateIs(STARTED)
+                .willSetStateTo("second").willReturn(aResponse().withStatus(201).withFixedDelay(2000)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"id\": \"%s\", \"amount\": 39.50, \"providerReference\": \"re_ok\"}"
+                                .formatted(UUID.randomUUID()))));
+        SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").inScenario("retries").whenScenarioStateIs("second")
+                .willReturn(aResponse().withStatus(503)));
+
+        CompletableFuture<Integer> slowSuccess = CompletableFuture.supplyAsync(() -> retry(refundRequestId, "ana@trailhead.example"));
+        await().atMost(Duration.ofSeconds(2)).until(() -> SERVICES.getAllScenarios().getScenarios().stream()
+                .anyMatch(scenario -> "second".equals(scenario.getState())));
+        int fastFailure = retry(refundRequestId, "ben@trailhead.example");
+
+        assertThat(List.of(slowSuccess.join(), fastFailure)).containsExactly(200, 200);
+        assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
     }
 
     @Test
