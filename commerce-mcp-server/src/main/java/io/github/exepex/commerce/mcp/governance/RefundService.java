@@ -1,6 +1,8 @@
 package io.github.exepex.commerce.mcp.governance;
 
 import io.github.exepex.commerce.mcp.GovernanceProperties;
+import io.github.exepex.commerce.mcp.cases.CaseService;
+import io.github.exepex.commerce.mcp.cases.CaseType;
 import io.github.exepex.commerce.mcp.downstream.Downstream;
 import io.github.exepex.commerce.mcp.downstream.DownstreamException;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
@@ -42,20 +44,20 @@ public class RefundService {
     private final PaymentApi payments;
     private final OrderApi orders;
     private final AuditTrail audit;
-    private final EscalationService escalations;
+    private final CaseService cases;
     private final BigDecimal approvalThreshold;
     private final TransactionTemplate transaction;
     private final JdbcClient jdbc;
     private final Clock clock;
 
     RefundService(RefundRequestRepository requests, PaymentApi payments, OrderApi orders, AuditTrail audit,
-            EscalationService escalations, GovernanceProperties properties, TransactionTemplate transaction,
+            CaseService cases, GovernanceProperties properties, TransactionTemplate transaction,
             JdbcClient jdbc, Clock clock) {
         this.requests = requests;
         this.payments = payments;
         this.orders = orders;
         this.audit = audit;
-        this.escalations = escalations;
+        this.cases = cases;
         this.approvalThreshold = properties.refundApprovalThreshold();
         this.transaction = transaction;
         this.jdbc = jdbc;
@@ -93,8 +95,8 @@ public class RefundService {
         if (earlier.isPresent()) {
             return repeat(earlier.get(), orderId, amount, idempotencyKey, agentId);
         }
-        // An order handed to a person is theirs: a new refund from an agent could pay out what they are retrying.
-        escalations.ensureNotWithHuman(orderId);
+        // An order a team is working is theirs: a new refund from an agent could pay out what they are paying back.
+        cases.ensureNotWithTeam(orderId);
         PaymentApi.Payment payment = paymentIfReachable(orderId);
         if (payment != null && amount.compareTo(payment.refundable()) > 0) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "A refund of " + amount + " "
@@ -155,12 +157,11 @@ public class RefundService {
     }
 
     /**
-     * Runs a failed refund again with its original idempotency key. If the order was escalated, only the person the
-     * escalation is assigned to may do this.
+     * Runs a failed refund again with its original idempotency key, so it pays out at most once however often it is
+     * retried.
      */
     public RefundRequest retry(UUID requestId, String retriedBy) {
         RefundRequest request = find(requestId);
-        escalations.ensureWorkedBy(request.getOrderId(), retriedBy);
         if (request.getStatus() != RefundRequest.Status.FAILED) {
             throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + request.getStatus() + ", not failed");
         }
@@ -169,7 +170,7 @@ public class RefundService {
 
     /**
      * The card processor reported an executed refund failed afterwards: the customer did not get the money. The
-     * request is marked failed and the order handed to a person, together and once, however often this is reported.
+     * request is marked failed and a case opened for the order, together and once, however often this is reported.
      */
     void recordFailedAtProcessor(UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
         String failure = "The card processor reported the refund of " + amount + " " + currency
@@ -180,8 +181,8 @@ public class RefundService {
             }
             audit.record(orderId, AuditEvent.ActorType.SYSTEM, "payment-service", "refund_failed",
                     AuditEvent.Outcome.FAILED, failure, "Idempotency key " + idempotencyKey);
-            escalations.escalate(AuditEvent.ActorType.SYSTEM, "payment-service", orderId, failure
-                    + " Contact the customer and refund them another way.");
+            cases.raise(CaseType.REFUND_FAILED, orderId, failure + " Idempotency key " + idempotencyKey
+                    + ". The customer must be refunded another way.", AuditEvent.ActorType.SYSTEM, "payment-service");
         });
     }
 
@@ -212,8 +213,8 @@ public class RefundService {
         if (earlier.getStatus() != RefundRequest.Status.FAILED) {
             return earlier;
         }
-        // A failed refund of an order handed to a person is theirs to retry, not the agent's.
-        escalations.ensureNotWithHuman(orderId);
+        // A failed refund of an order a team is working is theirs to retry, not the agent's.
+        cases.ensureNotWithTeam(orderId);
         return execute(earlier, agentId);
     }
 

@@ -6,8 +6,9 @@ import io.github.exepex.commerce.mcp.downstream.DownstreamException;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
 import io.github.exepex.commerce.mcp.downstream.ShippingApi;
+import io.github.exepex.commerce.mcp.cases.CaseService;
+import io.github.exepex.commerce.mcp.cases.CaseType;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
-import io.github.exepex.commerce.mcp.governance.EscalationService;
 import io.github.exepex.commerce.mcp.governance.NotificationService;
 import io.github.exepex.commerce.mcp.governance.ProposalService;
 import io.github.exepex.commerce.mcp.governance.RefundRequest;
@@ -73,11 +74,11 @@ class CommerceTools {
     private final ProposalService proposals;
     private final RefundService refunds;
     private final NotificationService notifications;
-    private final EscalationService escalations;
+    private final CaseService cases;
 
     CommerceTools(ToolGuard guard, CatalogApi catalog, OrderApi orders, PaymentApi payments, ShippingApi shipping,
             ProposalService proposals, RefundService refunds, NotificationService notifications,
-            EscalationService escalations) {
+            CaseService cases) {
         this.guard = guard;
         this.catalog = catalog;
         this.orders = orders;
@@ -86,7 +87,7 @@ class CommerceTools {
         this.proposals = proposals;
         this.refunds = refunds;
         this.notifications = notifications;
-        this.escalations = escalations;
+        this.cases = cases;
     }
 
     @McpTool(name = "search_products", description = """
@@ -216,21 +217,23 @@ class CommerceTools {
     }
 
     @McpTool(name = "escalate_to_human", description = """
-            Hand a problem to the operations team when you cannot or should not resolve it yourself, for example \
-            when a service keeps failing. Say what happened, what you already did, and what you recommend.""")
+            Hand a problem to the support team when you cannot or should not resolve it yourself, for example when a \
+            service keeps failing. It becomes a ServiceNow incident: the incident agent looks into it first and passes \
+            it to the right team when a person is needed. Say what happened, what you already did, and what you \
+            recommend.""")
     Acknowledgement escalateToHuman(McpTransportContext context,
             @McpToolParam(description = "The order id, if the problem is about one order", required = false) String orderId,
             @McpToolParam(description = "What happened, what you already did, and what you recommend") String summary,
             @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
         UUID id = orderId == null || orderId.isBlank() ? null : ToolGuard.parseOrderId(orderId);
-        return guard.run(context, "escalate_to_human", id, "Escalated to a human", true, agentId -> {
+        return guard.run(context, "escalate_to_human", id, "Handed to the support team", true, agentId -> {
             // Only a customer-scoped agent's order is looked up, so handing work to a person never depends on the
             // order service being up.
             if (id != null && guard.isCustomerScoped(agentId)) {
                 guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
             }
-            return new Acknowledgement(escalations.escalate(AuditEvent.ActorType.AGENT, agentId, id, summary).getId(),
-                    "The operations team has the escalation and will take it from here");
+            return new Acknowledgement(cases.raise(CaseType.HANDOFF, id, summary, AuditEvent.ActorType.AGENT, agentId).getId(),
+                    "The support team has it as a ServiceNow incident and will take it from here");
         });
     }
 

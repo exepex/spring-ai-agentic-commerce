@@ -65,6 +65,10 @@ commerce:
     payment-events: payment.events
     shipment-events: shipment.events
     stock-out: inventory.stock-out
+  cases:
+    # The agent that works cases. The ServiceNow MCP server's poller syncs cases with ServiceNow on its behalf, with
+    # its token; no other agent may.
+    worker: incident-agent
   governance:
     # Refunds up to this amount run straight away; larger ones wait for a human to approve them.
     refund-approval-threshold: 100.00
@@ -73,8 +77,6 @@ commerce:
     agents:
       shopping-assistant:
         token: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:dev-shopping-assistant-token}
-      order-exceptions-agent:
-        token: ${AGENTIC_COMMERCE_ORDER_EXCEPTIONS_AGENT_TOKEN:dev-order-exceptions-agent-token}
       incident-agent:
         token: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:dev-incident-agent-token}
 

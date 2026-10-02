@@ -42,7 +42,7 @@ import org.springframework.web.client.RestClient;
 abstract class McpServerTestSupport {
 
     protected static final String ASSISTANT_TOKEN = "dev-shopping-assistant-token";
-    protected static final String EXCEPTIONS_AGENT_TOKEN = "dev-order-exceptions-agent-token";
+    protected static final String INCIDENT_AGENT_TOKEN = "dev-incident-agent-token";
 
     protected static final WireMockServer SERVICES = startWireMock();
 
@@ -51,7 +51,7 @@ abstract class McpServerTestSupport {
 
 
     protected McpSyncClient assistant;
-    protected McpSyncClient exceptionsAgent;
+    protected McpSyncClient incidentAgent;
 
     @DynamicPropertySource
     static void pointAtWireMock(DynamicPropertyRegistry registry) {
@@ -64,13 +64,13 @@ abstract class McpServerTestSupport {
     void connectTheAgents() {
         SERVICES.resetAll();
         assistant = connect(ASSISTANT_TOKEN);
-        exceptionsAgent = connect(EXCEPTIONS_AGENT_TOKEN);
+        incidentAgent = connect(INCIDENT_AGENT_TOKEN);
     }
 
     @AfterEach
     void disconnect() {
         assistant.closeGracefully();
-        exceptionsAgent.closeGracefully();
+        incidentAgent.closeGracefully();
     }
 
     /** Sends both requests at the same moment and returns their HTTP statuses. */

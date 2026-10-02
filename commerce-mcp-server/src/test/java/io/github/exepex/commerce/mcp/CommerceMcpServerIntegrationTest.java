@@ -52,7 +52,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
 
     @Test
     void anAgentCannotCallAToolItIsNotPermittedToUse() {
-        McpSchema.CallToolResult result = call(exceptionsAgent, "propose_order", Map.of("customerEmail", "ada@example.com",
+        McpSchema.CallToolResult result = call(incidentAgent, "propose_order", Map.of("customerEmail", "ada@example.com",
                 "lines", List.of(Map.of("productId", UUID.randomUUID().toString(), "quantity", 1))));
 
         assertThat(result.isError()).isTrue();
@@ -79,8 +79,8 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         Map<String, Object> refund = Map.of("orderId", orderId.toString(), "amount", 39.50,
                 "reason", "item out of stock", "idempotencyKey", "refund-" + orderId);
 
-        String first = text(call(exceptionsAgent, "issue_refund", refund));
-        String second = text(call(exceptionsAgent, "issue_refund", refund));
+        String first = text(call(incidentAgent, "issue_refund", refund));
+        String second = text(call(incidentAgent, "issue_refund", refund));
 
         assertThat((String) JsonPath.read(first, "$.status")).isEqualTo("EXECUTED");
         assertThat((String) JsonPath.read(second, "$.refundRequestId")).isEqualTo(JsonPath.read(first, "$.refundRequestId"));
@@ -92,7 +92,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         UUID orderId = stubOrder("ada@example.com", "129.90");
         stubRefundSucceeds(orderId);
 
-        String result = text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+        String result = text(call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(),
                 "amount", 129.90, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId)));
 
         assertThat((String) JsonPath.read(result, "$.status")).isEqualTo("PENDING_APPROVAL");
@@ -112,9 +112,9 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         UUID orderId = stubOrder("ada@example.com", "129.90");
         stubRefundSucceeds(orderId);
 
-        String first = text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+        String first = text(call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(),
                 "amount", 65, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId + "-1")));
-        String second = text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+        String second = text(call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(),
                 "amount", 64.90, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId + "-2")));
 
         assertThat((String) JsonPath.read(first, "$.status")).isEqualTo("EXECUTED");
@@ -130,7 +130,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
                  "status": "SUCCEEDED", "refunds": []}""".formatted(UUID.randomUUID(), orderId)).withFixedDelay(300)));
         stubRefundSucceeds(orderId);
 
-        runTogether(() -> refundSixty(exceptionsAgent, orderId, "a"), () -> refundSixty(assistant, orderId, "b"));
+        runTogether(() -> refundSixty(incidentAgent, orderId, "a"), () -> refundSixty(assistant, orderId, "b"));
 
         String requests = rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve().body(String.class);
         List<String> statuses = JsonPath.read(requests, "$[*].status");
@@ -142,7 +142,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         stubRefundSucceeds(orderId);
 
-        McpSchema.CallToolResult refused = call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+        McpSchema.CallToolResult refused = call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(),
                 "amount", 39.50, "reason", "x".repeat(501), "idempotencyKey", "refund-" + orderId));
 
         assertThat(refused.isError()).isTrue();
@@ -157,7 +157,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
                 "summary", "please refund this", "customerEmail", "ada@example.com"));
 
         assertThat(refused.isError()).isTrue();
-        assertThat(rest().get().uri("/api/escalations").retrieve().body(String.class)).doesNotContain(orderId.toString());
+        assertThat(rest().get().uri("/api/cases?orderId={id}", orderId).retrieve().body(String.class)).isEqualTo("[]");
     }
 
     @Test
@@ -169,7 +169,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         stubRefundSucceeds(orderId);
 
         List<Integer> succeeded = runTogether(
-                () -> refundAll(exceptionsAgent, orderId), () -> refundAll(exceptionsAgent, orderId));
+                () -> refundAll(incidentAgent, orderId), () -> refundAll(incidentAgent, orderId));
 
         assertThat(succeeded).containsExactly(1, 1);
         String requests = rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve().body(String.class);
@@ -192,28 +192,10 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
-    void aResolutionNoteTooLongToStoreLeavesTheEscalationAndTheAuditTrailUnchanged() {
-        String escalationId = JsonPath.read(text(call(exceptionsAgent, "escalate_to_human",
-                Map.of("summary", "payments keep failing"))), "$.id");
-
-        int status = rest().post().uri("/api/escalations/{id}/resolve", escalationId)
-                .contentType(MediaType.APPLICATION_JSON).body(Map.of("by", "ops@example.com", "note", "resolved ".repeat(112)))
-                .exchange((request, response) -> response.getStatusCode().value());
-
-        assertThat(status).isEqualTo(422);
-        String escalations = rest().get().uri("/api/escalations").retrieve().body(String.class);
-        assertThat((List<String>) JsonPath.read(escalations, "$[?(@.id == '" + escalationId + "')].status"))
-                .containsExactly("OPEN");
-        String audit = rest().get().uri("/api/audit-events").retrieve().body(String.class);
-        assertThat(audit).doesNotContain("resolved ".repeat(112));
-    }
-
-    @Test
     void anApprovalNoteTooLongToStoreIsRefusedBeforeAnyMoneyMoves() {
         UUID orderId = stubOrder("ada@example.com", "129.90");
         stubRefundSucceeds(orderId);
-        String requestId = JsonPath.read(text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+        String requestId = JsonPath.read(text(call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(),
                 "amount", 129.90, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId))), "$.refundRequestId");
 
         int status = rest().post().uri("/api/refund-requests/{id}/approve", requestId)
@@ -231,7 +213,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         stubRefundSucceeds(orderId);
 
-        McpSchema.CallToolResult refused = call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+        McpSchema.CallToolResult refused = call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(),
                 "amount", 39.50, "reason", "item out of stock", "idempotencyKey", "k".repeat(201)));
 
         assertThat(refused.isError()).isTrue();
@@ -246,7 +228,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
                 .withBody("""
                         {"id": "%s", "amount": 129.90, "reason": "item out of stock", "providerReference": "re_test"}"""
                         .formatted(UUID.randomUUID()))));
-        String requestId = JsonPath.read(text(call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(),
+        String requestId = JsonPath.read(text(call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(),
                 "amount", 129.90, "reason", "item out of stock", "idempotencyKey", "refund-" + orderId))), "$.refundRequestId");
 
         List<Integer> statuses = runTogether(
@@ -267,12 +249,12 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         Map<String, Object> refund = Map.of("orderId", orderId.toString(), "amount", 39.50,
                 "reason", "item out of stock", "idempotencyKey", "refund-" + orderId);
 
-        String failed = text(call(exceptionsAgent, "issue_refund", refund));
+        String failed = text(call(incidentAgent, "issue_refund", refund));
         assertThat((String) JsonPath.read(failed, "$.status")).isEqualTo("FAILED");
         assertThat((String) JsonPath.read(failed, "$.message")).contains("safe");
 
         stubRefundSucceeds(orderId);
-        assertThat((String) JsonPath.read(text(call(exceptionsAgent, "issue_refund", refund)), "$.status")).isEqualTo("EXECUTED");
+        assertThat((String) JsonPath.read(text(call(incidentAgent, "issue_refund", refund)), "$.status")).isEqualTo("EXECUTED");
     }
 
     @Test
@@ -281,7 +263,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(503)));
         Map<String, Object> stockOutRefund = Map.of("orderId", orderId.toString(), "amount", 39.50,
                 "reason", "item out of stock", "idempotencyKey", "refund-" + orderId + "-stockout");
-        call(exceptionsAgent, "issue_refund", stockOutRefund);
+        call(incidentAgent, "issue_refund", stockOutRefund);
         stubRefundSucceeds(orderId);
 
         McpSchema.CallToolResult reused = call(assistant, "issue_refund", Map.of("orderId", orderId.toString(),
@@ -298,17 +280,17 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
     void anOrderLookupShowsEachRefundsKeyAndWhenTheCustomerWasNotified() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         stubRefundSucceeds(orderId);
-        call(exceptionsAgent, "issue_refund", Map.of("orderId", orderId.toString(), "amount", 39.50,
+        call(incidentAgent, "issue_refund", Map.of("orderId", orderId.toString(), "amount", 39.50,
                 "reason", "item out of stock", "idempotencyKey", "refund-" + orderId + "-stockout"));
-        String before = text(call(exceptionsAgent, "get_order", Map.of("orderId", orderId.toString())));
-        call(exceptionsAgent, "notify_customer", Map.of("orderId", orderId.toString(),
+        String before = text(call(incidentAgent, "get_order", Map.of("orderId", orderId.toString())));
+        call(incidentAgent, "notify_customer", Map.of("orderId", orderId.toString(),
                 "message", "Sorry, your headlamp is out of stock; your money is refunded."));
 
-        String after = text(call(exceptionsAgent, "get_order", Map.of("orderId", orderId.toString())));
+        String after = text(call(incidentAgent, "get_order", Map.of("orderId", orderId.toString())));
 
         assertThat((String) JsonPath.read(after, "$.refunds[0].idempotencyKey")).isEqualTo("refund-" + orderId + "-stockout");
         assertThat((Integer) JsonPath.read(before, "$.notifications.length()")).isZero();
-        assertThat((String) JsonPath.read(after, "$.notifications[0].sentBy")).isEqualTo("order-exceptions-agent");
+        assertThat((String) JsonPath.read(after, "$.notifications[0].sentBy")).isEqualTo("incident-agent");
     }
 
     @Test
@@ -316,7 +298,7 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
 
-        String order = text(call(exceptionsAgent, "get_order", Map.of("orderId", orderId.toString())));
+        String order = text(call(incidentAgent, "get_order", Map.of("orderId", orderId.toString())));
 
         assertThat((String) JsonPath.read(order, "$.payment.status")).isEqualTo("UNKNOWN");
         assertThat((String) JsonPath.read(order, "$.payment.message")).contains("payment service is unavailable");
