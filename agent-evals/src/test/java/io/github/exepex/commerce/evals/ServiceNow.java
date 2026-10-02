@@ -1,7 +1,12 @@
 package io.github.exepex.commerce.evals;
 
+import java.net.http.HttpClient;
+import java.time.Duration;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.StreamSupport;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 
@@ -23,6 +28,7 @@ final class ServiceNow {
                 "Online Shop Agent");
         this.api = RestClient.builder().baseUrl(url)
                 .defaultHeaders(headers -> headers.setBasicAuth(username, password))
+                .requestFactory(withTimeouts())
                 .build();
     }
 
@@ -50,6 +56,15 @@ final class ServiceNow {
         return incident(number).path("assignment_group").path("display_value").asString("");
     }
 
+    /** The text of the incident's work notes, oldest first. */
+    List<String> workNotesOf(String number) {
+        JsonNode notes = api.get().uri("/api/now/table/sys_journal_field?sysparm_query=element_id={sysId}^element=work_notes"
+                        + "^ORDERBYsys_created_on&sysparm_fields=value",
+                        incident(number).path("sys_id").path("value").asString())
+                .retrieve().body(JsonNode.class).path("result");
+        return StreamSupport.stream(notes.spliterator(), false).map(note -> note.path("value").asString()).toList();
+    }
+
     /** The incident's fields, each with its stored and its display value. */
     private JsonNode incident(String number) {
         return api.get().uri("/api/now/table/incident?sysparm_query=number={number}"
@@ -63,6 +78,15 @@ final class ServiceNow {
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("state", "6", "close_code", "Solution provided", "close_notes", resolution))
                 .retrieve().toBodilessEntity();
+    }
+
+    /** An instance that stops answering fails the scenario instead of blocking it forever. */
+    private static JdkClientHttpRequestFactory withTimeouts() {
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build());
+        requestFactory.setReadTimeout(Duration.ofSeconds(30));
+        return requestFactory;
     }
 
     private static String setting(String property, String environmentVariable, String fallback) {
