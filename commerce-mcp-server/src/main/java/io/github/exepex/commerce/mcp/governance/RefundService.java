@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -249,20 +250,33 @@ public class RefundService {
 
     private RefundRequest execute(RefundRequest request, String actor) {
         AuditEvent.ActorType actorType = actor.equals(request.getRequestedBy()) ? AuditEvent.ActorType.AGENT : AuditEvent.ActorType.HUMAN;
+        String providerReference = null;
         try {
             PaymentApi.Refund refund = Downstream.call("payment service", () -> payments.refund(request.getOrderId(),
                     new PaymentApi.RefundRequest(request.getAmount(), request.getReason(), request.getIdempotencyKey())));
-            request.markExecuted(refund.providerReference(), Instant.now(clock));
-            audit.record(request.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.SUCCEEDED,
-                    "Refunded " + request.getAmount() + " " + request.getCurrency() + " (" + refund.providerReference() + ")",
-                    request.getReason());
+            providerReference = refund.providerReference();
+            request.markExecuted(providerReference, Instant.now(clock));
         } catch (DownstreamException failure) {
             request.markFailed(failure.getMessage(), Instant.now(clock));
-            audit.record(request.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
-                    "Refund of " + request.getAmount() + " " + request.getCurrency() + " failed: " + failure.getMessage(),
-                    "Idempotency key " + request.getIdempotencyKey());
         }
-        return requests.save(request);
+        RefundRequest saved;
+        try {
+            saved = requests.save(request);
+        } catch (ObjectOptimisticLockingFailureException failedAtProcessorMeanwhile) {
+            // The card processor reported the refund failed while the payment service's answer was on its way; that
+            // failure, already recorded with its case, is the outcome.
+            return find(request.getId());
+        }
+        if (saved.getStatus() == RefundRequest.Status.EXECUTED) {
+            audit.record(saved.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.SUCCEEDED,
+                    "Refunded " + saved.getAmount() + " " + saved.getCurrency() + " (" + providerReference + ")",
+                    saved.getReason());
+        } else {
+            audit.record(saved.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
+                    "Refund of " + saved.getAmount() + " " + saved.getCurrency() + " failed: " + saved.getFailure(),
+                    "Idempotency key " + saved.getIdempotencyKey());
+        }
+        return saved;
     }
 
     private RefundRequest find(UUID requestId) {

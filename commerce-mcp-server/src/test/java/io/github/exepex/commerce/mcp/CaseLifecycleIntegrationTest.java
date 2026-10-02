@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -133,6 +134,32 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
         });
         assertThat((String) JsonPath.read(rest().get().uri("/api/refund-requests?orderId={id}", orderId).retrieve()
                 .body(String.class), "$[0].failure")).contains("card processor reported");
+    }
+
+    @Test
+    void aSlowAnswerFromThePaymentServiceDoesNotOverwriteAFailureTheProcessorReportedMeanwhile() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(201)
+                .withHeader("Content-Type", "application/json").withFixedDelay(4000)
+                .withBody("{\"id\": \"%s\", \"amount\": 39.50, \"providerReference\": \"re_slow\"}"
+                        .formatted(UUID.randomUUID()))));
+        CompletableFuture<McpSchema.CallToolResult> refund = CompletableFuture.supplyAsync(() -> call(incidentAgent,
+                "issue_refund", Map.of("orderId", orderId.toString(), "amount", 39.50, "reason", "item out of stock",
+                        "idempotencyKey", "refund-" + orderId)));
+        await().atMost(Duration.ofSeconds(3)).until(() -> rest().get().uri("/api/refund-requests?orderId={id}", orderId)
+                .retrieve().body(String.class).contains("refund-" + orderId));
+
+        kafka.send("payment.events", orderId.toString(), """
+                {"eventId": "%s", "type": "REFUND_FAILED", "orderId": "%s", "idempotencyKey": "refund-%s",
+                 "amount": 39.50, "currency": "EUR", "occurredAt": "2026-10-02T10:30:00Z"}"""
+                .formatted(UUID.randomUUID(), orderId, orderId)).join();
+        await().atMost(Duration.ofSeconds(3)).until(() -> timeline(orderId).contains("refund_failed"));
+        refund.join();
+
+        assertThat(refundStatus(orderId)).isEqualTo("FAILED");
+        assertThat((List<String>) JsonPath.read(cases(orderId), "$[*].type")).containsExactly("REFUND_FAILED");
+        assertThat((List<String>) JsonPath.read(timeline(orderId), "$[?(@.action == 'issue_refund')].outcome"))
+                .doesNotContain("SUCCEEDED");
     }
 
     @Test

@@ -29,11 +29,12 @@ interface RefundRequestRepository extends JpaRepository<RefundRequest, UUID> {
     /**
      * Marks a refund the processor failed as failed, in one statement: one that was executed, or one still failed
      * because its success was never recorded. 0 if there is no such request, or it waits for or was refused approval.
+     * The new version makes a payment-service answer still on its way fail to overwrite this.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update RefundRequest r set r.status = io.github.exepex.commerce.mcp.governance.RefundRequest.Status.FAILED,
-                r.failure = :failure, r.updatedAt = :now
+                r.failure = :failure, r.updatedAt = :now, r.version = r.version + 1
             where r.idempotencyKey = :idempotencyKey
               and r.status in (io.github.exepex.commerce.mcp.governance.RefundRequest.Status.EXECUTED,
                                io.github.exepex.commerce.mcp.governance.RefundRequest.Status.FAILED)""")

@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -28,6 +29,9 @@ public class RefundRequest {
 
     @Id
     private UUID id;
+
+    @Version
+    private Long version;
 
     @Column(name = "order_id")
     private UUID orderId;
