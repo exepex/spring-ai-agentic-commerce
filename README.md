@@ -70,6 +70,7 @@ flowchart LR
 | commerce-mcp-server | 8085 | Nine MCP tools over the services, plus the governance API: audit trail, refund approvals, order proposals, customer notifications, cases. Opens a case for every stock-out, failed delivery, lost parcel, refund that failed at the processor, and hand-off. |
 | servicenow-mcp-server | 8087 | Five MCP tools over ServiceNow incidents, governed like the commerce tools. Opens an incident for each case, claims new incidents for the incident agent, publishes `servicenow.incidents`, and reads back who has each case's incident. |
 | agent-service | 8086 | The two agents, each with its own MCP connections, allowlist, prompt and effort level. |
+| servicenow-simulator | 8088 | Only with `./start-demo.sh --simulator`: an in-memory stand-in for the part of ServiceNow's Table API the demo uses, for trying the cases and running the scenario suite without an instance. |
 | shop-ui | 8080 | Angular app served by nginx, which routes `/svc/<service>/` to each service. |
 
 Each agent is defined in one file (model, effort, tools, budget and prompt) that agent-service and the MCP servers
@@ -139,7 +140,7 @@ You need Docker, Java 21, Maven and Node 22.22+ (or 24).
 
 ```bash
 cp .env.example .env        # add your Anthropic API key; Stripe and Slack are optional
-./start-demo.sh             # or ./start-demo.sh --slack
+./start-demo.sh             # add --slack for Slack, --simulator to work the cases without a ServiceNow instance
 ```
 
 - Shop, orders and operations console: http://localhost:8080
@@ -151,8 +152,10 @@ services run but the incident agent hands every incident to a team.
 ### ServiceNow incidents
 
 Every case is worked as a ServiceNow incident, so the incident agent needs a ServiceNow instance; a free developer
-instance (developer.servicenow.com) works. Without one, cases wait as *pending* in the operations console. In the
-instance:
+instance (developer.servicenow.com) works. Without one, cases wait as *pending* in the operations console, unless the
+demo runs with the simulator: `./start-demo.sh --simulator` works the cases in a built-in stand-in for ServiceNow, with
+the agent's group and the three teams already set up. It has no screens of its own and forgets its incidents when it
+restarts. To use a real instance:
 
 1. Create the assignment groups: one for the agent (`Online Shop Agent`) and one per team (`Customer Care`,
    `Payments`, `Fulfilment`). Add people to the team groups; ServiceNow notifies a group when an incident is assigned
@@ -180,19 +183,23 @@ Integration tests run each service against real Postgres and Kafka (Testcontaine
 tested over real HTTP with WireMock. The MCP server is tested through a real MCP client, as the agents use it:
 authentication, permissions, customer scoping, the approval limit, idempotent retries and the audit trail.
 
-### Agent evals
+### Scenario suite
 
-The agents themselves are checked by `agent-evals`: seven scenarios run against the whole running demo with the real
+The workflows are checked end to end by `agent-evals`: ten scenarios run against the whole running demo with the real
 model, asserting on **what the agents did** (the audit trail, orders, payments and cases), not on the wording of their
-replies. The five stock-out scenarios need the demo connected to a ServiceNow instance.
+replies. They cover stock-outs within and above the refund limit, a stock-out delivered twice, payments down, the kill
+switch, the shopping assistant, a failed delivery, a lost parcel, and an incident the service desk raises. They play
+the carrier through the shop, and the service desk and the teams through ServiceNow's Table API.
 
 ```bash
-./start-demo.sh
-mvn -pl agent-evals -Pevals test
+./run-scenarios.sh          # starts the demo with the ServiceNow simulator, then runs the suite
+./run-scenarios.sh --live   # the same against the ServiceNow instance in .env
 ```
 
-They call Claude, so they are skipped in a normal build; a run costs a few cents. When the UI runs with `npm start`
-instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:4200/svc`.
+They call Claude, so they are skipped in a normal build; a run costs some model usage. Against a demo that is already
+running, use `mvn -pl agent-evals -Pevals test`. Point them at a UI run with `npm start` with
+`-Devals.baseUrl=http://localhost:4200/svc`, and at ServiceNow with `-Devals.servicenow.url`, `.username`,
+`.password` and `.agent-group` (by default the `AGENTIC_COMMERCE_SERVICENOW_*` variables, or the simulator).
 
 ## Design decisions
 

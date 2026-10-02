@@ -26,6 +26,7 @@
         <module>shipping-service</module>
         <module>commerce-mcp-server</module>
         <module>servicenow-mcp-server</module>
+        <module>servicenow-simulator</module>
         <module>agent-service</module>
         <module>agent-evals</module>
     </modules>

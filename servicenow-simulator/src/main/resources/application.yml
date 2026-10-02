@@ -1,0 +1,20 @@
+server:
+  port: 8088
+
+spring:
+  application:
+    name: servicenow-simulator
+
+# The instance the simulator stands in for. The integration user is the one servicenow-mcp-server logs in as; the
+# groups are the agent's group and the teams in servicenow-mcp-server's application.yml, each with its people.
+simulator:
+  username: ${AGENTIC_COMMERCE_SERVICENOW_USERNAME:trailhead.agent}
+  password: ${AGENTIC_COMMERCE_SERVICENOW_PASSWORD:simulator}
+  groups:
+    - name: Online Shop Agent
+    - name: Customer Care
+      people: [maria.lopez, james.whitaker]
+    - name: Payments
+      people: [daniel.okafor, priya.raman]
+    - name: Fulfilment
+      people: [sofia.lindqvist, tom.becker]
