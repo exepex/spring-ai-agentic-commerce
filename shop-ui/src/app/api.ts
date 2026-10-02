@@ -34,7 +34,7 @@ export interface OrderLine {
 export interface Order {
   id: string;
   customerEmail: string;
-  status: 'PLACED' | 'CONFIRMED' | 'PAYMENT_FAILED' | 'CANCELLED';
+  status: 'PLACED' | 'PAYMENT_PENDING' | 'CONFIRMED' | 'PAYMENT_FAILED' | 'CANCELLED';
   total: number;
   currency: string;
   createdAt: string;
@@ -50,6 +50,8 @@ export interface Refund {
   reason: string;
   idempotencyKey: string;
   providerReference: string;
+  /** A failed refund returned no money; it is not counted in the payment's refunded amount. */
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
   createdAt: string;
 }
 

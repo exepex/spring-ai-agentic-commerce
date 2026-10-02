@@ -55,6 +55,11 @@ spring:
       enabled: true
 
 commerce:
+  # How often confirmations that did not finish are settled. A confirmation counts as stalled once it is older than
+  # settle-after, so one still running is left alone.
+  reconciliation:
+    interval: 15s
+    settle-after: 30s
   topics:
     order-events: order.events
     stock-out: inventory.stock-out

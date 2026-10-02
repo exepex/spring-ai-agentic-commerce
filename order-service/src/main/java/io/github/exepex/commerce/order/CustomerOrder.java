@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -46,6 +47,12 @@ public class CustomerOrder {
     @Column(name = "payment_failure")
     private String paymentFailure;
 
+    @Column(name = "payment_method")
+    private String paymentMethod;
+
+    @Version
+    private Long version;
+
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @JoinColumn(name = "order_id", nullable = false)
     private List<OrderLine> lines = new ArrayList<>();
@@ -54,9 +61,11 @@ public class CustomerOrder {
         // for JPA
     }
 
-    private CustomerOrder(UUID id, String customerEmail, String currency, List<OrderLine> lines, Instant createdAt) {
+    private CustomerOrder(UUID id, String customerEmail, String currency, List<OrderLine> lines, String paymentMethod,
+            Instant createdAt) {
         this.id = id;
         this.customerEmail = customerEmail;
+        this.paymentMethod = paymentMethod;
         this.status = OrderStatus.PLACED;
         this.currency = currency;
         this.lines = new ArrayList<>(lines);
@@ -64,8 +73,13 @@ public class CustomerOrder {
         this.createdAt = createdAt;
     }
 
-    static CustomerOrder place(UUID id, String customerEmail, String currency, List<OrderLine> lines, Instant now) {
-        return new CustomerOrder(id, customerEmail, currency, lines, now);
+    static CustomerOrder place(UUID id, String customerEmail, String currency, List<OrderLine> lines,
+            String paymentMethod, Instant now) {
+        return new CustomerOrder(id, customerEmail, currency, lines, paymentMethod, now);
+    }
+
+    void markPaymentPending() {
+        status = OrderStatus.PAYMENT_PENDING;
     }
 
     void confirm() {
@@ -89,6 +103,10 @@ public class CustomerOrder {
         status = OrderStatus.CANCELLED;
         cancellationReason = reason;
         cancelledAt = now;
+    }
+
+    String getPaymentMethod() {
+        return paymentMethod;
     }
 
     public UUID getId() {

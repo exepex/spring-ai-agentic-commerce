@@ -83,7 +83,9 @@ commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
 
 1. **Order through chat.** The customer asks the shopping assistant for a product. It searches the catalog and calls
    `propose_order`; the chat shows the proposal with a **Confirm and pay** button. Only that click places the order,
-   reserves the stock and charges the card. A declined test card fails cleanly and releases the stock.
+   reserves the stock and charges the card. A declined test card fails cleanly and releases the stock. If the
+   payment service is down when the customer confirms, the proposal shows that the payment is being confirmed, and
+   the order completes by itself once the payment service is back.
 2. **Stock-out after ordering.** Operations writes off damaged stock. The catalog publishes a stock-out naming the
    newest order it can no longer cover. The order-exceptions agent wakes up, cancels the order, refunds it within its
    limit, notifies the customer, posts to Slack, and records its decision. The order's timeline shows every step.
@@ -157,6 +159,13 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
 - **Stock changes lock the product row,** so concurrent reservations and write-offs never reserve more than exists.
 - **No database transaction is held open across remote calls.** Checkout saves the order before charging the card,
   and releases the stock if any step fails.
+- **Unfinished work is finished later, never guessed.** When a payment's outcome is unknown (the payment service is
+  down or times out), the order waits as `PAYMENT_PENDING` with its stock kept, and the payment is asked for again
+  until it succeeds or is declined. Stock to give back is recorded with the order change that needs it and released
+  once the catalog answers. A confirmed proposal places its order under the proposal's id, so placing it again never
+  places a second order. Refunds are checked with the card processor again, and one that fails afterwards no longer
+  counts as refunded. Each service runs its own reconciler for this; the intervals are under `commerce.reconciliation`
+  and `commerce.payments.refund-check` in each service's `application.yml`.
 - **Events are published after commit,** so consumers never see a rolled-back change. The trade-off: an event can be
   lost if a process dies between commit and send. A transactional outbox closes that gap; it is left out to keep the
   demo small.

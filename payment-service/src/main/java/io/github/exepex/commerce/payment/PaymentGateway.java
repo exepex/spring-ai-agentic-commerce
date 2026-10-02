@@ -16,11 +16,23 @@ interface PaymentGateway {
         }
     }
 
+    /** Where a refund stands at the processor. Only a failed refund returned no money. */
+    enum RefundStatus {
+        PENDING,
+        SUCCEEDED,
+        FAILED
+    }
+
+    record RefundResult(String reference, RefundStatus status) {}
+
     String name();
 
     ChargeResult charge(BigDecimal amount, String currency, String paymentMethod, String description,
             String idempotencyKey);
 
-    /** Returns the processor's reference for the refund. */
-    String refund(String chargeReference, BigDecimal amount, String idempotencyKey);
+    /** Refunds part of a charge. A refund the processor rejects outright is not returned: it throws instead. */
+    RefundResult refund(String chargeReference, BigDecimal amount, String idempotencyKey);
+
+    /** Asks the processor again: a pending or even a succeeded refund can still fail later. */
+    RefundStatus refundStatus(String refundReference);
 }
