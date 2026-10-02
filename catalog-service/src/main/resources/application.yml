@@ -1,0 +1,35 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: catalog-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/commerce
+    username: commerce
+    password: commerce
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: catalog
+  flyway:
+    default-schema: catalog
+    schemas: catalog
+  kafka:
+    bootstrap-servers: localhost:9092
+    producer:
+      value-serializer: org.springframework.kafka.support.serializer.JacksonJsonSerializer
+      properties:
+        # The event is a JSON contract between services, not a Java type: leave class names out of the headers.
+        spring.json.add.type.headers: false
+  mvc:
+    problemdetails:
+      enabled: true
+
+commerce:
+  topics:
+    stock-out: inventory.stock-out

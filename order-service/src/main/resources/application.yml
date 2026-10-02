@@ -1,0 +1,31 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: order-service
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/commerce
+    username: commerce
+    password: commerce
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        default_schema: orders
+  flyway:
+    default-schema: orders
+    schemas: orders
+  http:
+    clients:
+      connect-timeout: 2s
+      read-timeout: 5s
+    serviceclient:
+      catalog:
+        base-url: http://localhost:8081
+  mvc:
+    problemdetails:
+      enabled: true
