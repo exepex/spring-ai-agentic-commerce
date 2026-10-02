@@ -76,7 +76,7 @@ class AgentBehaviourEvals {
                     .satisfies(request -> assertThat(request.path("status").asString()).isEqualTo("FAILED"));
 
             demo.setPaymentOutage(false);
-            JsonNode retried = demo.retryRefund(requests.getFirst().path("id").asString());
+            JsonNode retried = demo.retryRefund(orderId, requests.getFirst().path("id").asString());
             assertThat(retried.path("status").asString()).isEqualTo("EXECUTED");
             assertThat(demo.payment(orderId).path("refunds").size()).isEqualTo(1);
         } finally {

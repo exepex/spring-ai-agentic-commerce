@@ -8,88 +8,32 @@ import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-import com.github.tomakehurst.wiremock.WireMockServer;
 import com.jayway.jsonpath.JsonPath;
-import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
-import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpSchema;
-import java.net.http.HttpRequest;
 import java.time.Duration;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.client.RestClient;
 
 /**
  * Talks to the real server through a real MCP client over streamable HTTP, as the agents do. Postgres and Kafka run
  * in containers; one WireMock server stands in for the four commerce services.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(TestcontainersConfiguration.class)
-class CommerceMcpServerIntegrationTest {
-
-    private static final String ASSISTANT_TOKEN = "dev-shopping-assistant-token";
-    private static final String EXCEPTIONS_AGENT_TOKEN = "dev-order-exceptions-agent-token";
-
-    private static final WireMockServer SERVICES = startWireMock();
-
-    @LocalServerPort
-    private int port;
+class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
 
     @Autowired
     private KafkaTemplate<String, String> kafka;
-
-    private McpSyncClient assistant;
-    private McpSyncClient exceptionsAgent;
-
-    @DynamicPropertySource
-    static void pointAtWireMock(DynamicPropertyRegistry registry) {
-        for (String service : List.of("catalog", "order", "payment", "shipping")) {
-            registry.add("spring.http.serviceclient." + service + ".base-url", SERVICES::baseUrl);
-        }
-    }
-
-    @BeforeEach
-    void connectTheAgents() {
-        SERVICES.resetAll();
-        assistant = connect(ASSISTANT_TOKEN);
-        exceptionsAgent = connect(EXCEPTIONS_AGENT_TOKEN);
-    }
-
-    @AfterEach
-    void disconnect() {
-        assistant.closeGracefully();
-        exceptionsAgent.closeGracefully();
-    }
-
-    @AfterAll
-    static void stopWireMock() {
-        SERVICES.stop();
-    }
 
     @Test
     void refusesACallerWithoutAnAgentToken() {
@@ -316,23 +260,6 @@ class CommerceMcpServerIntegrationTest {
     }
 
     @Test
-    void confirmingTheSameProposalTwiceAtOncePlacesOneOrder() throws Exception {
-        UUID productId = UUID.randomUUID();
-        SERVICES.stubFor(get("/api/products").willReturn(okJson("""
-                [{"id": "%s", "sku": "HEADLAMP-400", "name": "Headlamp", "description": "", "price": 39.50,
-                  "currency": "EUR", "onHand": 5, "reserved": 0, "available": 5}]""".formatted(productId))));
-        SERVICES.stubFor(post("/api/orders").willReturn(okJson("""
-                {"id": "%s", "customerEmail": "ada@example.com", "status": "CONFIRMED", "total": 39.50, "currency": "EUR",
-                 "createdAt": "2026-10-02T10:00:00Z", "lines": []}""".formatted(UUID.randomUUID())).withFixedDelay(500)));
-        String proposalId = JsonPath.read(text(call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
-                "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1))))), "$.id");
-
-        runTogether(() -> confirm(proposalId), () -> confirm(proposalId));
-
-        SERVICES.verify(1, postRequestedFor(urlEqualTo("/api/orders")));
-    }
-
-    @Test
     void aRefundThatFailedBecausePaymentsWereDownSucceedsWhenRetriedWithTheSameKey() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));
@@ -360,40 +287,51 @@ class CommerceMcpServerIntegrationTest {
     }
 
     @Test
-    void aStockOutAppearsOnTheTimelineOfEveryAffectedOrderAtTheTimeItHappened() {
+    void aStockOutAppearsOnceOnTheTimelineOfEveryAffectedOrderAtTheTimeItHappenedEvenWhenDeliveredAgain() {
         UUID orderId = UUID.randomUUID();
+        UUID otherOrderId = UUID.randomUUID();
+        String stockOut = stockOut(UUID.randomUUID(), "damaged in warehouse", orderId, otherOrderId);
 
-        kafka.send("inventory.stock-out", "product", """
-                {"eventId": "%s", "occurredAt": "2026-10-02T09:15:00Z", "productId": "%s", "sku": "RUN-SHOE-BLUE-43",
-                 "onHand": 1, "reserved": 2, "shortfall": 1, "reason": "damaged in warehouse", "affectedOrderIds": ["%s"]}"""
-                .formatted(UUID.randomUUID(), UUID.randomUUID(), orderId)).join();
+        kafka.send("inventory.stock-out", "product", stockOut).join();
+        kafka.send("inventory.stock-out", "product", stockOut).join();
+        kafka.send("inventory.stock-out", "product", stockOut(UUID.randomUUID(), "lost in transit", orderId)).join();
 
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
-                assertThat(rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve().body(String.class))
-                        .contains("STOCK_OUT", "damaged in warehouse", "2026-10-02T09:15:00Z"));
+                assertThat(timeline(orderId)).contains("lost in transit"));
+        List<String> damaged = JsonPath.read(timeline(orderId), "$[?(@.summary =~ /.*damaged in warehouse.*/)].occurredAt");
+        assertThat(damaged).containsExactly("2026-10-02T09:15:00Z");
+        assertThat(timeline(otherOrderId)).contains("STOCK_OUT", "damaged in warehouse");
     }
 
     @Test
-    void aDeclinedConfirmationShowsOnTheTimelineOfTheOrderItFailed() {
-        UUID productId = UUID.randomUUID();
-        UUID failedOrderId = UUID.randomUUID();
-        SERVICES.stubFor(get("/api/products").willReturn(okJson("""
-                [{"id": "%s", "sku": "HEADLAMP-400", "name": "Headlamp", "description": "", "price": 39.50,
-                  "currency": "EUR", "onHand": 5, "reserved": 0, "available": 5}]""".formatted(productId))));
-        SERVICES.stubFor(post("/api/orders").willReturn(aResponse().withStatus(402)
-                .withHeader("Content-Type", "application/problem+json")
-                .withBody("""
-                        {"status": 402, "detail": "Your card was declined.", "orderId": "%s"}""".formatted(failedOrderId))));
-        String proposal = text(call(assistant, "propose_order", Map.of("customerEmail", "ada@example.com",
-                "lines", List.of(Map.of("productId", productId.toString(), "quantity", 1)))));
+    void anOrderEventDeliveredAgainAppearsOnceOnTheTimeline() {
+        UUID orderId = UUID.randomUUID();
+        String confirmed = """
+                {"eventId": "%s", "type": "ORDER_CONFIRMED", "orderId": "%s", "customerEmail": "ada@example.com",
+                 "occurredAt": "2026-10-02T09:10:00Z"}""".formatted(UUID.randomUUID(), orderId);
 
-        String confirmed = rest().post().uri("/api/order-proposals/{id}/confirm", (String) JsonPath.read(proposal, "$.id"))
-                .contentType(MediaType.APPLICATION_JSON).body(Map.of("paymentMethod", "pm_card_chargeDeclined"))
-                .retrieve().body(String.class);
+        kafka.send("order.events", orderId.toString(), confirmed).join();
+        kafka.send("order.events", orderId.toString(), confirmed).join();
+        kafka.send("order.events", orderId.toString(), """
+                {"eventId": "%s", "type": "ORDER_CANCELLED", "orderId": "%s", "customerEmail": "ada@example.com",
+                 "occurredAt": "2026-10-02T09:20:00Z"}""".formatted(UUID.randomUUID(), orderId)).join();
 
-        assertThat((String) JsonPath.read(confirmed, "$.status")).isEqualTo("FAILED");
-        assertThat(rest().get().uri("/api/orders/{orderId}/timeline", failedOrderId).retrieve().body(String.class))
-                .contains("confirm_order", "FAILED", "Your card was declined.");
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
+                assertThat(timeline(orderId)).contains("ORDER_CANCELLED"));
+        List<String> actions = JsonPath.read(timeline(orderId), "$[*].action");
+        assertThat(actions).containsExactly("ORDER_CONFIRMED", "ORDER_CANCELLED");
+    }
+
+    private static String stockOut(UUID eventId, String reason, UUID... affectedOrderIds) {
+        String orderIds = String.join(", ", Arrays.stream(affectedOrderIds).map(id -> "\"" + id + "\"").toList());
+        return """
+                {"eventId": "%s", "occurredAt": "2026-10-02T09:15:00Z", "productId": "%s", "sku": "RUN-SHOE-BLUE-43",
+                 "onHand": 1, "reserved": 2, "shortfall": 1, "reason": "%s", "affectedOrderIds": [%s]}"""
+                .formatted(eventId, UUID.randomUUID(), reason, orderIds);
+    }
+
+    private String timeline(UUID orderId) {
+        return rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve().body(String.class);
     }
 
     /** Asks for the full €39.50 refund with one fixed key and returns 1 when the call succeeded. */
@@ -415,79 +353,5 @@ class CommerceMcpServerIntegrationTest {
         return rest().post().uri("/api/refund-requests/{id}/" + decision, requestId)
                 .contentType(MediaType.APPLICATION_JSON).body(Map.of("by", "ops@example.com"))
                 .exchange((request, response) -> response.getStatusCode().value());
-    }
-
-    private int confirm(String proposalId) {
-        return rest().post().uri("/api/order-proposals/{id}/confirm", proposalId)
-                .contentType(MediaType.APPLICATION_JSON).body(Map.of("paymentMethod", "pm_card_visa"))
-                .exchange((request, response) -> response.getStatusCode().value());
-    }
-
-    /** Sends both requests at the same moment and returns their HTTP statuses. */
-    @SafeVarargs
-    private static List<Integer> runTogether(Callable<Integer>... requests) throws Exception {
-        try (ExecutorService threads = Executors.newFixedThreadPool(requests.length)) {
-            CountDownLatch start = new CountDownLatch(1);
-            List<Future<Integer>> results = new ArrayList<>();
-            for (Callable<Integer> request : requests) {
-                results.add(threads.submit(() -> {
-                    start.await();
-                    return request.call();
-                }));
-            }
-            start.countDown();
-            List<Integer> statuses = new ArrayList<>();
-            for (Future<Integer> result : results) {
-                statuses.add(result.get());
-            }
-            return statuses;
-        }
-    }
-
-    private McpSyncClient connect(String token) {
-        McpSyncClient client = McpClient.sync(HttpClientStreamableHttpTransport.builder("http://localhost:" + port)
-                        .requestBuilder(HttpRequest.newBuilder().header("Authorization", "Bearer " + token))
-                        .build())
-                .requestTimeout(Duration.ofSeconds(20))
-                .build();
-        client.initialize();
-        return client;
-    }
-
-    private static McpSchema.CallToolResult call(McpSyncClient client, String tool, Map<String, Object> arguments) {
-        return client.callTool(new McpSchema.CallToolRequest(tool, arguments));
-    }
-
-    private static String text(McpSchema.CallToolResult result) {
-        return ((McpSchema.TextContent) result.content().getFirst()).text();
-    }
-
-    private RestClient rest() {
-        return RestClient.create("http://localhost:" + port);
-    }
-
-    private static UUID stubOrder(String customerEmail, String total) {
-        UUID orderId = UUID.randomUUID();
-        SERVICES.stubFor(get("/api/orders/" + orderId).willReturn(okJson("""
-                {"id": "%s", "customerEmail": "%s", "status": "CONFIRMED", "total": %s, "currency": "EUR",
-                 "createdAt": "2026-10-02T10:00:00Z", "lines": []}""".formatted(orderId, customerEmail, total))));
-        SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(okJson("""
-                {"id": "%s", "orderId": "%s", "amount": %s, "refundedAmount": 0, "refundable": %s, "currency": "EUR",
-                 "status": "SUCCEEDED", "refunds": []}""".formatted(UUID.randomUUID(), orderId, total, total))));
-        return orderId;
-    }
-
-    private static void stubRefundSucceeds(UUID orderId) {
-        SERVICES.stubFor(post("/api/payments/" + orderId + "/refunds").willReturn(aResponse().withStatus(201)
-                .withHeader("Content-Type", "application/json")
-                .withBody("""
-                        {"id": "%s", "amount": 39.50, "reason": "item out of stock", "providerReference": "re_test"}"""
-                        .formatted(UUID.randomUUID()))));
-    }
-
-    private static WireMockServer startWireMock() {
-        WireMockServer server = new WireMockServer(wireMockConfig().dynamicPort());
-        server.start();
-        return server;
     }
 }

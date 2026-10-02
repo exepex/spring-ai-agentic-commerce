@@ -5,7 +5,7 @@ import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { AgentsView, Api, AuditEvent, Escalation, Product, RefundRequest } from '../api';
 import { refreshWhileOpen } from '../polling';
-import { OPERATOR } from '../session';
+import { OPERATORS, Session } from '../session';
 import { Timeline } from '../timeline';
 
 /** The operations team's console: approvals, escalations, the agents' kill switches, and demo controls. */
@@ -17,7 +17,10 @@ import { Timeline } from '../timeline';
 })
 export class Operations {
   private readonly api = inject(Api);
-  protected readonly operator = OPERATOR;
+  protected readonly session = inject(Session);
+  protected readonly operators = OPERATORS;
+  /** Why the last action on an item was refused, by item id, as the server said it. */
+  protected readonly refusals = signal<Record<string, string>>({});
 
   protected readonly refunds = signal<RefundRequest[]>([]);
   protected readonly pendingRefunds = computed(() => this.refunds().filter((refund) => refund.status === 'PENDING_APPROVAL'));
@@ -46,11 +49,12 @@ export class Operations {
     this.notes.update((notes) => ({ ...notes, [id]: note }));
   }
 
-  protected decide(refund: RefundRequest, decision: 'approve' | 'reject' | 'retry'): void {
-    this.busy.set(refund.id);
-    this.api.decideRefund(refund.id, decision, OPERATOR, this.noteFor(refund.id)).subscribe({
-      next: () => this.done(),
-      error: () => this.done(),
+  /** {@code card} is the card the button sits on: it is busy meanwhile and shows a refusal. */
+  protected decide(refund: RefundRequest, decision: 'approve' | 'reject' | 'retry', card: string = refund.id): void {
+    this.busy.set(card);
+    this.api.decideRefund(refund.id, decision, this.session.operator(), this.noteFor(refund.id)).subscribe({
+      next: () => this.done(card),
+      error: (failure) => this.done(card, failure),
     });
   }
 
@@ -58,16 +62,28 @@ export class Operations {
     return this.refunds().find((refund) => refund.orderId === escalation.orderId && refund.status === 'FAILED');
   }
 
-  protected resolve(escalation: Escalation): void {
+  protected act(escalation: Escalation, action: 'assign' | 'hand-back' | 'resolve'): void {
     this.busy.set(escalation.id);
-    this.api.resolveEscalation(escalation.id, OPERATOR, this.noteFor(escalation.id) || 'Handled').subscribe({
-      next: () => this.done(),
-      error: () => this.done(),
+    const note = this.noteFor(escalation.id) || (action === 'resolve' ? 'Handled' : '');
+    this.api.actOnEscalation(escalation.id, action, this.session.operator(), note).subscribe({
+      next: () => this.done(escalation.id),
+      error: (failure) => this.done(escalation.id, failure),
     });
   }
 
+  protected isMine(escalation: Escalation): boolean {
+    return escalation.status === 'ASSIGNED' && escalation.assignedTo === this.session.operator();
+  }
+
+  protected refusalFor(id: string): string | undefined {
+    return this.refusals()[id];
+  }
+
   protected toggleAgent(agentId: string, enabled: boolean): void {
-    this.api.setAgentEnabled(agentId, enabled).subscribe((agents) => this.agents.set(agents));
+    this.api.setAgentEnabled(agentId, enabled, this.session.operator()).subscribe({
+      next: (agents) => this.agents.set(agents),
+      error: () => this.refresh(),
+    });
   }
 
   protected toggleOutage(active: boolean): void {
@@ -90,8 +106,9 @@ export class Operations {
     });
   }
 
-  private done(): void {
+  private done(id: string, failure?: { error?: { detail?: string } }): void {
     this.busy.set(null);
+    this.refusals.update((refusals) => ({ ...refusals, [id]: failure?.error?.detail ?? '' }));
     this.refresh();
   }
 
@@ -101,11 +118,12 @@ export class Operations {
       pending: this.api.refundRequests({ status: 'PENDING_APPROVAL' }),
       failed: this.api.refundRequests({ status: 'FAILED' }),
       open: this.api.escalations('OPEN'),
+      assigned: this.api.escalations('ASSIGNED'),
       recent: this.api.escalations(),
       activity: this.api.recentActivity(),
-    }).subscribe(({ pending, failed, open, recent, activity }) => {
+    }).subscribe(({ pending, failed, open, assigned, recent, activity }) => {
       this.refunds.set([...pending, ...failed]);
-      this.escalations.set([...open, ...recent.filter((escalation) => escalation.status !== 'OPEN')]);
+      this.escalations.set([...open, ...assigned, ...recent.filter((escalation) => escalation.status === 'RESOLVED')]);
       this.activity.set(activity);
     });
     this.api.agents().subscribe({ next: (agents) => this.agents.set(agents), error: () => this.agents.set(null) });

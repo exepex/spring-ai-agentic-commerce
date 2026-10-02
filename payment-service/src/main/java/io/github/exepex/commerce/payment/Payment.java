@@ -75,6 +75,11 @@ public class Payment {
         refundedAmount = refundedAmount.add(refundAmount);
     }
 
+    /** A refund failed at the processor after it was recorded: its amount was never returned. */
+    void reverseRefund(BigDecimal failedAmount) {
+        refundedAmount = refundedAmount.subtract(failedAmount);
+    }
+
     public UUID getId() {
         return id;
     }

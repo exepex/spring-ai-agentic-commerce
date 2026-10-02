@@ -46,6 +46,7 @@ flowchart LR
     mcp --> catalog & orders & payments & shipping
     orders --> catalog & payments
     orders -- order.events --> kafka
+    payments -- payment.events --> kafka
     catalog -- inventory.stock-out --> kafka
     kafka --> shipping & agent & mcp
     agent & mcp & catalog & orders & payments & shipping -.-> jaeger
@@ -55,10 +56,10 @@ flowchart LR
 |---|---|---|
 | catalog-service | 8081 | Products and stock (on hand and reserved). A write-off below the reserved units publishes `inventory.stock-out`, naming the orders that can no longer be fulfilled. |
 | order-service | 8082 | Checkout: reserves stock, saves the order, charges the card, publishes `order.events`. Cancellation releases the stock. |
-| payment-service | 8083 | Card payments and idempotent refunds through Stripe test mode (or a built-in simulator without a key). Has a simulated-outage switch for the demo. |
+| payment-service | 8083 | Card payments and idempotent refunds through Stripe test mode (or a built-in simulator without a key). Publishes `payment.events` when a refund fails after it was made. Has a simulated-outage switch for the demo. |
 | shipping-service | 8084 | Creates and cancels shipments from order events. |
 | commerce-mcp-server | 8085 | Nine MCP tools over the services, plus the governance API: audit trail, refund approvals, order proposals, customer notifications, escalations. |
-| agent-service | 8086 | The two agents, each with its own MCP connection, allowlist, prompt, effort level and kill switch. |
+| agent-service | 8086 | The two agents, each with its own MCP connection, allowlist, prompt and effort level. |
 | shop-ui | 8080 | Angular app served by nginx, which routes `/svc/<service>/` to each service. |
 
 Each agent is defined in one file (model, effort, tools, budget and prompt) that both agent-service and
@@ -83,19 +84,27 @@ commerce-mcp-server read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
 
 1. **Order through chat.** The customer asks the shopping assistant for a product. It searches the catalog and calls
    `propose_order`; the chat shows the proposal with a **Confirm and pay** button. Only that click places the order,
-   reserves the stock and charges the card. A declined test card fails cleanly and releases the stock.
+   reserves the stock and charges the card. A declined test card fails cleanly and releases the stock. If the
+   payment service is down when the customer confirms, the proposal shows that the payment is being confirmed, and
+   the order completes by itself once the payment service is back.
 2. **Stock-out after ordering.** Operations writes off damaged stock. The catalog publishes a stock-out naming the
    newest order it can no longer cover. The order-exceptions agent wakes up, cancels the order, refunds it within its
    limit, notifies the customer, posts to Slack, and records its decision. The order's timeline shows every step.
 3. **Refund above the limit.** The same stock-out on a €129.90 order: the refund is held as *pending approval*. A
    person approves or rejects it in the operations console; the decision is recorded, and the refund runs once.
 4. **Payment service down.** With the simulated outage on, the agent's refund fails. It retries with the same
-   idempotency key, then escalates to a human instead of guessing. Once payments are back, a person clicks **Retry
-   refund**: it runs exactly once, with the same key.
+   idempotency key, then escalates to a human instead of guessing. Once payments are back, a person takes the
+   escalation with **Assign to me** and clicks **Retry refund**: it runs exactly once, with the same key.
 5. **Kill switch.** Switch the order-exceptions agent off: the next stock-out goes straight to the escalation queue,
-   without calling the model.
+   without calling the model. The switch is kept by the MCP server, so it stays off after a restart, and the server
+   refuses every tool call of a switched-off agent except handing the work to a human.
 6. **Prompt injection.** Ask the assistant to cancel another customer's order. The customer's identity is injected
    by code and the MCP server checks ownership, so the attempt is refused and recorded as *denied*.
+7. **One person per escalation.** An escalation is open until someone assigns it to themselves; from then on only
+   they can retry its refund, resolve it, or hand it back to the queue. Switch the operator at the top of the
+   operations console: if two people try to take the same escalation, only one gets it and the other is told who
+   has it. An order has at most one open escalation, and once it is with a person, agents leave its failed refund to
+   them.
 
 ## Run it
 
@@ -153,9 +162,19 @@ instead of in Docker, point them at it with `-Devals.baseUrl=http://localhost:42
 - **Stock changes lock the product row,** so concurrent reservations and write-offs never reserve more than exists.
 - **No database transaction is held open across remote calls.** Checkout saves the order before charging the card,
   and releases the stock if any step fails.
+- **Unfinished work is finished later, never guessed.** When a payment's outcome is unknown (the payment service is
+  down or times out), the order waits as `PAYMENT_PENDING` with its stock kept, and the payment is asked for again
+  until it succeeds or is declined. Stock to give back is recorded with the order change that needs it and released
+  once the catalog answers. A confirmed proposal places its order under the proposal's id, so placing it again never
+  places a second order. Refunds are checked with the card processor again; one that fails afterwards no longer
+  counts as refunded, its refund request is marked failed, and the order is handed to a person. Each service runs its own reconciler for this; the intervals are under `commerce.reconciliation`
+  and `commerce.payments.refund-check` in each service's `application.yml`.
 - **Events are published after commit,** so consumers never see a rolled-back change. The trade-off: an event can be
   lost if a process dies between commit and send. A transactional outbox closes that gap; it is left out to keep the
   demo small.
+- **Events can arrive twice, and that is harmless.** The audit trail records each event once per order, by the id its
+  service gave it. agent-service reads stock-outs from the start of the topic when it first joins, so none published
+  before it started is missed; a stock-out handled before is found already settled.
 - **The demo UI has no login.** You pick which customer you are. In production the UI and the governance API would sit
   behind the organisation's identity provider.
 

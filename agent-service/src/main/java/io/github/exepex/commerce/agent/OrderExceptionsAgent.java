@@ -32,8 +32,6 @@ public class OrderExceptionsAgent {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OrderExceptionsAgent.class);
 
-
-
     private final ChatClient chatClient;
     private final McpToolboxes toolboxes;
     private final AgentSwitchboard switchboard;
@@ -54,7 +52,14 @@ public class OrderExceptionsAgent {
     }
 
     public void handleStockOut(UUID orderId, String stockOutEvent) {
-        if (!switchboard.isEnabled(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT)) {
+        boolean enabled;
+        try {
+            enabled = switchboard.isEnabled(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT);
+        } catch (RuntimeException unreachable) {
+            throw new HandOffFailedException("Could not read the kill switch, so order " + orderId
+                    + " was neither handled nor handed to a human", unreachable);
+        }
+        if (!enabled) {
             handToHuman(orderId, "Stock-out: this order can no longer be fulfilled as placed. The order-exceptions agent "
                     + "is switched off, so a person must decide whether to cancel and refund it.");
             return;

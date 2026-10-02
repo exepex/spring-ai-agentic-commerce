@@ -56,7 +56,7 @@ class StripePaymentGateway implements PaymentGateway {
     }
 
     @Override
-    public String refund(String chargeReference, BigDecimal amount, String idempotencyKey) {
+    public RefundResult refund(String chargeReference, BigDecimal amount, String idempotencyKey) {
         RefundCreateParams params = RefundCreateParams.builder()
                 .setPaymentIntent(chargeReference)
                 .setAmount(minorUnits(amount))
@@ -64,21 +64,35 @@ class StripePaymentGateway implements PaymentGateway {
                 .build();
         try {
             Refund refund = stripe.v1().refunds().create(params, idempotent(idempotencyKey));
-            ensureAccepted(refund.getStatus());
-            return refund.getId();
+            RefundStatus status = statusOf(refund.getStatus());
+            if (status == RefundStatus.FAILED) {
+                throw PaymentProblems.refundNotCompleted(refund.getStatus());
+            }
+            return new RefundResult(refund.getId(), status);
+        } catch (StripeException failure) {
+            throw new PaymentProviderUnavailableException(failure);
+        }
+    }
+
+    @Override
+    public RefundStatus refundStatus(String refundReference) {
+        try {
+            return statusOf(stripe.v1().refunds().retrieve(refundReference).getStatus());
         } catch (StripeException failure) {
             throw new PaymentProviderUnavailableException(failure);
         }
     }
 
     /**
-     * A refund Stripe reports as failed or cancelled did not return any money, so it must not count as refunded. A
-     * pending one has been accepted and completes on Stripe's side.
+     * Stripe's refund statuses: a failed or cancelled refund returned no money; anything not yet final, such as
+     * {@code pending} or {@code requires_action}, is pending.
      */
-    static void ensureAccepted(String refundStatus) {
-        if ("failed".equals(refundStatus) || "canceled".equals(refundStatus)) {
-            throw PaymentProblems.refundNotCompleted(refundStatus);
-        }
+    static RefundStatus statusOf(String stripeStatus) {
+        return switch (stripeStatus) {
+            case "succeeded" -> RefundStatus.SUCCEEDED;
+            case "failed", "canceled" -> RefundStatus.FAILED;
+            default -> RefundStatus.PENDING;
+        };
     }
 
     private static long minorUnits(BigDecimal amount) {

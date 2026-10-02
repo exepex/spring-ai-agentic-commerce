@@ -6,6 +6,7 @@ import io.github.exepex.commerce.mcp.downstream.DownstreamException;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
 import io.github.exepex.commerce.mcp.downstream.ShippingApi;
+import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.EscalationService;
 import io.github.exepex.commerce.mcp.governance.NotificationService;
 import io.github.exepex.commerce.mcp.governance.ProposalService;
@@ -206,10 +207,12 @@ class CommerceTools {
             @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
         UUID id = orderId == null || orderId.isBlank() ? null : ToolGuard.parseOrderId(orderId);
         return guard.run(context, "escalate_to_human", id, "Escalated to a human", true, agentId -> {
-            if (id != null) {
+            // Only a customer-scoped agent's order is looked up, so handing work to a person never depends on the
+            // order service being up.
+            if (id != null && guard.isCustomerScoped(agentId)) {
                 guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
             }
-            return new Acknowledgement(escalations.escalate(agentId, id, summary).getId(),
+            return new Acknowledgement(escalations.escalate(AuditEvent.ActorType.AGENT, agentId, id, summary).getId(),
                     "The operations team has the escalation and will take it from here");
         });
     }

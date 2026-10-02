@@ -1,93 +1,28 @@
 package io.github.exepex.commerce.order;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
-import static com.github.tomakehurst.wiremock.client.WireMock.delete;
 import static com.github.tomakehurst.wiremock.client.WireMock.deleteRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
-import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
-import com.github.tomakehurst.wiremock.WireMockServer;
-import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.jayway.jsonpath.JsonPath;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.serialization.StringDeserializer;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.kafka.test.utils.KafkaTestUtils;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
-import org.testcontainers.kafka.KafkaContainer;
 
-/**
- * Runs the real service against Postgres and Kafka. One WireMock server stands in for both the catalog and the
- * payment service over real HTTP; their paths do not overlap.
- */
-@SpringBootTest
-@AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
-class OrderApiIntegrationTest {
-
-    private static final UUID SHOE = UUID.fromString("8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0001");
-    private static final UUID HEADLAMP = UUID.fromString("8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0004");
-    private static final UUID UNKNOWN_PRODUCT = UUID.fromString("00000000-0000-0000-0000-000000000000");
-
-    private static final WireMockServer DEPENDENCIES = startWireMock();
-
-    @Autowired
-    private MockMvcTester mockMvc;
-
-    @Autowired
-    private KafkaContainer kafka;
-
-    @DynamicPropertySource
-    static void pointAtWireMock(DynamicPropertyRegistry registry) {
-        registry.add("spring.http.serviceclient.catalog.base-url", DEPENDENCIES::baseUrl);
-        registry.add("spring.http.serviceclient.payment.base-url", DEPENDENCIES::baseUrl);
-    }
-
-    @BeforeEach
-    void stubTheDependencies() {
-        DEPENDENCIES.resetAll();
-        stubProduct(SHOE, "RUN-SHOE-BLUE-42", "Trail running shoe, blue, EU 42", "129.90");
-        stubProduct(HEADLAMP, "HEADLAMP-400", "Headlamp, 400 lumen", "39.50");
-        DEPENDENCIES.stubFor(get("/api/products/" + UNKNOWN_PRODUCT).willReturn(problem(HttpStatus.NOT_FOUND, "no such product")));
-        DEPENDENCIES.stubFor(post(urlMatching("/api/products/.+/reservations")).willReturn(aResponse().withStatus(201)));
-        DEPENDENCIES.stubFor(delete(urlMatching("/api/orders/.+/reservations")).willReturn(aResponse().withStatus(204)));
-        DEPENDENCIES.stubFor(post("/api/payments").willReturn(aResponse().withStatus(201)));
-    }
-
-    @AfterAll
-    static void stopWireMock() {
-        DEPENDENCIES.stop();
-    }
+/** Checkout and cancellation through the HTTP API. */
+class OrderApiIntegrationTest extends OrderServiceTestSupport {
 
     @Test
     void placesAnOrderReservingEveryLineChargingTheTotalAndAnnouncingIt() throws Exception {
@@ -139,13 +74,16 @@ class OrderApiIntegrationTest {
     }
 
     @Test
-    void anUnavailablePaymentServiceFailsTheOrderAndReleasesItsStock() {
+    void anUnavailablePaymentServiceLeavesThePaymentPendingAndKeepsTheStock() throws Exception {
         DEPENDENCIES.stubFor(post("/api/payments").willReturn(problem(HttpStatus.SERVICE_UNAVAILABLE, "down")));
 
-        assertThat(placeOrder("ken@example.com", SHOE, 1)).hasStatus(HttpStatus.SERVICE_UNAVAILABLE);
-        DEPENDENCIES.verify(deleteRequestedFor(urlMatching("/api/orders/.+/reservations")));
-        assertThat(mockMvc.get().uri("/api/orders?customerEmail=ken@example.com"))
-                .bodyJson().extractingPath("$[0].status").isEqualTo("PAYMENT_FAILED");
+        MvcTestResult pending = placeOrder("ken@example.com", SHOE, 1);
+
+        assertThat(pending).hasStatus(HttpStatus.ACCEPTED);
+        assertThat(pending).bodyJson().extractingPath("$.status").isEqualTo("PAYMENT_PENDING");
+        DEPENDENCIES.verify(0, deleteRequestedFor(urlMatching("/api/orders/.+/reservations")));
+        DEPENDENCIES.verify(1, postRequestedFor(urlEqualTo("/api/payments")));
+        assertThat(cancel(orderIdOf(pending), "changed mind")).hasStatus(HttpStatus.CONFLICT);
     }
 
     @Test
@@ -209,78 +147,5 @@ class OrderApiIntegrationTest {
     @Test
     void rejectsAnInvalidEmail() {
         assertThat(placeOrder("not-an-email", SHOE, 1)).hasStatus(HttpStatus.BAD_REQUEST);
-    }
-
-    private static WireMockServer startWireMock() {
-        WireMockServer server = new WireMockServer(wireMockConfig().dynamicPort());
-        server.start();
-        return server;
-    }
-
-    private static void stubProduct(UUID productId, String sku, String name, String price) {
-        DEPENDENCIES.stubFor(get("/api/products/" + productId).willReturn(okJson("""
-                {"id": "%s", "sku": "%s", "name": "%s", "price": %s, "currency": "EUR", "available": 10}"""
-                .formatted(productId, sku, name, price))));
-    }
-
-    private static ResponseDefinitionBuilder problem(HttpStatus status, String detail) {
-        return aResponse().withStatus(status.value())
-                .withHeader("Content-Type", MediaType.APPLICATION_PROBLEM_JSON_VALUE)
-                .withBody("""
-                        {"status": %d, "detail": "%s"}""".formatted(status.value(), detail));
-    }
-
-    private MvcTestResult placeOrder(String customerEmail, Object... productsAndQuantities) {
-        List<String> lines = new ArrayList<>();
-        for (int index = 0; index < productsAndQuantities.length; index += 2) {
-            lines.add("""
-                    {"productId": "%s", "quantity": %d}""".formatted(productsAndQuantities[index],
-                    productsAndQuantities[index + 1]));
-        }
-        return mockMvc.post().uri("/api/orders")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"customerEmail": "%s", "lines": [%s]}""".formatted(customerEmail, String.join(", ", lines)))
-                .exchange();
-    }
-
-    private String placedOrderOf(String customerEmail) throws Exception {
-        List<String> placed = JsonPath.read(mockMvc.get().uri("/api/orders?customerEmail={email}", customerEmail).exchange()
-                .getResponse().getContentAsString(), "$[?(@.status == 'PLACED')].id");
-        return placed.isEmpty() ? null : placed.getFirst();
-    }
-
-    private MvcTestResult cancel(String orderId, String reason) {
-        return mockMvc.post().uri("/api/orders/{orderId}/cancellation", orderId)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("""
-                        {"reason": "%s"}""".formatted(reason))
-                .exchange();
-    }
-
-    private static String orderIdOf(MvcTestResult result) throws Exception {
-        return JsonPath.read(result.getResponse().getContentAsString(), "$.id");
-    }
-
-    private List<String> orderEventTypesFor(String orderId, int expectedEvents) {
-        Map<String, Object> consumerProperties = Map.of(
-                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
-                ConsumerConfig.GROUP_ID_CONFIG, "order-test-" + UUID.randomUUID(),
-                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
-                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
-            consumer.subscribe(List.of("order.events"));
-            List<String> types = new ArrayList<>();
-            long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
-            while (types.size() < expectedEvents && System.nanoTime() < deadline) {
-                for (ConsumerRecord<String, String> record : KafkaTestUtils.getRecords(consumer, Duration.ofSeconds(2))) {
-                    if (orderId.equals(record.key())) {
-                        types.add(JsonPath.read(record.value(), "$.type"));
-                    }
-                }
-            }
-            return types;
-        }
     }
 }

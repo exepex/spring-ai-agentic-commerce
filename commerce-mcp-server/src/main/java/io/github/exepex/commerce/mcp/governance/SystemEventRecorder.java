@@ -10,8 +10,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Adds what the commerce services announce on Kafka to the audit trail, so an order's timeline shows the system's
- * steps next to the agents' and the humans'. Events are read as plain JSON: the topics are contracts, not shared
- * Java types.
+ * steps next to the agents' and the humans'. Each event is recorded once, however often Kafka delivers it. Events are
+ * read as plain JSON: the topics are contracts, not shared Java types.
  */
 @Component
 class SystemEventRecorder {
@@ -35,8 +35,8 @@ class SystemEventRecorder {
             case "ORDER_CANCELLED" -> "Order cancelled; stock released and shipment cancelled";
             default -> "Order event " + type;
         };
-        audit.recordAt(occurredAt(event), UUID.fromString(event.path("orderId").asString()), AuditEvent.ActorType.SYSTEM,
-                "order-service", type, AuditEvent.Outcome.SUCCEEDED, summary, null);
+        audit.recordSystemEvent(eventId(event), occurredAt(event), UUID.fromString(event.path("orderId").asString()),
+                "order-service", type, summary, null);
     }
 
     @KafkaListener(topics = "${commerce.topics.stock-out}")
@@ -46,9 +46,13 @@ class SystemEventRecorder {
                 + " on hand for " + event.path("reserved").asInt() + " reserved (" + event.path("reason").asString()
                 + "). This order can no longer be fulfilled as placed.";
         for (JsonNode orderId : event.path("affectedOrderIds")) {
-            audit.recordAt(occurredAt(event), UUID.fromString(orderId.asString()), AuditEvent.ActorType.SYSTEM,
-                    "catalog-service", "STOCK_OUT", AuditEvent.Outcome.SUCCEEDED, summary, json);
+            audit.recordSystemEvent(eventId(event), occurredAt(event), UUID.fromString(orderId.asString()),
+                    "catalog-service", "STOCK_OUT", summary, json);
         }
+    }
+
+    private static UUID eventId(JsonNode event) {
+        return UUID.fromString(event.path("eventId").asString());
     }
 
     /** When the service says it happened: a consumer that catches up late must not reorder the timeline. */

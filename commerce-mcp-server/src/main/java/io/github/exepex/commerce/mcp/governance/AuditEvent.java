@@ -55,12 +55,16 @@ public class AuditEvent {
     @Column(name = "trace_id")
     private String traceId;
 
+    /** The id the announcing service gave a system event, so a redelivered event is recorded only once. */
+    @Column(name = "source_event_id")
+    private UUID sourceEventId;
+
     protected AuditEvent() {
         // for JPA
     }
 
     AuditEvent(Instant occurredAt, UUID orderId, ActorType actorType, String actor, String action, Outcome outcome,
-            String summary, String details, String traceId) {
+            String summary, String details, String traceId, UUID sourceEventId) {
         this.id = UUID.randomUUID();
         this.occurredAt = occurredAt;
         this.orderId = orderId;
@@ -71,6 +75,7 @@ public class AuditEvent {
         this.summary = summary;
         this.details = details;
         this.traceId = traceId;
+        this.sourceEventId = sourceEventId;
     }
 
     public UUID getId() {

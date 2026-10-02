@@ -44,6 +44,11 @@ spring:
       enabled: true
 
 commerce:
+  # How often checkout's unfinished work is retried: payments whose outcome is unknown and unconfirmed stock releases.
+  # An order counts as stalled once it is older than settle-after, so a checkout still running is left alone.
+  reconciliation:
+    interval: 15s
+    settle-after: 30s
   topics:
     order-events: order.events
 

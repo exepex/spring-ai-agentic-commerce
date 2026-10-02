@@ -1,30 +1,41 @@
 import { Injectable, signal } from '@angular/core';
 
-/** The demo has no login: you pick which customer you are, and which person approves things in operations. */
+/** The demo has no login: you pick which customer you are, and which person you are in operations. */
 export const CUSTOMERS = ['ada@example.com', 'grace@example.com', 'alan@example.com'];
-export const OPERATOR = 'ops@trailhead.example';
+export const OPERATORS = ['ana@trailhead.example', 'ben@trailhead.example'];
 
 const STORAGE_KEY = 'trailhead.customer';
+const OPERATOR_KEY = 'trailhead.operator';
 
 @Injectable({ providedIn: 'root' })
 export class Session {
-  readonly customer = signal(Session.restore());
+  readonly customer = signal(Session.restore(STORAGE_KEY, CUSTOMERS));
+  readonly operator = signal(Session.restore(OPERATOR_KEY, OPERATORS));
 
   switchTo(customerEmail: string): void {
     this.customer.set(customerEmail);
+    Session.remember(STORAGE_KEY, customerEmail);
+  }
+
+  switchOperator(operatorEmail: string): void {
+    this.operator.set(operatorEmail);
+    Session.remember(OPERATOR_KEY, operatorEmail);
+  }
+
+  private static remember(key: string, value: string): void {
     try {
-      localStorage.setItem(STORAGE_KEY, customerEmail);
+      localStorage.setItem(key, value);
     } catch {
       // storage unavailable: the choice lasts for this page only
     }
   }
 
-  private static restore(): string {
+  private static restore(key: string, choices: string[]): string {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored && CUSTOMERS.includes(stored) ? stored : CUSTOMERS[0];
+      const stored = localStorage.getItem(key);
+      return stored && choices.includes(stored) ? stored : choices[0];
     } catch {
-      return CUSTOMERS[0];
+      return choices[0];
     }
   }
 }

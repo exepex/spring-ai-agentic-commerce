@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.mcp.tools;
 
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
+import io.github.exepex.commerce.mcp.governance.AgentSwitches;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.AuditTrail;
 import io.github.exepex.commerce.mcp.governance.GovernanceException;
@@ -13,17 +14,22 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 /**
- * Wraps every tool call: checks that the calling agent may use the tool, runs it, and records the outcome in the
- * audit trail. A refused or failed call is recorded too, and its message goes back to the agent.
+ * Wraps every tool call: checks that the calling agent may use the tool and is switched on, runs it, and records the
+ * outcome in the audit trail. A refused or failed call is recorded too, and its message goes back to the agent. A
+ * switched-off agent can still hand work to a human, so nothing is left without someone handling it.
  */
 @Component
 class ToolGuard {
 
+    static final String HAND_TO_HUMAN = "escalate_to_human";
+
     private final AgentRegistry agents;
+    private final AgentSwitches switches;
     private final AuditTrail audit;
 
-    ToolGuard(AgentRegistry agents, AuditTrail audit) {
+    ToolGuard(AgentRegistry agents, AgentSwitches switches, AuditTrail audit) {
         this.agents = agents;
+        this.switches = switches;
         this.audit = audit;
     }
 
@@ -38,6 +44,12 @@ class ToolGuard {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, tool, AuditEvent.Outcome.DENIED,
                     "Tool not permitted for this agent", summary);
             throw new GovernanceException(HttpStatus.FORBIDDEN, "Agent " + agentId + " is not permitted to call " + tool);
+        }
+        if (!HAND_TO_HUMAN.equals(tool) && !switches.isEnabled(agentId)) {
+            audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, tool, AuditEvent.Outcome.DENIED,
+                    "Agent is switched off", summary);
+            throw new GovernanceException(HttpStatus.FORBIDDEN, "Agent " + agentId + " is switched off. Stop, and hand "
+                    + "any work that needs doing to a human with " + HAND_TO_HUMAN + ".");
         }
         try {
             T result = action.apply(agentId);
@@ -59,6 +71,10 @@ class ToolGuard {
     }
 
     /** A customer-facing agent may only touch the orders of the customer it is talking to. */
+    boolean isCustomerScoped(String agentId) {
+        return agents.isCustomerScoped(agentId);
+    }
+
     void ensureCustomerOwns(String agentId, OrderApi.Order order, String customerEmail) {
         if (agents.isCustomerScoped(agentId)
                 && (customerEmail == null || !customerEmail.equalsIgnoreCase(order.customerEmail()))) {

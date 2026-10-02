@@ -42,17 +42,20 @@ public class RefundService {
     private final PaymentApi payments;
     private final OrderApi orders;
     private final AuditTrail audit;
+    private final EscalationService escalations;
     private final BigDecimal approvalThreshold;
     private final TransactionTemplate transaction;
     private final JdbcClient jdbc;
     private final Clock clock;
 
     RefundService(RefundRequestRepository requests, PaymentApi payments, OrderApi orders, AuditTrail audit,
-            GovernanceProperties properties, TransactionTemplate transaction, JdbcClient jdbc, Clock clock) {
+            EscalationService escalations, GovernanceProperties properties, TransactionTemplate transaction,
+            JdbcClient jdbc, Clock clock) {
         this.requests = requests;
         this.payments = payments;
         this.orders = orders;
         this.audit = audit;
+        this.escalations = escalations;
         this.approvalThreshold = properties.refundApprovalThreshold();
         this.transaction = transaction;
         this.jdbc = jdbc;
@@ -90,6 +93,8 @@ public class RefundService {
         if (earlier.isPresent()) {
             return repeat(earlier.get(), orderId, amount, idempotencyKey, agentId);
         }
+        // An order handed to a person is theirs: a new refund from an agent could pay out what they are retrying.
+        escalations.ensureNotWithHuman(orderId);
         PaymentApi.Payment payment = paymentIfReachable(orderId);
         if (payment != null && amount.compareTo(payment.refundable()) > 0) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "A refund of " + amount + " "
@@ -149,13 +154,35 @@ public class RefundService {
         return requests.save(request);
     }
 
-    /** Runs a failed refund again with its original idempotency key. */
+    /**
+     * Runs a failed refund again with its original idempotency key. If the order was escalated, only the person the
+     * escalation is assigned to may do this.
+     */
     public RefundRequest retry(UUID requestId, String retriedBy) {
         RefundRequest request = find(requestId);
+        escalations.ensureWorkedBy(request.getOrderId(), retriedBy);
         if (request.getStatus() != RefundRequest.Status.FAILED) {
             throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + request.getStatus() + ", not failed");
         }
         return execute(request, retriedBy);
+    }
+
+    /**
+     * The card processor reported an executed refund failed afterwards: the customer did not get the money. The
+     * request is marked failed and the order handed to a person, together and once, however often this is reported.
+     */
+    void recordFailedAtProcessor(UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
+        String failure = "The card processor reported the refund of " + amount + " " + currency
+                + " failed after accepting it; no money was returned.";
+        transaction.executeWithoutResult(status -> {
+            if (requests.failExecuted(idempotencyKey, failure, Instant.now(clock)) == 0) {
+                return;
+            }
+            audit.record(orderId, AuditEvent.ActorType.SYSTEM, "payment-service", "refund_failed",
+                    AuditEvent.Outcome.FAILED, failure, "Idempotency key " + idempotencyKey);
+            escalations.escalate(AuditEvent.ActorType.SYSTEM, "payment-service", orderId, failure
+                    + " Contact the customer and refund them another way.");
+        });
     }
 
     public List<RefundRequest> withStatus(RefundRequest.Status status) {
@@ -177,7 +204,12 @@ public class RefundService {
             throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
                     + " was already used for a different refund. Use a new key for a new refund.");
         }
-        return earlier.getStatus() == RefundRequest.Status.FAILED ? execute(earlier, agentId) : earlier;
+        if (earlier.getStatus() != RefundRequest.Status.FAILED) {
+            return earlier;
+        }
+        // A failed refund of an order handed to a person is theirs to retry, not the agent's.
+        escalations.ensureNotWithHuman(orderId);
+        return execute(earlier, agentId);
     }
 
     /** What was already refunded or asked for on the order, except refunds a person turned down. */

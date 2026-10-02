@@ -12,8 +12,10 @@ import java.util.UUID;
 @Entity
 public class Escalation {
 
+    /** Open until someone takes it; then assigned to that one person until they resolve it or hand it back. */
     public enum Status {
         OPEN,
+        ASSIGNED,
         RESOLVED
     }
 
@@ -30,6 +32,12 @@ public class Escalation {
 
     @Enumerated(EnumType.STRING)
     private Status status;
+
+    @Column(name = "assigned_to")
+    private String assignedTo;
+
+    @Column(name = "assigned_at")
+    private Instant assignedAt;
 
     @Column(name = "resolved_by")
     private String resolvedBy;
@@ -56,13 +64,6 @@ public class Escalation {
         this.createdAt = createdAt;
     }
 
-    void resolve(String by, String note, Instant now) {
-        status = Status.RESOLVED;
-        resolvedBy = by;
-        resolutionNote = note;
-        resolvedAt = now;
-    }
-
     public UUID getId() {
         return id;
     }
@@ -81,6 +82,14 @@ public class Escalation {
 
     public Status getStatus() {
         return status;
+    }
+
+    public String getAssignedTo() {
+        return assignedTo;
+    }
+
+    public Instant getAssignedAt() {
+        return assignedAt;
     }
 
     public String getResolvedBy() {

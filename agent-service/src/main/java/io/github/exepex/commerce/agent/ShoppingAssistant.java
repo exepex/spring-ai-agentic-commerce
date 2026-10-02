@@ -52,7 +52,14 @@ public class ShoppingAssistant {
     }
 
     public Reply chat(String conversationId, String customerEmail, String message) {
-        if (!switchboard.isEnabled(AgentSwitchboard.SHOPPING_ASSISTANT)) {
+        boolean enabled;
+        try {
+            enabled = switchboard.isEnabled(AgentSwitchboard.SHOPPING_ASSISTANT);
+        } catch (RuntimeException unreachable) {
+            LOGGER.error("Could not read the shopping assistant's kill switch", unreachable);
+            return new Reply("Sorry, I could not answer that just now. Please try again in a moment.", List.of());
+        }
+        if (!enabled) {
             return new Reply("The shopping assistant is switched off right now. Please try again later.", List.of());
         }
         ToolRun run = new ToolRun(customerEmail, definition.toolCallBudget());

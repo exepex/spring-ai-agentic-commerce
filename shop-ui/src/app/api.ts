@@ -34,7 +34,7 @@ export interface OrderLine {
 export interface Order {
   id: string;
   customerEmail: string;
-  status: 'PLACED' | 'CONFIRMED' | 'PAYMENT_FAILED' | 'CANCELLED';
+  status: 'PLACED' | 'PAYMENT_PENDING' | 'CONFIRMED' | 'PAYMENT_FAILED' | 'CANCELLED';
   total: number;
   currency: string;
   createdAt: string;
@@ -50,6 +50,8 @@ export interface Refund {
   reason: string;
   idempotencyKey: string;
   providerReference: string;
+  /** A failed refund returned no money; it is not counted in the payment's refunded amount. */
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
   createdAt: string;
 }
 
@@ -135,7 +137,8 @@ export interface Escalation {
   orderId: string | null;
   raisedBy: string;
   summary: string;
-  status: 'OPEN' | 'RESOLVED';
+  status: 'OPEN' | 'ASSIGNED' | 'RESOLVED';
+  assignedTo: string | null;
   resolvedBy: string | null;
   resolutionNote: string | null;
   createdAt: string;
@@ -143,7 +146,8 @@ export interface Escalation {
 
 export interface AgentView {
   id: string;
-  enabled: boolean;
+  /** null when the switches cannot be read (the MCP server is down). */
+  enabled: boolean | null;
   model: string;
   effort: string;
   tools: string[];
@@ -232,16 +236,17 @@ export class Api {
     return this.http.get<Escalation[]>(`${GOVERNANCE}/escalations${status ? `?status=${status}` : ''}`);
   }
 
-  resolveEscalation(escalationId: string, by: string, note: string): Observable<Escalation> {
-    return this.http.post<Escalation>(`${GOVERNANCE}/escalations/${escalationId}/resolve`, { by, note });
+  /** Acts on an escalation: take it, hand it back to the queue, or resolve it. */
+  actOnEscalation(escalationId: string, action: 'assign' | 'hand-back' | 'resolve', by: string, note: string): Observable<Escalation> {
+    return this.http.post<Escalation>(`${GOVERNANCE}/escalations/${escalationId}/${action}`, { by, note });
   }
 
   agents(): Observable<AgentsView> {
     return this.http.get<AgentsView>(`${AGENTS}/agents`);
   }
 
-  setAgentEnabled(agentId: string, enabled: boolean): Observable<AgentsView> {
-    return this.http.put<AgentsView>(`${AGENTS}/agents/${agentId}`, { enabled });
+  setAgentEnabled(agentId: string, enabled: boolean, by: string): Observable<AgentsView> {
+    return this.http.put<AgentsView>(`${AGENTS}/agents/${agentId}`, { enabled, by });
   }
 
   chat(conversationId: string, customerEmail: string, message: string): Observable<AssistantReply> {

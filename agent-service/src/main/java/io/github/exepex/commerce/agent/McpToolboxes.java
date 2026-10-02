@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -34,21 +35,26 @@ class McpToolboxes {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(McpToolboxes.class);
     private static final String SLACK = "slack";
+    /** The commerce MCP server enforces the kill switch on every call itself. */
+    private static final BooleanSupplier ENFORCED_BY_THE_SERVER = () -> true;
 
     private final AgentProperties properties;
     private final AgentDefinitions definitions;
+    private final AgentSwitchboard switchboard;
     private final Map<String, McpSyncClient> clients = new ConcurrentHashMap<>();
 
-    McpToolboxes(AgentProperties properties, AgentDefinitions definitions) {
+    McpToolboxes(AgentProperties properties, AgentDefinitions definitions, AgentSwitchboard switchboard) {
         this.properties = properties;
         this.definitions = definitions;
+        this.switchboard = switchboard;
     }
 
     /** The shopping assistant's tools; {@code customerEmail} is always the signed-in customer's. */
     List<ToolCallback> shoppingAssistantTools() {
         AgentDefinition agent = definitions.get(AgentSwitchboard.SHOPPING_ASSISTANT);
         return toolsFrom(AgentSwitchboard.SHOPPING_ASSISTANT,
-                () -> commerceClient(AgentSwitchboard.SHOPPING_ASSISTANT), agent.commerceTools(), agent.customerScoped());
+                () -> commerceClient(AgentSwitchboard.SHOPPING_ASSISTANT), agent.commerceTools(), agent.customerScoped(),
+                ENFORCED_BY_THE_SERVER);
     }
 
     List<ToolCallback> orderExceptionsAgentTools() {
@@ -56,10 +62,11 @@ class McpToolboxes {
         List<ToolCallback> tools = new ArrayList<>(
                 toolsFrom(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT,
                         () -> commerceClient(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT), agent.commerceTools(),
-                        agent.customerScoped()));
+                        agent.customerScoped(), ENFORCED_BY_THE_SERVER));
         if (properties.slack().isConfigured() && !agent.slackTools().isEmpty()) {
             try {
-                tools.addAll(toolsFrom(SLACK, this::slackClient, agent.slackTools(), false));
+                tools.addAll(toolsFrom(SLACK, this::slackClient, agent.slackTools(), false,
+                        () -> isSwitchedOn(AgentSwitchboard.ORDER_EXCEPTIONS_AGENT)));
             } catch (RuntimeException slackDown) {
                 // Slack is a nice-to-have: without it the agent still does its job and records it in the audit trail.
                 LOGGER.warn("Slack MCP server unavailable; the agent runs without Slack", slackDown);
@@ -78,13 +85,23 @@ class McpToolboxes {
     }
 
     private List<ToolCallback> toolsFrom(String connection, Supplier<McpSyncClient> client, List<String> allowedTools,
-            boolean injectsCustomer) {
+            boolean injectsCustomer, BooleanSupplier agentSwitchedOn) {
         ToolCallback[] mcpTools = onLiveConnection(connection, client, live -> listTools(live, allowedTools));
         List<ToolCallback> tools = new ArrayList<>();
         for (ToolCallback mcpTool : mcpTools) {
-            tools.add(new AgentToolCallback(mcpTool, injectsCustomer));
+            tools.add(new AgentToolCallback(mcpTool, injectsCustomer, agentSwitchedOn));
         }
         return tools;
+    }
+
+    /** Fails closed: if the switch cannot be read, the third-party tool is not called. */
+    private boolean isSwitchedOn(String agentId) {
+        try {
+            return switchboard.isEnabled(agentId);
+        } catch (RuntimeException unreadable) {
+            LOGGER.warn("Could not read the kill switch of {}; refusing its third-party tool call", agentId, unreadable);
+            return false;
+        }
     }
 
     /**

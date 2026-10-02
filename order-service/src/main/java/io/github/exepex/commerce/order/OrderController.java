@@ -11,6 +11,7 @@ import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,8 +27,11 @@ class OrderController {
 
     record LineRequest(@NotNull UUID productId, @Positive int quantity) {}
 
-    /** {@code paymentMethod} is a Stripe test payment method; it defaults to the test Visa card. */
-    record PlaceOrderRequest(@NotBlank @Email String customerEmail, @NotEmpty List<@Valid LineRequest> lines,
+    /**
+     * {@code paymentMethod} is a Stripe test payment method; it defaults to the test Visa card. {@code orderId} is
+     * optional: with it, placing the order is idempotent.
+     */
+    record PlaceOrderRequest(UUID orderId, @NotBlank @Email String customerEmail, @NotEmpty List<@Valid LineRequest> lines,
             String paymentMethod) {
 
         String paymentMethodOrDefault() {
@@ -63,12 +67,17 @@ class OrderController {
         this.orderService = orderService;
     }
 
+    /**
+     * Answers 201 when the order is paid, 202 when it is not settled yet (its payment is pending, or the same order is
+     * still being placed by another request), and 402 when the card was declined.
+     */
     @PostMapping
     ResponseEntity<OrderView> placeOrder(@Valid @RequestBody PlaceOrderRequest request) {
-        CustomerOrder order = orderService.placeOrder(request.customerEmail(), request.lines().stream()
+        CustomerOrder order = orderService.placeOrder(request.orderId(), request.customerEmail(), request.lines().stream()
                 .map(line -> new OrderService.RequestedLine(line.productId(), line.quantity()))
                 .toList(), request.paymentMethodOrDefault());
-        return ResponseEntity.created(URI.create("/api/orders/" + order.getId())).body(OrderView.of(order));
+        HttpStatus status = order.getStatus() == OrderStatus.CONFIRMED ? HttpStatus.CREATED : HttpStatus.ACCEPTED;
+        return ResponseEntity.status(status).location(URI.create("/api/orders/" + order.getId())).body(OrderView.of(order));
     }
 
     @GetMapping("/{orderId}")

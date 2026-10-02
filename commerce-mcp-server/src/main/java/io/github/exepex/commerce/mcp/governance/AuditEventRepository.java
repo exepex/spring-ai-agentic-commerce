@@ -9,4 +9,6 @@ interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
     List<AuditEvent> findByOrderIdOrderByOccurredAt(UUID orderId);
 
     List<AuditEvent> findTop200ByOrderByOccurredAtDesc();
+
+    boolean existsBySourceEventIdAndOrderId(UUID sourceEventId, UUID orderId);
 }

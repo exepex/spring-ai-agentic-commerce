@@ -15,7 +15,9 @@ spring:
       observation-enabled: true
     consumer:
       group-id: agent-service
-      auto-offset-reset: latest
+      # A stock-out published before this service first joined its group is still handled. A replayed one does not
+      # act twice: the agent finds the order already cancelled with its refund paid or waiting for approval.
+      auto-offset-reset: earliest
   http:
     clients:
       connect-timeout: 2s
