@@ -33,7 +33,7 @@ public class EscalationService {
      * escalation and its audit entry are saved together or not at all.
      */
     @Transactional
-    public Escalation escalate(String raisedBy, UUID orderId, String summary) {
+    public Escalation escalate(AuditEvent.ActorType raisedByType, String raisedBy, UUID orderId, String summary) {
         if (orderId != null) {
             // Two hand-offs of the same order at once must not each miss the other's escalation.
             jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:orderId, 1))")
@@ -42,13 +42,13 @@ public class EscalationService {
                     .single();
             List<Escalation> unresolved = escalations.findByOrderIdAndStatusIn(orderId, UNRESOLVED);
             if (!unresolved.isEmpty()) {
-                audit.record(orderId, AuditEvent.ActorType.AGENT, raisedBy, "escalate_to_human",
+                audit.record(orderId, raisedByType, raisedBy, "escalate_to_human",
                         AuditEvent.Outcome.SUCCEEDED, "Already with a human; added to the open escalation", summary);
                 return unresolved.getFirst();
             }
         }
         Escalation escalation = escalations.save(new Escalation(orderId, raisedBy, summary, Instant.now(clock)));
-        audit.record(orderId, AuditEvent.ActorType.AGENT, raisedBy, "escalate_to_human", AuditEvent.Outcome.SUCCEEDED,
+        audit.record(orderId, raisedByType, raisedBy, "escalate_to_human", AuditEvent.Outcome.SUCCEEDED,
                 "Handed over to a human", summary);
         return escalation;
     }

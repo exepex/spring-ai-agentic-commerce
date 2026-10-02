@@ -6,6 +6,7 @@ import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -13,7 +14,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 /**
  * Asks the card processor again about refunds that can still change: pending ones until they settle, and succeeded
  * ones for {@code commerce.payments.refund-check.watch} after they succeeded, because a succeeded refund can still
- * fail. A failed refund returned no money, so its amount is taken off the payment's refunded amount. Only refunds of
+ * fail. A failed refund returned no money, so its amount is taken off the payment's refunded amount, and a
+ * {@link RefundFailedEvent} tells the governance service, which hands the order to a person. Only refunds of
  * payments the current processor took are checked: after switching between the simulator and Stripe, the other one's
  * refunds are unknown to it. The demo asks instead of receiving Stripe webhooks, so it needs no public URL.
  */
@@ -26,16 +28,18 @@ class RefundReconciler {
     private final PaymentRepository payments;
     private final PaymentGateway gateway;
     private final TransactionTemplate transaction;
+    private final ApplicationEventPublisher events;
     private final Duration watch;
     private final Clock clock;
 
     RefundReconciler(RefundRepository refunds, PaymentRepository payments, PaymentGateway gateway,
-            TransactionTemplate transaction, @Value("${commerce.payments.refund-check.watch}") Duration watch,
-            Clock clock) {
+            TransactionTemplate transaction, ApplicationEventPublisher events,
+            @Value("${commerce.payments.refund-check.watch}") Duration watch, Clock clock) {
         this.refunds = refunds;
         this.payments = payments;
         this.gateway = gateway;
         this.transaction = transaction;
+        this.events = events;
         this.watch = watch;
         this.clock = clock;
     }
@@ -65,6 +69,7 @@ class RefundReconciler {
             }
             if (latest == PaymentGateway.RefundStatus.FAILED) {
                 payment.reverseRefund(current.getAmount());
+                events.publishEvent(RefundFailedEvent.of(payment, current, Instant.now(clock)));
                 LOGGER.warn("Refund {} of {} {} failed at the card processor; no money was returned",
                         current.getId(), current.getAmount(), payment.getCurrency());
             }

@@ -6,6 +6,7 @@ import io.github.exepex.commerce.mcp.downstream.DownstreamException;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
 import io.github.exepex.commerce.mcp.downstream.ShippingApi;
+import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.EscalationService;
 import io.github.exepex.commerce.mcp.governance.NotificationService;
 import io.github.exepex.commerce.mcp.governance.ProposalService;
@@ -211,7 +212,7 @@ class CommerceTools {
             if (id != null && guard.isCustomerScoped(agentId)) {
                 guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
             }
-            return new Acknowledgement(escalations.escalate(agentId, id, summary).getId(),
+            return new Acknowledgement(escalations.escalate(AuditEvent.ActorType.AGENT, agentId, id, summary).getId(),
                     "The operations team has the escalation and will take it from here");
         });
     }

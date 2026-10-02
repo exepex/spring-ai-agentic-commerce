@@ -165,6 +165,24 @@ public class RefundService {
         return execute(request, retriedBy);
     }
 
+    /**
+     * The card processor reported an executed refund failed afterwards: the customer did not get the money. The
+     * request is marked failed and the order handed to a person, together and once, however often this is reported.
+     */
+    void recordFailedAtProcessor(UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
+        String failure = "The card processor reported the refund of " + amount + " " + currency
+                + " failed after accepting it; no money was returned.";
+        transaction.executeWithoutResult(status -> {
+            if (requests.failExecuted(idempotencyKey, failure, Instant.now(clock)) == 0) {
+                return;
+            }
+            audit.record(orderId, AuditEvent.ActorType.SYSTEM, "payment-service", "refund_failed",
+                    AuditEvent.Outcome.FAILED, failure, "Idempotency key " + idempotencyKey);
+            escalations.escalate(AuditEvent.ActorType.SYSTEM, "payment-service", orderId, failure
+                    + " Contact the customer and refund them another way.");
+        });
+    }
+
     public List<RefundRequest> withStatus(RefundRequest.Status status) {
         return requests.findByStatusOrderByCreatedAt(status);
     }
