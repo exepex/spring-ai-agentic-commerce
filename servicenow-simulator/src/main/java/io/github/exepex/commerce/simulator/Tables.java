@@ -57,6 +57,15 @@ class Tables {
         return rows.containsKey(table);
     }
 
+    /** Whether the field points at a row of another table, such as an incident's assignment group. */
+    boolean isReference(String table, String field) {
+        return INCIDENT.equals(table) && REFERENCES.containsKey(field);
+    }
+
+    String referencedTable(String field) {
+        return REFERENCES.get(field);
+    }
+
     /** The rows that match an encoded query such as {@code assigned_toISEMPTY^state=1^ORDERBYDESCsys_created_on}. */
     synchronized List<Map<String, String>> find(String table, String encodedQuery, int limit) {
         List<Map<String, String>> found = new ArrayList<>();

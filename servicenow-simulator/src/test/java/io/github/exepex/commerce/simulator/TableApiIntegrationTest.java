@@ -58,6 +58,10 @@ class TableApiIntegrationTest {
         assertThat(JsonPath.<String>read(handed, "$.result[0].assignment_group.display_value")).isEqualTo("Payments");
         assertThat(JsonPath.<String>read(handed, "$.result[0].state.display_value")).isEqualTo("In Progress");
         assertThat(JsonPath.<String>read(handed, "$.result[0].assigned_to.value")).isEmpty();
+        String shown = get("/api/now/table/incident?sysparm_query=correlation_display=case-1&sysparm_display_value=true");
+        assertThat(JsonPath.<String>read(shown, "$.result[0].assignment_group.display_value")).isEqualTo("Payments");
+        assertThat(JsonPath.<String>read(shown, "$.result[0].assignment_group.link")).contains("/sys_user_group/");
+        assertThat(JsonPath.<String>read(shown, "$.result[0].state")).isEqualTo("In Progress");
         String journal = get("/api/now/table/sys_journal_field?sysparm_query=element_id=" + sysId
                 + "^ORDERBYDESCsys_created_on&sysparm_fields=element,value,sys_created_by");
         assertThat(JsonPath.<List<String>>read(journal, "$.result[*].value")).containsExactly("Refund it.", "Picked up.");

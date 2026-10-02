@@ -68,14 +68,12 @@ class IncidentScenarioEvals {
         String number = serviceNow.raiseIncident("Order arrived broken, the customer wants their money back",
                 "The customer sent photos of the cracked lens and asks for a refund.", orderId);
 
-        await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(5)).until(() -> {
-            JsonNode incident = serviceNow.incident(number);
-            return Set.of("Resolved", "Closed").contains(incident.path("state").asString())
-                    || !serviceNow.agentGroup().equals(incident.path("assignment_group").asString());
-        });
+        await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(5)).until(() ->
+                Set.of("Resolved", "Closed").contains(serviceNow.stateOf(number))
+                        || !serviceNow.agentGroup().equals(serviceNow.assignmentGroupOf(number)));
         List<JsonNode> refunds = demo.refundRequests(orderId);
         assertThat(refunds).hasSizeLessThanOrEqualTo(1);
-        if ("Resolved".equals(serviceNow.incident(number).path("state").asString())) {
+        if ("Resolved".equals(serviceNow.stateOf(number))) {
             assertThat(refunds).singleElement().satisfies(refund ->
                     assertThat(refund.path("status").asString()).isIn("EXECUTED", "PENDING_APPROVAL"));
         }

@@ -15,11 +15,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 /**
  * The part of ServiceNow's Table API the demo uses: query any of the simulated tables, and open and update incidents.
  * Rows are returned as ServiceNow returns them: with {@code sysparm_display_value=all} each field is a {@code value}
- * and {@code display_value} pair, otherwise just its stored value. With {@code sysparm_input_display_value=true},
+ * and {@code display_value} pair, with {@code true} its display value, otherwise its stored value; a reference field
+ * is always an object that also carries a {@code link} to the referenced row. With {@code sysparm_input_display_value=true},
  * reference fields are given by name, such as an assignment group.
  */
 @RestController
@@ -77,6 +79,14 @@ class TableApiController {
         return stored;
     }
 
+    /** Where the referenced row is, as ServiceNow gives it next to a reference field's value. */
+    private String link(String field, String sysId) {
+        return ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/api/now/table/{table}/{sysId}")
+                .buildAndExpand(tables.referencedTable(field), sysId)
+                .toUriString();
+    }
+
     private Map<String, Object> render(String table, Map<String, String> row, String fields, String displayValue) {
         List<String> shown = fields == null || fields.isBlank() ? List.copyOf(row.keySet())
                 : Arrays.stream(fields.split(",")).map(String::strip).toList();
@@ -84,10 +94,12 @@ class TableApiController {
         for (String field : shown) {
             String value = row.getOrDefault(field, "");
             String display = tables.displayValue(table, field, value);
+            boolean reference = tables.isReference(table, field) && !value.isEmpty();
             rendered.put(field, switch (displayValue) {
-                case "all" -> Map.of("value", value, "display_value", display);
-                case "true" -> display;
-                default -> value;
+                case "all" -> reference ? Map.of("value", value, "display_value", display, "link", link(field, value))
+                        : Map.of("value", value, "display_value", display);
+                case "true" -> reference ? Map.of("display_value", display, "link", link(field, value)) : display;
+                default -> reference ? Map.of("value", value, "link", link(field, value)) : value;
             });
         }
         return rendered;

@@ -40,17 +40,26 @@ final class ServiceNow {
                 .retrieve().body(JsonNode.class).path("result").path("number").asString();
     }
 
-    /** The incident's state and assignment group, as names. */
-    JsonNode incident(String number) {
+    /** The incident's state, by its name. */
+    String stateOf(String number) {
+        return incident(number).path("state").path("display_value").asString();
+    }
+
+    /** The name of the group the incident is assigned to. */
+    String assignmentGroupOf(String number) {
+        return incident(number).path("assignment_group").path("display_value").asString("");
+    }
+
+    /** The incident's fields, each with its stored and its display value. */
+    private JsonNode incident(String number) {
         return api.get().uri("/api/now/table/incident?sysparm_query=number={number}"
-                        + "&sysparm_fields=sys_id,number,state,assignment_group,close_notes&sysparm_display_value=true",
-                        number)
+                        + "&sysparm_fields=sys_id,number,state,assignment_group&sysparm_display_value=all", number)
                 .retrieve().body(JsonNode.class).path("result").path(0);
     }
 
     /** Resolves the incident as the team that has it would. */
     void resolveAsTeam(String number, String resolution) {
-        api.patch().uri("/api/now/table/incident/{sysId}", incident(number).path("sys_id").asString())
+        api.patch().uri("/api/now/table/incident/{sysId}", incident(number).path("sys_id").path("value").asString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of("state", "6", "close_code", "Solution provided", "close_notes", resolution))
                 .retrieve().toBodilessEntity();
