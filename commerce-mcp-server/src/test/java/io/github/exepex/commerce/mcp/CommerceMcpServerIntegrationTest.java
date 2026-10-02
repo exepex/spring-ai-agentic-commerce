@@ -294,6 +294,23 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void aMessageWithAKeyIsSentOnceHoweverOftenAndAtOnceItIsAskedFor() throws Exception {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        Map<String, Object> message = Map.of("orderId", orderId.toString(), "message", "Sorry, it is out of stock.",
+                "idempotencyKey", "notify-" + orderId + "-INC0010001");
+
+        runTogether(() -> text(call(incidentAgent, "notify_customer", message)).length(),
+                () -> text(call(incidentAgent, "notify_customer", message)).length());
+        String again = text(call(incidentAgent, "notify_customer", message));
+
+        assertThat(again).contains("already told");
+        String notifications = rest().get().uri("/api/notifications?orderId={id}", orderId).retrieve().body(String.class);
+        assertThat((Integer) JsonPath.read(notifications, "$.length()")).isEqualTo(1);
+        List<String> summaries = JsonPath.read(timeline(orderId), "$[?(@.action == 'notify_customer')].summary");
+        assertThat(summaries).hasSize(3).filteredOn(summary -> summary.startsWith("Already notified")).hasSize(2);
+    }
+
+    @Test
     void anOrderLookupSaysSoWhenThePaymentServiceIsDownInsteadOfShowingNoPayment() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));

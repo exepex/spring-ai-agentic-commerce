@@ -39,7 +39,10 @@ class IncidentPollerTest {
         when(serviceNow.integrationUserSysId()).thenReturn("agent-sys-id");
         when(serviceNow.findClaimedByAgent()).thenReturn(List.of());
         when(serviceNow.findNewForAgent()).thenReturn(List.of(NEW_INCIDENT));
-        when(serviceNow.findByNumber("INC0010001")).thenReturn(Optional.of(NEW_INCIDENT));
+        ServiceNowClient.Incident claimed = new ServiceNowClient.Incident("sys-1", "INC0010001", "Order arrived broken", "",
+                ServiceNowClient.STATE_IN_PROGRESS, "In Progress", "Online Shop Agent", "agent-sys-id", "Agent", "Ada", "",
+                "", null, null);
+        when(serviceNow.findByNumber("INC0010001")).thenReturn(Optional.of(NEW_INCIDENT), Optional.of(claimed));
         when(kafka.send(eq("servicenow.incidents"), eq("INC0010001"), any()))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("Kafka is down")));
 
@@ -50,5 +53,23 @@ class IncidentPollerTest {
                 "work_notes", "Picked up by the incident-agent."));
         verify(serviceNow).update("sys-1", Map.of("assigned_to", "", "state", ServiceNowClient.STATE_NEW));
         verify(governance, never()).recordToolCall(any(), any());
+    }
+
+    @Test
+    void anIncidentAPersonTookWhileKafkaRefusedTheAnnouncementStaysTheirs() {
+        ServiceNowClient.Incident takenByAPerson = new ServiceNowClient.Incident("sys-1", "INC0010001",
+                "Order arrived broken", "", ServiceNowClient.STATE_IN_PROGRESS, "In Progress", "Online Shop Agent",
+                "desk-ana", "Ana", "Ada", "", "", null, null);
+        when(serviceNow.integrationUserSysId()).thenReturn("agent-sys-id");
+        when(serviceNow.findClaimedByAgent()).thenReturn(List.of());
+        when(serviceNow.findNewForAgent()).thenReturn(List.of(NEW_INCIDENT));
+        when(serviceNow.findByNumber("INC0010001")).thenReturn(Optional.of(NEW_INCIDENT), Optional.of(takenByAPerson));
+        when(kafka.send(eq("servicenow.incidents"), eq("INC0010001"), any()))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("Kafka is down")));
+
+        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", governance,
+                mock(AgentRegistry.class), Clock.systemUTC()).poll();
+
+        verify(serviceNow, never()).update("sys-1", Map.of("assigned_to", "", "state", ServiceNowClient.STATE_NEW));
     }
 }

@@ -249,6 +249,19 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void anIncidentMovedToAnotherGroupBeforeTheClaimIsLeftThere() {
+        stubNewIncidents("""
+                [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "1"},
+                  "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
+        stubClaimed("[]");
+        stubIncident("INC0010001", "sys-1", "1", "Payments", "", "", Instant.now());
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
+    }
+
+    @Test
     void aClaimTheAgentDidNotFinishGoesToTheDefaultTeam() {
         stubNewIncidents("[]");
         stubClaimed("""

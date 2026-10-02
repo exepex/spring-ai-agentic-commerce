@@ -90,6 +90,26 @@ class IncidentAgentTest {
         assertThat(IncidentAgent.isFinished(INCIDENT, run)).isTrue();
     }
 
+    @Test
+    void anOrderMayOnlyChangeWhileTheIncidentIsStillTheAgentsAndStillLinksToIt() {
+        String orderA = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        String orderB = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+        IncidentAgent agent = agent(mock(ChatModel.class), true);
+
+        when(toolboxes.callAsIncidentAgent(eq("get_incident"), any()))
+                .thenReturn(result("{\"number\": \"INC0010001\", \"linkedOrderId\": \"" + orderA + "\"}", false));
+        assertThat(agent.stillLinksTo(INCIDENT, orderA.toUpperCase())).isTrue();
+
+        // The service desk corrected the incident's Correlation ID from order A to order B during the run.
+        when(toolboxes.callAsIncidentAgent(eq("get_incident"), any()))
+                .thenReturn(result("{\"number\": \"INC0010001\", \"linkedOrderId\": \"" + orderB + "\"}", false));
+        assertThat(agent.stillLinksTo(INCIDENT, orderA)).isFalse();
+
+        when(toolboxes.callAsIncidentAgent(eq("get_incident"), any()))
+                .thenReturn(result("Refused: Incident INC0010001 is not yours to change", true));
+        assertThat(agent.stillLinksTo(INCIDENT, orderB)).isFalse();
+    }
+
     private IncidentAgent agent(ChatModel model, boolean switchedOn) {
         AgentSwitchesApi switches = mock(AgentSwitchesApi.class);
         when(switches.all()).thenReturn(Map.of(AgentSwitchboard.INCIDENT_AGENT, switchedOn));
