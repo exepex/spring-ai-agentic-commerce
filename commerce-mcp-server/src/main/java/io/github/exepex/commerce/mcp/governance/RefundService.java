@@ -204,6 +204,11 @@ public class RefundService {
             throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
                     + " was already used for a different refund. Use a new key for a new refund.");
         }
+        // A key is its requester's: another agent repeating it would act, and be audited, as someone it is not.
+        if (!earlier.getRequestedBy().equals(agentId)) {
+            throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
+                    + " belongs to a refund another agent asked for. Do not reuse it.");
+        }
         if (earlier.getStatus() != RefundRequest.Status.FAILED) {
             return earlier;
         }

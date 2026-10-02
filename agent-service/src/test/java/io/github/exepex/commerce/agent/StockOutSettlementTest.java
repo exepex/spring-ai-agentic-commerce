@@ -69,6 +69,16 @@ class StockOutSettlementTest {
     }
 
     @Test
+    void anOrderWhoseMoneyIsAllReturnedNeedsNoStockOutRefund() {
+        String refundedEarlier = "{\"status\": \"CANCELLED\", \"payment\": {\"status\": \"SUCCEEDED\", \"refundable\": 0}, "
+                + "\"refunds\": [" + refundOf("refund-" + ORDER + "-1", "EXECUTED") + "], \"notifications\": [{}]}";
+        assertThat(StockOutSettlement.isSettled(ORDER, List.of(call("get_order", refundedEarlier)))).isTrue();
+
+        String partlyRefunded = refundedEarlier.replace("\"refundable\": 0", "\"refundable\": 40.00");
+        assertThat(StockOutSettlement.isSettled(ORDER, List.of(call("get_order", partlyRefunded)))).isFalse();
+    }
+
+    @Test
     void aCustomerWhoWasNeverToldLeavesTheOrderUnsettled() {
         assertThat(StockOutSettlement.isSettled(ORDER, List.of(
                 lookup("CANCELLED", refundOf(STOCK_OUT_KEY, "EXECUTED"), 0)))).isFalse();

@@ -9,7 +9,8 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * Decides, from the tool calls that succeeded in a run, whether the agent dealt with a stock-out order. It did when it
  * handed the order to a person, or when the order is cancelled, the stock-out's own refund (key
- * {@code refund-<order id>-stockout}) is paid or waiting for approval, and the customer was notified. Each can have
+ * {@code refund-<order id>-stockout}) is paid or waiting for approval, or nothing is left to refund, and the customer
+ * was notified. Each can have
  * happened in this run or, for a replayed stock-out, an earlier one that {@code get_order} shows. Only calls made for
  * that order count, and the model's own summary is not trusted for this.
  */
@@ -40,10 +41,19 @@ final class StockOutSettlement {
                         && SETTLED_REFUNDS.contains(json(call).path("status").asString("")))
                 || lookups.stream().flatMap(order -> order.path("refunds").valueStream())
                         .anyMatch(refund -> refundKey.equals(refund.path("idempotencyKey").asString(""))
-                                && SETTLED_REFUNDS.contains(refund.path("status").asString("")));
+                                && SETTLED_REFUNDS.contains(refund.path("status").asString("")))
+                || lookups.stream().anyMatch(StockOutSettlement::fullyRefunded);
         boolean notified = calls.stream().anyMatch(call -> "notify_customer".equals(call.tool()))
                 || lookups.stream().anyMatch(order -> !order.path("notifications").isEmpty());
         return escalated || (cancelled && refunded && notified);
+    }
+
+    /** The payment was taken and all of it is already returned, for example after the customer cancelled earlier. */
+    private static boolean fullyRefunded(JsonNode order) {
+        JsonNode payment = order.path("payment");
+        return "SUCCEEDED".equals(payment.path("status").asString(""))
+                && payment.path("refundable").isNumber()
+                && payment.path("refundable").decimalValue().signum() == 0;
     }
 
     private static JsonNode json(ToolRun.ToolResult call) {
