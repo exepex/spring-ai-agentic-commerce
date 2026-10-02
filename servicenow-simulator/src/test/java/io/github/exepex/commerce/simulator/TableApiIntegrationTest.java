@@ -50,10 +50,15 @@ class TableApiIntegrationTest {
         String fresh = get("/api/now/table/incident?sysparm_query=assignment_group.name=Online Shop Agent"
                 + "^assigned_toISEMPTY^state=1&sysparm_display_value=all");
         patch(sysId, false, Map.of("assigned_to", agentUser, "state", "2", "work_notes", "Picked up."));
+        String claimedQuery = "/api/now/table/incident?sysparm_query=assignment_group.name=Online Shop Agent"
+                + "^assigned_to=" + agentUser + "^state=2&sysparm_display_value=all";
+        String claimed = get(claimedQuery);
         patch(sysId, true, Map.of("assignment_group", "Payments", "assigned_to", "", "work_notes", "Refund it."));
 
         assertThat(number).matches("INC\\d{7}");
         assertThat(JsonPath.<List<String>>read(fresh, "$.result[*].number.value")).contains(number);
+        assertThat(JsonPath.<List<String>>read(claimed, "$.result[*].number.value")).contains(number);
+        assertThat(JsonPath.<List<String>>read(get(claimedQuery), "$.result[*].number.value")).doesNotContain(number);
         String handed = get("/api/now/table/incident?sysparm_query=correlation_display=case-1&sysparm_display_value=all");
         assertThat(JsonPath.<String>read(handed, "$.result[0].assignment_group.display_value")).isEqualTo("Payments");
         assertThat(JsonPath.<String>read(handed, "$.result[0].state.display_value")).isEqualTo("In Progress");

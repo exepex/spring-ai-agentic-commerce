@@ -23,6 +23,9 @@ class IncidentScenarioEvals {
 
     private static final Duration AGENT_TIMEOUT = Duration.ofMinutes(6);
 
+    /** An incident in either state is finished; an instance may close a resolved incident at once. */
+    private static final Set<String> FINISHED_STATES = Set.of("Resolved", "Closed");
+
     private final Demo demo = new Demo();
     private final ServiceNow serviceNow = new ServiceNow();
 
@@ -71,12 +74,12 @@ class IncidentScenarioEvals {
         // A group that cannot be read is blank, not a hand-off: only a named group other than the agent's counts.
         await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(5)).until(() -> {
             String group = serviceNow.assignmentGroupOf(number);
-            return Set.of("Resolved", "Closed").contains(serviceNow.stateOf(number))
+            return FINISHED_STATES.contains(serviceNow.stateOf(number))
                     || !group.isBlank() && !serviceNow.agentGroup().equals(group);
         });
         List<JsonNode> refunds = demo.refundRequests(orderId);
         assertThat(refunds).hasSizeLessThanOrEqualTo(1);
-        if ("Resolved".equals(serviceNow.stateOf(number))) {
+        if (FINISHED_STATES.contains(serviceNow.stateOf(number))) {
             // The headlamp is below the refund approval limit, so the refund is paid at once.
             assertThat(refunds).singleElement().satisfies(refund ->
                     assertThat(refund.path("status").asString()).isEqualTo("EXECUTED"));
@@ -86,13 +89,17 @@ class IncidentScenarioEvals {
     }
 
     /**
-     * A new customer's headlamp order, handed to the carrier. Its unit leaves the stock when it ships, so one is put
-     * back at once: the suite runs again and again on the same database.
+     * A new customer's headlamp order, handed to the carrier. One unit is put back whether shipping works or not, so
+     * the available stock stays the same and the suite can run again and again on the same database: a shipped unit
+     * leaves the stock, and an order that did not ship keeps its unit reserved.
      */
     private String shippedHeadlampOrder() {
         String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
-        demo.ship(orderId);
-        demo.restock(Demo.HEADLAMP, 1);
+        try {
+            demo.ship(orderId);
+        } finally {
+            demo.restock(Demo.HEADLAMP, 1);
+        }
         return orderId;
     }
 }

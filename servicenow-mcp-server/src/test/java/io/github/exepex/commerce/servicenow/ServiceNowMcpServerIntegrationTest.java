@@ -159,6 +159,20 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void anIncidentAPersonMovedToAnotherGroupIsNoLongerTheAgentsEvenWhileStillAssignedToIt() {
+        stubIncident("INC0010001", "sys-1", "2", "Payments", AGENT_USER, "", Instant.now());
+
+        McpSchema.CallToolResult read = call("get_incident", Map.of("number", "INC0010001"));
+        McpSchema.CallToolResult resolve = call("resolve_incident", Map.of("number", "INC0010001", "resolution", "Done."));
+
+        assertThat(read.isError()).isTrue();
+        assertThat(text(read)).contains("not yours to change");
+        assertThat(resolve.isError()).isTrue();
+        assertThat(text(resolve)).contains("not yours to change");
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
+    }
+
+    @Test
     void handsAnIncidentToTheTeamByItsGroupAndRecordsIt() {
         stubIncident(AGENT_USER, "2");
 
@@ -484,7 +498,8 @@ class ServiceNowMcpServerIntegrationTest {
 
     private void stubClaimed(String rows) {
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
-                .withQueryParam("sysparm_query", equalTo("assigned_to=" + AGENT_USER + "^state=2"))
+                .withQueryParam("sysparm_query",
+                        equalTo("assignment_group.name=Online Shop Agent^assigned_to=" + AGENT_USER + "^state=2"))
                 .willReturn(okJson("{\"result\": " + rows + "}")));
     }
 

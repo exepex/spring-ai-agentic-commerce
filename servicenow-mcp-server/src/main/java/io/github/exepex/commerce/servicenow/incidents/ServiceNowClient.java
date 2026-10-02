@@ -106,9 +106,10 @@ class ServiceNowClient {
         return query("assignment_group.name=" + properties.agentGroup() + "^assigned_toISEMPTY^state=" + STATE_NEW, 20);
     }
 
-    /** Incidents the agent has claimed and not finished: still assigned to it and in progress. */
+    /** Incidents the agent has claimed and not finished: still in its group, assigned to it and in progress. */
     List<Incident> findClaimedByAgent() {
-        return query("assigned_to=" + integrationUserSysId() + "^state=" + STATE_IN_PROGRESS, 50);
+        return query("assignment_group.name=" + properties.agentGroup() + "^assigned_to=" + integrationUserSysId()
+                + "^state=" + STATE_IN_PROGRESS, 50);
     }
 
     /** The incident's latest work notes and comments, oldest first. */
