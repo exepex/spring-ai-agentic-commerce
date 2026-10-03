@@ -15,7 +15,8 @@ final class KafkaSerializers {
 
     @SuppressWarnings("unchecked")
     static Serializer<Object> valueSerializerOf(ProducerFactory<String, Object> producers) {
-        var supplied = producers.getValueSerializerSupplier().get();
+        var supplier = producers.getValueSerializerSupplier();
+        var supplied = supplier == null ? null : supplier.get();
         if (supplied != null) {
             return supplied;
         }
