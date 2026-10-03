@@ -8,6 +8,22 @@ assistant** that customers chat with, and an **incident agent** that works every
 lost parcel, as a ServiceNow incident, and hands it to the right team when it cannot finish it. Every action they take goes through MCP tools whose rules are **enforced in code**, and every step is
 **traceable and auditable** afterwards.
 
+## Contents
+
+- [See it in action](#see-it-in-action)
+- [The idea in one paragraph](#the-idea-in-one-paragraph)
+- [Architecture](#architecture)
+- [The workflows](#the-workflows)
+- [Get started](#get-started): prerequisites, first run, your first ten minutes
+- [Configuration](#configuration)
+- [ServiceNow incidents](#servicenow-incidents)
+- [Stop, restart and reset](#stop-restart-and-reset)
+- [Develop](#develop): run services from your IDE, project layout
+- [Tests](#tests) and the [scenario suite](#scenario-suite)
+- [Troubleshooting](#troubleshooting)
+- [Design decisions](#design-decisions)
+- [Stack](#stack)
+
 ## See it in action
 
 A customer orders a headlamp through the shopping assistant; operations writes off the damaged stock; the incident
@@ -159,22 +175,89 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    parcel *delivered*, *delivery failed* or *lost*; the order follows, and its timeline shows each step.
    `track_shipment` shows the agents where the parcel is and what went wrong.
 
-## Run it
+## Get started
 
-You need Docker, Java 21, Maven and Node 22.22+ (or 24).
+### Prerequisites
+
+| You need | Version | Why |
+|---|---|---|
+| Docker with Compose v2 (Docker Desktop, or Docker Engine with the compose plugin) | recent | Runs Postgres, Kafka, Jaeger, the seven services and the UI. Give Docker at least **8 GB of memory**: up to eight Spring Boot services and Kafka run at once. |
+| JDK | 21 | `start-demo.sh` builds the services with Maven on your machine before it builds the images. |
+| Maven | 3.9 or newer | Builds the services. |
+| Node.js and npm | Node 22.22 or newer, or 24 | `start-demo.sh` builds the Angular UI on your machine. |
+| An Anthropic API key | | For the agents (console.anthropic.com). Optional: without one everything else runs, and the incident agent hands every incident to a team. |
+
+Optional extras: a Stripe **test-mode** key (payments are simulated without one), a ServiceNow developer instance (the
+built-in simulator stands in for it), and a Slack bot token (the incident agent then also posts to a channel).
+
+Ports 8080 to 8088, 5432, 9092, 16686 and 4318 must be free.
+
+### First run
 
 ```bash
-cp .env.example .env        # add your Anthropic API key; Stripe and Slack are optional
-./start-demo.sh             # add --slack for Slack, --simulator to work the cases without a ServiceNow instance
+git clone https://github.com/exepex/spring-ai-agentic-commerce.git
+cd spring-ai-agentic-commerce
+cp .env.example .env              # then open .env and set AGENTIC_COMMERCE_ANTHROPIC_API_KEY
+./start-demo.sh --simulator       # builds everything and starts the demo with the ServiceNow simulator
 ```
 
-- Shop, orders and operations console: http://localhost:8080
-- Traces: http://localhost:16686
+`start-demo.sh` builds the services (`mvn package`), builds the UI (`npm ci` and `npm run build` in `shop-ui`) and
+starts everything with `docker compose up -d --build`. The first build downloads dependencies and images and takes a
+few minutes; later starts are much faster. When it finishes, give the services about a minute to start, then open:
 
-Without a Stripe key, payments are simulated with Stripe's test-card conventions. Without an Anthropic key, the
-services run but the incident agent hands every incident to a team.
+- **http://localhost:8080**: the shop, the customer's orders and the operations console;
+- **http://localhost:16686**: Jaeger, with the trace of every request and agent run.
 
-### ServiceNow incidents
+`docker compose ps` shows what is running; `docker compose logs -f agent-service` follows one service's log.
+
+Options: `--simulator` works the cases in the built-in ServiceNow stand-in (recommended for a first run; without it,
+and without a ServiceNow instance in `.env`, cases wait as *pending*); `--slack` also starts the Slack MCP server for
+the channel in `.env`. Both can be combined.
+
+### Your first ten minutes
+
+The UI has no login: pick a customer (`ada@example.com`, `grace@example.com` or `alan@example.com`) in the header.
+The shop sells five seeded products, from a €24.00 bottle to €129.90 trail shoes.
+
+1. **Order through chat.** On **Shop**, ask the shopping assistant: *"I need a headlamp for night hikes."* It
+   searches the catalog and proposes an order. Click **Confirm and pay**: the order is placed and paid (the test card
+   is accepted). **Orders** lists it; open it to see its timeline.
+2. **Cause a stock-out.** On **Operations**, under **Write off damaged stock**, write off enough headlamps that fewer
+   remain than are reserved. The catalog announces the stock-out and the shop opens a `STOCK_OUT` case; the **Cases**
+   card shows it go to ServiceNow and to the incident agent.
+3. **Watch the incident agent work.** Within about half a minute the agent claims the incident, cancels the order,
+   refunds it, tells the customer (see **Your inbox** on **Shop**) and resolves the incident. Open the order: its
+   **Timeline** shows every system, agent and human step, each linked to its trace in Jaeger.
+4. **Hit the refund limit.** Repeat with the €129.90 trail shoes: the refund is above the €100 limit, so it waits under
+   **Refunds waiting for approval** and the incident goes to the Payments team. Approve or reject it yourself.
+5. **Break things on purpose.** Under **Demo controls**, switch on the payment-service outage, or switch an agent off
+   under **Agents**, and repeat a stock-out: the agent retries with the same idempotency key and hands over, or the
+   incident goes straight to a team. Ask the assistant to cancel another customer's order: it is refused and recorded
+   as *denied* under **Activity**.
+
+The [workflows](#the-workflows) above describe each of these, and more, in detail.
+
+## Configuration
+
+Everything is set in `.env` (copied from `.env.example`); Docker Compose passes it to the services. Never commit
+`.env`.
+
+| Variable | Required | What it does |
+|---|---|---|
+| `AGENTIC_COMMERCE_ANTHROPIC_API_KEY` | for the agents | Claude API key. Without it the services run, but the agents cannot answer and incidents go to a team. |
+| `AGENTIC_COMMERCE_STRIPE_SECRET_KEY` | no | A Stripe test-mode key (`sk_test_...`). Without it, payments are simulated with Stripe's test-card conventions; a live key is refused. |
+| `AGENTIC_COMMERCE_SERVICENOW_INSTANCE_URL`, `_USERNAME`, `_PASSWORD` | no | The ServiceNow instance and integration user, see [ServiceNow incidents](#servicenow-incidents). `--simulator` overrides them. |
+| `AGENTIC_COMMERCE_SERVICENOW_AGENT_GROUP`, `_CUSTOMER_CARE_GROUP`, `_PAYMENTS_GROUP`, `_FULFILMENT_GROUP` | no | Assignment group names, if yours differ from `Online Shop Agent`, `Customer Care`, `Payments` and `Fulfilment`. |
+| `AGENTIC_COMMERCE_SLACK_BOT_TOKEN`, `AGENTIC_COMMERCE_SLACK_CHANNEL_ID` | no | Slack bot and channel for `--slack`; the scopes are listed in `.env.example`. |
+| `AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN`, `AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN` | yes (defaults in `.env.example`) | Each agent's bearer token, shared by agent-service and the MCP servers. Change them for anything beyond a local demo. |
+| `AGENTIC_COMMERCE_SLACK_MCP_API_KEY` | with `--slack` | The key agent-service presents to the Slack MCP server. |
+
+Behaviour that is not a secret lives in each service's `src/main/resources/application.yml`, for example the refund
+approval limit (`commerce.governance.refund-approval-threshold` in commerce-mcp-server) and the reconciliation
+intervals. Each agent's model, effort, tools, tool-call budget and prompt live in one file per agent, listed in
+[AGENTS.md](AGENTS.md#the-demos-agents).
+
+## ServiceNow incidents
 
 Every case is worked as a ServiceNow incident, so the incident agent needs a ServiceNow instance; a free developer
 instance (developer.servicenow.com) works. Without one, cases wait as *pending* in the operations console, unless the
@@ -193,10 +276,46 @@ The shop's own cases arrive in the `Online Shop Agent` group by themselves. To r
 incident in that group with the order's id in its Correlation ID field. Within half a minute the agent claims it. The agent may cancel, refund or notify the customer about that order only; an incident
 without one, or about another order, is investigated and handed to a team.
 
-For development, start only the infrastructure (`docker compose up -d postgres kafka jaeger`), run the services
-from your IDE or with `mvn spring-boot:run`, and the UI with `npm start` in `shop-ui`. To work ServiceNow incidents
-this way, also run servicenow-mcp-server and start agent-service with
-`AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8087`.
+## Stop, restart and reset
+
+```bash
+docker compose --profile simulator --profile slack stop      # stop everything, keep the data
+docker compose --profile simulator --profile slack start     # start it again
+docker compose --profile simulator --profile slack down -v   # remove the containers and wipe the database
+```
+
+Name the profiles you started with, so their services are included. After `down -v` the next start creates the
+databases again with the seeded products and stock. To rebuild after a code change, run `./start-demo.sh` again.
+
+## Develop
+
+For development, start only the infrastructure (`docker compose up -d postgres kafka jaeger`), run the services from
+your IDE or with `mvn spring-boot:run` in a service's folder, and the UI with `npm start` in `shop-ui`
+(http://localhost:4200). To work ServiceNow incidents this way, also run servicenow-mcp-server and start agent-service
+with `AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8087`.
+
+### Project layout
+
+| Folder | What is in it |
+|---|---|
+| `agent-definitions` | The two agents' definition files (model, effort, tools, budget, prompt) and the code that reads them. |
+| `agent-service` | Runs the agents with Spring AI: the chat endpoint, the incident listener, MCP connections and per-call guards. |
+| `commerce-mcp-server` | The commerce MCP tools and the governance API: permissions, limits, approvals, cases, audit trail, kill switches. |
+| `servicenow-mcp-server` | The ServiceNow MCP tools and the poller that keeps cases and incidents in step. |
+| `servicenow-simulator` | The in-memory ServiceNow stand-in used by `--simulator` and the scenario suite. |
+| `catalog-service`, `order-service`, `payment-service`, `shipping-service` | The shop's ordinary microservices. |
+| `agent-evals` | The scenario suite that runs the workflows against the whole demo with the real model. |
+| `shop-ui` | The Angular shop, orders and operations console. |
+| `docker`, `docker-compose.yml`, `start-demo.sh`, `run-scenarios.sh` | How the demo is built and started. |
+
+Inside a service, the code is organised the same way: the domain, its services, controllers and repositories in the
+service's package, and next to them
+
+- `constants`: every fixed text and name the service uses (API paths, configuration keys, error messages, the names
+  and codes of the systems it talks to), so they can be reviewed in one place;
+- `dto`: the records that go over the wire (request and response bodies, MCP tool parameters);
+- `exception`: one exception per thing that can go wrong (for example `PaymentNotFoundException`,
+  `RefundExceedsPaymentException`) and the `GlobalExceptionHandler` that turns them into RFC 9457 problem details.
 
 ## Tests
 
@@ -226,6 +345,19 @@ They call Claude, so they are skipped in a normal build; a run costs some model 
 running, use `mvn -pl agent-evals -Pevals test`. Point them at a UI run with `npm start` with
 `-Devals.baseUrl=http://localhost:4200/svc`, and at ServiceNow with `-Devals.servicenow.url`, `.username`,
 `.password` and `.agent-group` (by default the `AGENTIC_COMMERCE_SERVICENOW_*` variables, or the simulator).
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| `start-demo.sh` fails in `mvn package` | `java -version` must show 21 and `mvn -v` 3.9 or newer. |
+| `start-demo.sh` fails in `npm ci` | `node -v` must be 22.22 or newer, or 24. |
+| A container exits or restarts | `docker compose logs <service>`. Most often Docker has too little memory: give it 8 GB. A port already in use shows as a bind error. |
+| The shopping assistant does not answer | `AGENTIC_COMMERCE_ANTHROPIC_API_KEY` in `.env`, then restart with `./start-demo.sh`. `docker compose logs agent-service` shows the error. |
+| Cases stay *pending* | No ServiceNow is configured: start with `--simulator`, or set the instance in `.env`. |
+| Every payment fails with 503 | The simulated outage is on: switch it off under **Demo controls**. |
+| An incident went straight to a team | The incident agent is switched off under **Agents**, or it has no API key. |
+| `mvn verify` fails at Testcontainers | The integration tests need a running Docker daemon. |
 
 ## Design decisions
 
