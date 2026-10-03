@@ -6,8 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -20,14 +19,16 @@ import org.springframework.stereotype.Service;
  * The customer-facing agent: answers questions, finds products, proposes orders, and handles cancellations. It can
  * propose an order but never place one; only the customer's own "Confirm and pay" does that.
  */
+@Slf4j
 @Service
 public class ShoppingAssistant {
 
     public record Reply(String text, List<String> proposals) {}
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ShoppingAssistant.class);
     private static final int MAX_CONVERSATIONS = 1_000;
-
+    /** How much of each answer the audit trail shows. */
+    private static final int MAX_SUMMARY_LENGTH = 160;
+    private static final String TRY_AGAIN = "Sorry, I could not answer that just now. Please try again in a moment.";
 
     private final ChatClient chatClient;
     private final McpToolboxes toolboxes;
@@ -56,8 +57,8 @@ public class ShoppingAssistant {
         try {
             enabled = switchboard.isEnabled(AgentSwitchboard.SHOPPING_ASSISTANT);
         } catch (RuntimeException unreachable) {
-            LOGGER.error("Could not read the shopping assistant's kill switch", unreachable);
-            return new Reply("Sorry, I could not answer that just now. Please try again in a moment.", List.of());
+            log.error("Could not read the shopping assistant's kill switch", unreachable);
+            return new Reply(TRY_AGAIN, List.of());
         }
         if (!enabled) {
             return new Reply("The shopping assistant is switched off right now. Please try again later.", List.of());
@@ -75,16 +76,12 @@ public class ShoppingAssistant {
                     .chatResponse();
             String text = ClaudeReply.textOf(response);
             decisions.record(AgentSwitchboard.SHOPPING_ASSISTANT, null,
-                    "Answered " + customerEmail + ": " + abbreviate(text), "Customer asked: " + message, response,
-                    Duration.between(started, Instant.now()));
+                    "Answered " + customerEmail + ": " + AgentTexts.abbreviate(text, MAX_SUMMARY_LENGTH, "..."),
+                    "Customer asked: " + message, response, Duration.between(started, Instant.now()));
             return new Reply(text, run.proposals());
         } catch (RuntimeException failure) {
-            LOGGER.error("The shopping assistant failed to answer {}", customerEmail, failure);
-            return new Reply("Sorry, I could not answer that just now. Please try again in a moment.", run.proposals());
+            log.error("The shopping assistant failed to answer {}", LogValues.safe(customerEmail), failure);
+            return new Reply(TRY_AGAIN, run.proposals());
         }
-    }
-
-    private static String abbreviate(String text) {
-        return text == null || text.length() <= 160 ? text : text.substring(0, 157) + "...";
     }
 }

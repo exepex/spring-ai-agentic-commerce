@@ -3,8 +3,8 @@ package io.github.exepex.commerce.order;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
@@ -12,20 +12,14 @@ import org.springframework.stereotype.Component;
  * caller's transaction, {@link #attempt} tries it once the transaction has committed, and {@link #retryAll} retries
  * whatever is still recorded. Releasing is idempotent in the catalog, so trying again is always safe.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 class StockReleases {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(StockReleases.class);
 
     private final StockReleaseRepository releases;
     private final CatalogGateway catalog;
     private final Clock clock;
-
-    StockReleases(StockReleaseRepository releases, CatalogGateway catalog, Clock clock) {
-        this.releases = releases;
-        this.catalog = catalog;
-        this.clock = clock;
-    }
 
     /** Records that the order's stock must be released. Call it inside the transaction that makes it necessary. */
     void request(UUID orderId) {
@@ -38,7 +32,7 @@ class StockReleases {
             catalog.releaseOrderReservations(orderId);
             releases.deleteById(orderId);
         } catch (DependencyUnavailableException catalogDown) {
-            LOGGER.warn("Could not release the stock reserved for order {} yet; it will be retried", orderId);
+            log.warn("Could not release the stock reserved for order {} yet; it will be retried", orderId);
         }
     }
 

@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Optional;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -16,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * the request, where the MCP transport passes it to every tool call: the model cannot claim to be another agent.
  */
 @Component
+@RequiredArgsConstructor
 public class AgentAuthenticationFilter extends OncePerRequestFilter {
 
     public static final String AGENT_ID_ATTRIBUTE = "commerce.agentId";
@@ -23,10 +25,6 @@ public class AgentAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final AgentRegistry agents;
-
-    AgentAuthenticationFilter(AgentRegistry agents) {
-        this.agents = agents;
-    }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {

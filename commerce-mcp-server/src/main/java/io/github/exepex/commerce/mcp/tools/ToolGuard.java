@@ -10,6 +10,7 @@ import io.github.exepex.commerce.mcp.security.CallingAgent;
 import io.modelcontextprotocol.common.McpTransportContext;
 import java.util.UUID;
 import java.util.function.Function;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
  * switched-off agent can still hand work to a human, so nothing is left without someone handling it.
  */
 @Component
+@RequiredArgsConstructor
 class ToolGuard {
 
     static final String HAND_TO_HUMAN = "escalate_to_human";
@@ -26,12 +28,6 @@ class ToolGuard {
     private final AgentRegistry agents;
     private final AgentSwitches switches;
     private final AuditTrail audit;
-
-    ToolGuard(AgentRegistry agents, AgentSwitches switches, AuditTrail audit) {
-        this.agents = agents;
-        this.switches = switches;
-        this.audit = audit;
-    }
 
     /**
      * @param orderId the order the call is about, for the audit trail; {@code null} if none
@@ -80,21 +76,6 @@ class ToolGuard {
                 && (customerEmail == null || !customerEmail.equalsIgnoreCase(order.customerEmail()))) {
             throw new GovernanceException(HttpStatus.FORBIDDEN,
                     "Order " + order.id() + " does not belong to the customer in this conversation");
-        }
-    }
-
-    static String requireCustomer(String customerEmail) {
-        if (customerEmail == null || customerEmail.isBlank()) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "A customer email is required");
-        }
-        return customerEmail;
-    }
-
-    static UUID parseOrderId(String orderId) {
-        try {
-            return UUID.fromString(orderId);
-        } catch (IllegalArgumentException | NullPointerException notAUuid) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "'" + orderId + "' is not an order id");
         }
     }
 }

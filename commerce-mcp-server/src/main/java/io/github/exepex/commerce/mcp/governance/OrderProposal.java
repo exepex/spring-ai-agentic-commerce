@@ -9,6 +9,9 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /**
  * An order an agent put together for a customer. The agent cannot place it: only the customer's own confirmation in
@@ -16,6 +19,8 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "order_proposal")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class OrderProposal {
 
     public enum Status {
@@ -59,10 +64,6 @@ public class OrderProposal {
     @Column(name = "created_at")
     private Instant createdAt;
 
-    protected OrderProposal() {
-        // for JPA
-    }
-
     OrderProposal(String customerEmail, String lines, BigDecimal total, String currency, Instant createdAt) {
         this.id = UUID.randomUUID();
         this.customerEmail = customerEmail;
@@ -71,45 +72,5 @@ public class OrderProposal {
         this.currency = currency;
         this.status = Status.PROPOSED;
         this.createdAt = createdAt;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public String getCustomerEmail() {
-        return customerEmail;
-    }
-
-    public String getLines() {
-        return lines;
-    }
-
-    public BigDecimal getTotal() {
-        return total;
-    }
-
-    public String getCurrency() {
-        return currency;
-    }
-
-    public Status getStatus() {
-        return status;
-    }
-
-    public UUID getOrderId() {
-        return orderId;
-    }
-
-    public String getFailure() {
-        return failure;
-    }
-
-    public String getPaymentMethod() {
-        return paymentMethod;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
     }
 }

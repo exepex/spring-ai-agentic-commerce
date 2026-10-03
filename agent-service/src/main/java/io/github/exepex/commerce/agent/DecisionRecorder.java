@@ -3,27 +3,21 @@ package io.github.exepex.commerce.agent;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import java.time.Duration;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Component;
 
 /** Writes each agent decision to the audit trail, with the model and the tokens it used. */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 class DecisionRecorder {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(DecisionRecorder.class);
 
     private final GovernanceApi governance;
     private final AgentProperties properties;
     private final AgentDefinitions definitions;
-
-    DecisionRecorder(GovernanceApi governance, AgentProperties properties, AgentDefinitions definitions) {
-        this.governance = governance;
-        this.properties = properties;
-        this.definitions = definitions;
-    }
 
     void record(String agentId, UUID orderId, String summary, String reasoning, ChatResponse response, Duration took) {
         Usage usage = response == null ? null : response.getMetadata().getUsage();
@@ -35,7 +29,8 @@ class DecisionRecorder {
         try {
             governance.recordDecision("Bearer " + properties.agents().tokenOf(agentId), decision);
         } catch (RuntimeException unavailable) {
-            LOGGER.warn("Could not record {}'s decision in the audit trail: {}", agentId, summary, unavailable);
+            log.warn("Could not record {}'s decision in the audit trail: {}", LogValues.safe(agentId), LogValues.safe(summary),
+                    unavailable);
         }
     }
 }

@@ -10,10 +10,14 @@ import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /** A refund an agent asked for, and what became of it. */
 @Entity
 @Table(name = "refund_request")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RefundRequest {
 
     public enum Status {
@@ -28,56 +32,68 @@ public class RefundRequest {
     }
 
     @Id
+    @Getter
     private UUID id;
 
     @Version
     private Long version;
 
     @Column(name = "order_id")
+    @Getter
     private UUID orderId;
 
+    @Getter
     private BigDecimal amount;
 
+    @Getter
     private String currency;
 
+    @Getter
     private String reason;
 
     @Column(name = "idempotency_key")
+    @Getter
     private String idempotencyKey;
 
     @Column(name = "requested_by")
+    @Getter
     private String requestedBy;
 
     @Enumerated(EnumType.STRING)
+    @Getter
     private Status status;
 
     @Column(name = "provider_reference")
+    @Getter
     private String providerReference;
 
+    @Getter
     private String failure;
 
     /** The card processor failed the refund after accepting it; no later answer from the payment service undoes that. */
     @Column(name = "failed_at_processor")
+    @Getter
     private boolean failedAtProcessor;
 
     @Column(name = "decided_by")
+    @Getter
     private String decidedBy;
 
     @Column(name = "decided_at")
+    @Getter
     private Instant decidedAt;
 
     @Column(name = "decision_note")
+    @Getter
     private String decisionNote;
 
     @Column(name = "created_at")
+    @Getter
     private Instant createdAt;
 
     @Column(name = "updated_at")
+    @Getter
     private Instant updatedAt;
-
-    protected RefundRequest() {
-        // for JPA
-    }
 
     RefundRequest(UUID orderId, BigDecimal amount, String currency, String reason, String idempotencyKey,
             String requestedBy, Status status, Instant now) {
@@ -121,69 +137,5 @@ public class RefundRequest {
     void reject(String by, String note, Instant now) {
         recordDecision(by, note, now);
         status = Status.REJECTED;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getOrderId() {
-        return orderId;
-    }
-
-    public BigDecimal getAmount() {
-        return amount;
-    }
-
-    public String getCurrency() {
-        return currency;
-    }
-
-    public String getReason() {
-        return reason;
-    }
-
-    public String getIdempotencyKey() {
-        return idempotencyKey;
-    }
-
-    public String getRequestedBy() {
-        return requestedBy;
-    }
-
-    public Status getStatus() {
-        return status;
-    }
-
-    public String getProviderReference() {
-        return providerReference;
-    }
-
-    public String getFailure() {
-        return failure;
-    }
-
-    public boolean isFailedAtProcessor() {
-        return failedAtProcessor;
-    }
-
-    public String getDecidedBy() {
-        return decidedBy;
-    }
-
-    public Instant getDecidedAt() {
-        return decidedAt;
-    }
-
-    public String getDecisionNote() {
-        return decisionNote;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
     }
 }

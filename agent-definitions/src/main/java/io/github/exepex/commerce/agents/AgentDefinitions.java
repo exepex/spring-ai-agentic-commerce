@@ -7,6 +7,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.AccessLevel;
+import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.yaml.snakeyaml.Yaml;
@@ -16,15 +18,12 @@ import org.yaml.snakeyaml.Yaml;
  * lines (the settings) followed by the instructions in Markdown. A file that is missing a setting fails at startup,
  * so a broken definition never reaches a running agent.
  */
+@RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public final class AgentDefinitions {
 
     private static final String LOCATION = "classpath*:agents/*.md";
 
     private final Map<String, AgentDefinition> byId;
-
-    private AgentDefinitions(Map<String, AgentDefinition> byId) {
-        this.byId = byId;
-    }
 
     public static AgentDefinitions load() {
         Map<String, AgentDefinition> byId = new LinkedHashMap<>();

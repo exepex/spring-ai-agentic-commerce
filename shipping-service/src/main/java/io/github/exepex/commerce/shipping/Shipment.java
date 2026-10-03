@@ -8,12 +8,17 @@ import jakarta.persistence.Id;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /**
  * An order's parcel: prepared when the order is confirmed, handed to the carrier when the order ships, then delivered,
  * not delivered, or lost, as the carrier reports. A parcel that has not shipped yet is cancelled with its order.
  */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Shipment {
 
     enum Status {
@@ -64,10 +69,6 @@ public class Shipment {
     @Column(name = "delivery_problem")
     private String deliveryProblem;
 
-    protected Shipment() {
-        // for JPA
-    }
-
     Shipment(UUID orderId, String customerEmail, String trackingNumber, LocalDate estimatedDelivery, Instant createdAt) {
         this.id = UUID.randomUUID();
         this.orderId = orderId;
@@ -100,49 +101,5 @@ public class Shipment {
         } else {
             deliveryProblem = problem;
         }
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getOrderId() {
-        return orderId;
-    }
-
-    public String getCustomerEmail() {
-        return customerEmail;
-    }
-
-    public String getTrackingNumber() {
-        return trackingNumber;
-    }
-
-    public Status getStatus() {
-        return status;
-    }
-
-    public LocalDate getEstimatedDelivery() {
-        return estimatedDelivery;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getCancelledAt() {
-        return cancelledAt;
-    }
-
-    public Instant getShippedAt() {
-        return shippedAt;
-    }
-
-    public Instant getDeliveredAt() {
-        return deliveredAt;
-    }
-
-    public String getDeliveryProblem() {
-        return deliveryProblem;
     }
 }

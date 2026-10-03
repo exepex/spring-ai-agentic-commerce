@@ -13,15 +13,17 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
 
 /** Agents propose orders; customers confirm them. Only a confirmation places the order and charges the card. */
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class ProposalService {
 
     public record RequestedLine(String productId, int quantity) {}
@@ -31,7 +33,6 @@ public class ProposalService {
     public record Proposal(UUID id, String customerEmail, List<ProposedLine> lines, BigDecimal total, String currency,
             OrderProposal.Status status, UUID orderId, String failure, Instant createdAt) {}
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ProposalService.class);
     /** An order in these is still being placed or paid; in any other it was placed and paid first. */
     private static final Set<String> UNSETTLED_ORDER_STATUSES = Set.of("PLACED", "PAYMENT_PENDING");
 
@@ -41,16 +42,6 @@ public class ProposalService {
     private final AuditTrail audit;
     private final JsonMapper jsonMapper;
     private final Clock clock;
-
-    ProposalService(OrderProposalRepository proposals, CatalogApi catalog, OrderApi orders, AuditTrail audit,
-            JsonMapper jsonMapper, Clock clock) {
-        this.proposals = proposals;
-        this.catalog = catalog;
-        this.orders = orders;
-        this.audit = audit;
-        this.jsonMapper = jsonMapper;
-        this.clock = clock;
-    }
 
     /** Prices the lines from the catalog and checks stock now; stock is only reserved once the customer confirms. */
     public Proposal propose(String customerEmail, List<RequestedLine> requestedLines) {
@@ -73,11 +64,9 @@ public class ProposalService {
                 throw new GovernanceException(HttpStatus.CONFLICT, "Cannot order " + requested.quantity() + " of "
                         + product.name() + ": " + product.available() + " available.");
             }
-            return new ProposedLine(product.id(), product.sku(), product.name(), requested.quantity(), product.price());
+            return ProposalViews.toLine(product, requested.quantity());
         }).toList();
-        BigDecimal total = lines.stream()
-                .map(line -> line.unitPrice().multiply(BigDecimal.valueOf(line.quantity())))
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal total = ProposalViews.totalOf(lines);
         String currency = productsById.get(lines.getFirst().productId()).currency();
         OrderProposal proposal = proposals.save(new OrderProposal(customerEmail, jsonMapper.writeValueAsString(lines),
                 total, currency, Instant.now(clock)));
@@ -105,9 +94,7 @@ public class ProposalService {
      * confirmation records it in the audit trail.
      */
     void settle(OrderProposal proposal) {
-        List<OrderApi.RequestedLine> lines = linesOf(proposal).stream()
-                .map(line -> new OrderApi.RequestedLine(line.productId(), line.quantity()))
-                .toList();
+        List<OrderApi.RequestedLine> lines = ProposalViews.toOrderLines(linesOf(proposal));
         try {
             OrderApi.Order order = Downstream.call("order service", () -> orders.placeOrder(new OrderApi.PlaceOrderRequest(
                     proposal.getId(), proposal.getCustomerEmail(), lines, proposal.getPaymentMethod())));
@@ -121,7 +108,7 @@ public class ProposalService {
             }
         } catch (DownstreamException failure) {
             if (failure.isRetryable()) {
-                LOGGER.warn("The order for proposal {} is not settled yet; it will be asked for again", proposal.getId());
+                log.warn("The order for proposal {} is not settled yet; it will be asked for again", proposal.getId());
             } else if (proposals.settle(proposal.getId(), OrderProposal.Status.FAILED, null, failure.getMessage()) == 1) {
                 audit.record(failedOrderId(failure), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(),
                         "confirm_order", AuditEvent.Outcome.FAILED, "Order could not be placed: " + failure.getMessage(),
@@ -136,9 +123,7 @@ public class ProposalService {
     }
 
     private Proposal view(OrderProposal proposal) {
-        return new Proposal(proposal.getId(), proposal.getCustomerEmail(), linesOf(proposal), proposal.getTotal(),
-                proposal.getCurrency(), proposal.getStatus(), proposal.getOrderId(), proposal.getFailure(),
-                proposal.getCreatedAt());
+        return ProposalViews.toView(proposal, linesOf(proposal));
     }
 
     private List<ProposedLine> linesOf(OrderProposal proposal) {

@@ -2,21 +2,18 @@ package io.github.exepex.commerce.order;
 
 import io.github.exepex.commerce.order.CatalogHttpApi.CatalogProduct;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ProblemDetail;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 
 /** Calls the catalog and turns its HTTP failures into order-domain errors. */
 @Component
+@RequiredArgsConstructor
 class CatalogGateway {
 
     private final CatalogHttpApi catalog;
-
-    CatalogGateway(CatalogHttpApi catalog) {
-        this.catalog = catalog;
-    }
 
     CatalogProduct getProduct(UUID productId) {
         try {
@@ -57,10 +54,7 @@ class CatalogGateway {
         }
     }
 
-    private static String catalogDetail(HttpClientErrorException failure) {
-        ProblemDetail problem = failure.getResponseBodyAs(ProblemDetail.class);
-        return problem != null && problem.getDetail() != null
-                ? problem.getDetail()
-                : HttpStatus.CONFLICT.getReasonPhrase();
+    private static String catalogDetail(HttpClientErrorException.Conflict conflict) {
+        return RemoteProblems.detailOf(conflict, HttpStatus.CONFLICT.getReasonPhrase());
     }
 }

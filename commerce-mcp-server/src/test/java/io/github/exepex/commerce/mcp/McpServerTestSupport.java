@@ -49,7 +49,6 @@ abstract class McpServerTestSupport {
     @LocalServerPort
     protected int port;
 
-
     protected McpSyncClient assistant;
     protected McpSyncClient incidentAgent;
 
@@ -114,6 +113,10 @@ abstract class McpServerTestSupport {
 
     protected RestClient rest() {
         return RestClient.create("http://localhost:" + port);
+    }
+
+    protected String timeline(UUID orderId) {
+        return rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve().body(String.class);
     }
 
     protected static UUID stubOrder(String customerEmail, String total) {

@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code pm_card_refundFail} succeeds at first and is reported failed from the second time it is asked about. Every
  * other card succeeds.
  */
-class SimulatedPaymentGateway implements PaymentGateway {
+final class SimulatedPaymentGateway implements PaymentGateway {
 
     static final String DECLINED_CARD = "pm_card_chargeDeclined";
     static final String REFUND_FAILS_CARD = "pm_card_refundFail";

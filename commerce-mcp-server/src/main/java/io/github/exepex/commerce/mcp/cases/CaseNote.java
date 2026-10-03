@@ -6,10 +6,15 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /** Something added to a case after it was opened, sent to its incident as a work note. */
 @Entity
 @Table(name = "case_note")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class CaseNote {
 
     @Id
@@ -25,10 +30,6 @@ public class CaseNote {
 
     @Column(name = "sent_at")
     private Instant sentAt;
-
-    protected CaseNote() {
-        // for JPA
-    }
 
     CaseNote(UUID caseId, String text, Instant now) {
         this.id = UUID.randomUUID();
@@ -46,25 +47,5 @@ public class CaseNote {
         if (sentAt == null) {
             sentAt = now;
         }
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getCaseId() {
-        return caseId;
-    }
-
-    public String getText() {
-        return text;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getSentAt() {
-        return sentAt;
     }
 }

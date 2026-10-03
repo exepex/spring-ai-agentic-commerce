@@ -16,9 +16,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
+/** A customer's order, from checkout through payment to what the carrier reports. */
 @Entity
 @Table(name = "customer_order")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class CustomerOrder {
 
     @Id
@@ -48,18 +54,16 @@ public class CustomerOrder {
     private String paymentFailure;
 
     @Column(name = "payment_method")
+    @Getter(AccessLevel.PACKAGE)
     private String paymentMethod;
 
     @Version
+    @Getter(AccessLevel.NONE)
     private Long version;
 
     @OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
     @JoinColumn(name = "order_id", nullable = false)
     private List<OrderLine> lines = new ArrayList<>();
-
-    protected CustomerOrder() {
-        // for JPA
-    }
 
     private CustomerOrder(UUID id, String customerEmail, String currency, List<OrderLine> lines, String paymentMethod,
             Instant createdAt) {
@@ -105,8 +109,15 @@ public class CustomerOrder {
     }
 
     boolean hasShipped() {
-        return status == OrderStatus.SHIPPED || status == OrderStatus.DELIVERED
-                || status == OrderStatus.DELIVERY_FAILED || status == OrderStatus.LOST;
+        return switch (status) {
+            case SHIPPED, DELIVERED, DELIVERY_FAILED, LOST -> true;
+            case PLACED, PAYMENT_PENDING, CONFIRMED, PAYMENT_FAILED, CANCELLED -> false;
+        };
+    }
+
+    /** An order id belongs to the customer who placed it; email addresses are compared ignoring case. */
+    boolean isPlacedBy(String otherCustomerEmail) {
+        return customerEmail.equalsIgnoreCase(otherCustomerEmail);
     }
 
     void ship() {
@@ -124,46 +135,7 @@ public class CustomerOrder {
         cancelledAt = now;
     }
 
-    String getPaymentMethod() {
-        return paymentMethod;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public String getCustomerEmail() {
-        return customerEmail;
-    }
-
-    public OrderStatus getStatus() {
-        return status;
-    }
-
-    public BigDecimal getTotalAmount() {
-        return totalAmount;
-    }
-
-    public String getCurrency() {
-        return currency;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getCancelledAt() {
-        return cancelledAt;
-    }
-
-    public String getCancellationReason() {
-        return cancellationReason;
-    }
-
-    public String getPaymentFailure() {
-        return paymentFailure;
-    }
-
+    /** A copy: an order's lines are fixed once it is placed. */
     public List<OrderLine> getLines() {
         return List.copyOf(lines);
     }

@@ -14,8 +14,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
-import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -114,10 +114,7 @@ public class RefundService {
         NewRequest decided = transaction.execute(status -> {
             // One new refund per order at a time, so two at once cannot each miss the other's amount and stay under
             // the approval limit together.
-            jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:orderId, 0))")
-                    .param("orderId", orderId.toString())
-                    .query((row, number) -> number)
-                    .single();
+            AdvisoryLocks.lock(jdbc, orderId.toString(), 0);
             // The same refund may have arrived at the same moment and got the lock first.
             Optional<RefundRequest> sameKey = requests.findByIdempotencyKey(idempotencyKey);
             if (sameKey.isPresent()) {
@@ -302,6 +299,7 @@ public class RefundService {
             }
         }
     }
+
     private RefundRequest find(UUID requestId) {
         return requests.findById(requestId)
                 .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Refund request " + requestId + " does not exist"));

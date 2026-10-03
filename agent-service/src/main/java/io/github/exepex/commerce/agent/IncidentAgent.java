@@ -8,27 +8,24 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
-import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Works ServiceNow incidents first: gathers the facts from the shop, fixes what it may, and resolves the incident or
  * hands it to the team whose work it is. When it is switched off, fails, or finishes without doing either, code hands
  * the incident to the default team, so every incident ends with an owner.
  */
+@Slf4j
 @Service
 public class IncidentAgent {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(IncidentAgent.class);
-    private static final JsonMapper JSON = JsonMapper.builder().build();
     /** How the ServiceNow MCP server marks a call its rules refuse, which asking again will not change. */
     private static final String REFUSED = "Refused: ";
-    /** The longest note the ServiceNow MCP server accepts. */
+    /** The longest note the ServiceNow MCP server accepts; a longer hand-off note is cut to fit. */
     private static final int MAX_NOTE_LENGTH = 4000;
 
     private final ChatClient chatClient;
@@ -81,7 +78,7 @@ public class IncidentAgent {
                     .call()
                     .chatResponse();
         } catch (RuntimeException failure) {
-            LOGGER.error("The incident agent failed on incident {}", number, failure);
+            log.error("The incident agent failed on incident {}", number, failure);
             handToTeam(number, "The incident agent failed while working this incident (" + failure.getMessage()
                     + "). Check its earlier work notes, then finish it.");
             return;
@@ -116,10 +113,10 @@ public class IncidentAgent {
             if (Boolean.TRUE.equals(incident.isError())) {
                 return false;
             }
-            UUID linked = orderOf(JSON.readTree(textOf(incident)).path("linkedOrderId").asString(""));
+            UUID linked = orderOf(ToolJson.textField(McpResults.textOf(incident), "linkedOrderId"));
             return linked != null && linked.equals(orderOf(orderId));
         } catch (RuntimeException unavailable) {
-            LOGGER.warn("Could not check that incident {} is still the agent's and about order {}", number, orderId,
+            log.warn("Could not check that incident {} is still the agent's and about order {}", number, orderId,
                     unavailable);
             return false;
         }
@@ -129,7 +126,7 @@ public class IncidentAgent {
     static boolean isFinished(String number, ToolRun run) {
         return run.succeeded().stream()
                 .filter(call -> "resolve_incident".equals(call.tool()) || "assign_to_team".equals(call.tool()))
-                .anyMatch(call -> number.equals(JSON.readTree(call.arguments()).path("number").asString("")));
+                .anyMatch(call -> number.equals(ToolJson.textField(call.arguments(), "number")));
     }
 
     /**
@@ -140,33 +137,21 @@ public class IncidentAgent {
     private void handToTeam(String number, String note) {
         McpSchema.CallToolResult result;
         try {
-            result = toolboxes.callAsIncidentAgent("assign_to_team", Map.of("number", number, "note", abbreviate(note)));
+            result = toolboxes.callAsIncidentAgent("assign_to_team",
+                    Map.of("number", number, "note", AgentTexts.abbreviate(note, MAX_NOTE_LENGTH, "…")));
         } catch (RuntimeException unavailable) {
             throw new HandOffFailedException("Could not hand incident " + number + " to a team: " + note, unavailable);
         }
         if (Boolean.TRUE.equals(result.isError())) {
-            String message = textOf(result);
+            String message = McpResults.textOf(result);
             if (message.startsWith(REFUSED)) {
                 // Usually a person took the incident meanwhile. Whatever the reason, an incident the agent still owns
                 // goes to the default team once its claim is stale, so it is never left without an owner.
-                LOGGER.warn("Incident {} was not handed to a team: {}", number, message);
+                log.warn("Incident {} was not handed to a team: {}", LogValues.safe(number), LogValues.safe(message));
                 return;
             }
             throw new HandOffFailedException("ServiceNow did not take the hand-off of incident " + number + ": " + message,
                     null);
         }
-    }
-
-    /** A hand-off note fits ServiceNow's limit, however long the agent's summary was. */
-    private static String abbreviate(String note) {
-        return note.length() <= MAX_NOTE_LENGTH ? note : note.substring(0, MAX_NOTE_LENGTH - 1) + "…";
-    }
-
-    private static String textOf(McpSchema.CallToolResult result) {
-        return result.content().stream()
-                .filter(McpSchema.TextContent.class::isInstance)
-                .map(content -> ((McpSchema.TextContent) content).text())
-                .findFirst()
-                .orElse("");
     }
 }

@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
  * login in this demo; in production it would sit behind the organisation's identity provider.
  */
 @RestController
+@RequiredArgsConstructor
 class GovernanceController {
 
     record Decision(@NotBlank String by, String note) {}
@@ -47,15 +49,6 @@ class GovernanceController {
     private final ProposalService proposals;
     private final NotificationService notifications;
     private final AgentSwitches switches;
-
-    GovernanceController(AuditTrail audit, RefundService refunds, ProposalService proposals,
-            NotificationService notifications, AgentSwitches switches) {
-        this.audit = audit;
-        this.refunds = refunds;
-        this.proposals = proposals;
-        this.notifications = notifications;
-        this.switches = switches;
-    }
 
     @GetMapping("/api/orders/{orderId}/timeline")
     List<AuditEvent> timeline(@PathVariable UUID orderId) {

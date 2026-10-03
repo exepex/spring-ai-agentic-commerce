@@ -1,14 +1,13 @@
 package io.github.exepex.commerce.payment;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+/** Charges through Stripe when a test-mode key is configured, and through the simulator otherwise. */
+@Slf4j
 @Configuration(proxyBeanMethods = false)
 class PaymentGatewayConfiguration {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(PaymentGatewayConfiguration.class);
 
     @Bean
     PaymentGateway paymentGateway(PaymentProperties properties) {
@@ -16,10 +15,10 @@ class PaymentGatewayConfiguration {
             if (!properties.stripeSecretKey().startsWith("sk_test_")) {
                 throw new IllegalStateException("This demo only accepts a Stripe test-mode key (sk_test_...)");
             }
-            LOGGER.info("Payments go to Stripe");
+            log.info("Payments go to Stripe");
             return new StripePaymentGateway(properties.stripeSecretKey());
         }
-        LOGGER.info("No Stripe key configured: payments are simulated");
+        log.info("No Stripe key configured: payments are simulated");
         return new SimulatedPaymentGateway();
     }
 }
