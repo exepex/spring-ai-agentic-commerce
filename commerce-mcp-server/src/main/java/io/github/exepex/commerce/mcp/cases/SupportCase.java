@@ -63,6 +63,17 @@ public class SupportCase {
     @Column(name = "for_people")
     private boolean forPeople;
 
+    /** Its incident is closed or cancelled, so it can no longer be reopened and is not read back any more. */
+    @Column(name = "incident_final")
+    private boolean incidentFinal;
+
+    /**
+     * Its incident was reopened while the order already had a newer open case of the same problem: it is open, but that
+     * newer case stays the one a problem raised again goes to.
+     */
+    @Column(name = "reopened_beside_open_case")
+    private boolean reopenedBesideOpenCase;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -132,15 +143,31 @@ public class SupportCase {
         return true;
     }
 
-    /** Takes over who has the incident now. Returns whether anything changed. */
-    boolean followIncident(Status incidentStatus, String group, Instant now) {
+    /**
+     * Takes over who has the incident now, and whether it is final: closed or cancelled rather than only resolved.
+     *
+     * @param besideOpenCase whether the order has another open case of the same problem, should the incident have been
+     *     reopened
+     * @return whether who has the incident changed
+     */
+    boolean followIncident(Status incidentStatus, String group, boolean finalState, boolean besideOpenCase,
+            Instant now) {
+        incidentFinal = incidentStatus == Status.RESOLVED && finalState;
         if (incidentStatus == status && Objects.equals(group, assignmentGroup)) {
             return false;
+        }
+        if (status == Status.RESOLVED) {
+            reopenedBesideOpenCase = besideOpenCase;
         }
         status = incidentStatus;
         assignmentGroup = group;
         updatedAt = now;
         return true;
+    }
+
+    /** Becomes the order's open case of its problem, the one a problem raised again goes to. */
+    void becomeTheOpenCase() {
+        reopenedBesideOpenCase = false;
     }
 
     public UUID getId() {

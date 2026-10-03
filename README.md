@@ -122,10 +122,12 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    group, is recorded as a `SERVICE_DESK` case of that order. An order has at most one open case of each kind except
    `SERVICE_DESK`; the same problem raised again adds a work note to its incident. The incident agent works each case
    the shop opens first; a failed delivery goes to Fulfilment and a failed refund to Payments. The console's
-   **Cases** card shows who has each incident now. While a team or a person has one of an order's incidents, agents
-   leave the order's money to them: their refunds are refused. While any case of an order is open, the shopping
-   assistant may not refund it either, and the incident agent refunds only for the incident it is working, while the
-   order's other cases have not reached ServiceNow yet.
+   **Cases** card shows who has each incident now. An incident reopened after it was resolved opens its case again;
+   if a newer case of the same kind is open by then, both are open, and the newer one still takes the problem raised
+   again. While a team or a person has one of an order's incidents, agents leave the order's money to them: their
+   refunds are refused. While any case of an order is open, the shopping assistant may not refund it either, and the
+   incident agent refunds only for the incident it is working, while the order's other cases have not reached
+   ServiceNow yet.
 8. **Incident from the service desk.** The service desk raises an incident in the agent's assignment group, for
    example "Order arrived broken, the customer wants their money back", with the order's id in the incident's
    Correlation ID field. The shop records it as a `SERVICE_DESK` case of the order (see workflow 7). The incident

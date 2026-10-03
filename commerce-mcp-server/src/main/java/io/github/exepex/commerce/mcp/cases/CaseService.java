@@ -105,8 +105,14 @@ public class CaseService {
         if (orderId != null) {
             // Two raises of the same problem at once must not each miss the other's case.
             lockProblem(orderId, type);
-            Optional<SupportCase> open = cases.findByOrderIdAndTypeAndStatusNot(orderId, type,
-                    SupportCase.Status.RESOLVED);
+            Optional<SupportCase> open = cases.findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(orderId,
+                    type, SupportCase.Status.RESOLVED);
+            if (open.isEmpty()) {
+                // The case a reopened one stood beside is resolved: the reopened one takes the problem over.
+                open = cases.findFirstByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseTrueOrderByCreatedAtDesc(
+                        orderId, type, SupportCase.Status.RESOLVED);
+                open.ifPresent(SupportCase::becomeTheOpenCase);
+            }
             if (open.isPresent()) {
                 notes.save(new CaseNote(open.get().getId(), text, now));
                 audit.record(orderId, raisedByType, raisedBy, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
@@ -231,9 +237,14 @@ public class CaseService {
                 .markSent(Instant.now(clock));
     }
 
-    /** Cases whose incident is in ServiceNow and not resolved: the poller reads who has each one now. */
+    /**
+     * Cases whose incident the poller reads back: those whose incident is open in ServiceNow, and those whose incident
+     * is resolved but may still be reopened, until ServiceNow closes or cancels it.
+     */
     public List<SupportCase> inServiceNow() {
-        return cases.findByStatusInOrderByCreatedAt(IN_SERVICENOW);
+        List<SupportCase> inServiceNow = new ArrayList<>(cases.findByStatusInOrderByCreatedAt(IN_SERVICENOW));
+        inServiceNow.addAll(cases.findByStatusAndIncidentFinalFalseOrderByCreatedAt(SupportCase.Status.RESOLVED));
+        return inServiceNow;
     }
 
     /**
@@ -244,9 +255,16 @@ public class CaseService {
      * <p>Notes that had not reached the incident when it was resolved would never be read there, so they go to a new
      * case of the same problem. This holds the same lock as raising the problem, so a raise either lands before the
      * resolution, and is carried over, or after it, and opens the new case.
+     *
+     * <p>An incident reopened after it was resolved opens its case again, so agents leave the order's money to whoever
+     * has it. When the order has a newer open case of the same problem by then, both are open, and the newer one stays
+     * the case a problem raised again goes to.
+     *
+     * @param incidentFinal whether a resolved incident is closed or cancelled, so it can no longer be reopened
      */
     @Transactional
-    public SupportCase followIncident(UUID caseId, String number, SupportCase.Status status, String assignmentGroup) {
+    public SupportCase followIncident(UUID caseId, String number, SupportCase.Status status, String assignmentGroup,
+            boolean incidentFinal) {
         if (status == SupportCase.Status.PENDING) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "An incident in ServiceNow is not pending");
         }
@@ -258,21 +276,39 @@ public class CaseService {
         if (supportCase.getOrderId() != null) {
             lockProblem(supportCase.getOrderId(), supportCase.getType());
         }
-        if (supportCase.followIncident(status, assignmentGroup, Instant.now(clock))) {
-            String incident = supportCase.getIncidentNumber();
+        boolean reopened = supportCase.getStatus() == SupportCase.Status.RESOLVED
+                && status != SupportCase.Status.RESOLVED;
+        // Looked up before the case changes, so that it does not find itself.
+        Optional<SupportCase> open = reopened ? openCaseOfTheSameProblem(supportCase) : Optional.empty();
+        if (supportCase.followIncident(status, assignmentGroup, incidentFinal, open.isPresent(), Instant.now(clock))) {
+            String incident = supportCase.getIncidentNumber() + (reopened ? " was reopened and" : "");
             String summary = switch (status) {
                 case WITH_AGENT -> incident + " is with the incident agent";
                 case WITH_TEAM -> incident + " is assigned to " + assignmentGroup;
                 case RESOLVED -> incident + " is resolved";
                 case PENDING -> throw new IllegalStateException();
             };
+            String details = open.map(other -> "The order's open " + other.getType() + " case" + incidentOf(other)
+                    + " still takes what is raised again.").orElse(null);
             audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                    AuditEvent.Outcome.SUCCEEDED, summary, null);
+                    AuditEvent.Outcome.SUCCEEDED, summary, details);
             if (status == SupportCase.Status.RESOLVED) {
                 carryOverUnsentNotes(supportCase);
             }
         }
         return supportCase;
+    }
+
+    /**
+     * The order's open case of the same problem, the one a problem raised again goes to, if it has one; a service-desk
+     * case shares its problem with none.
+     */
+    private Optional<SupportCase> openCaseOfTheSameProblem(SupportCase supportCase) {
+        if (supportCase.getOrderId() == null || supportCase.getType() == CaseType.SERVICE_DESK) {
+            return Optional.empty();
+        }
+        return cases.findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(supportCase.getOrderId(),
+                supportCase.getType(), SupportCase.Status.RESOLVED);
     }
 
     /**
