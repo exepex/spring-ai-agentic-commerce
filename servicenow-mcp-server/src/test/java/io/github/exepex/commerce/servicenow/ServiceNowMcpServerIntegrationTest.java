@@ -298,11 +298,13 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
-    void anIncidentTheServiceDeskGaveATeamIsRecordedAsTheTeamsAndOneNamingNoOrderIsLeftOut() {
-        String withPayments = incidentRow("INC0010021", "sys-21", "2", "Payments", "", "", Instant.now());
+    void anIncidentTheServiceDeskGaveATeamIsRecordedAsTheTeamsAndOneNamingNoOrderOrACaseIsLeftOut() {
+        String withPayments = incidentRow("INC0010021", "sys-21", "2", "Payments", "", "Raised by the CRM", Instant.now());
         String noOrder = incidentRow("INC0010022", "sys-22", "2", "Payments", "", "", Instant.now())
                 .replace(LINKED_ORDER, "the blue one");
-        stubServiceDeskIncidents("[" + withPayments + ", " + noOrder + "]");
+        String shopCase = incidentRow("INC0010024", "sys-24", "2", "Payments", "", UUID.randomUUID().toString(),
+                Instant.now());
+        stubServiceDeskIncidents("[" + withPayments + ", " + noOrder + ", " + shopCase + "]");
         stubNewIncidents("[]");
         stubClaimed("[]");
 
@@ -705,8 +707,7 @@ class ServiceNowMcpServerIntegrationTest {
 
     private void stubServiceDeskIncidents(String offset, String rows) {
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
-                .withQueryParam("sysparm_query", equalTo("correlation_idISNOTEMPTY^correlation_displayISEMPTY"
-                        + "^stateNOT IN6,7,8^ORDERBYsys_created_on"))
+                .withQueryParam("sysparm_query", equalTo("correlation_idISNOTEMPTY^stateNOT IN6,7,8^ORDERBYsys_created_on"))
                 .withQueryParam("sysparm_offset", equalTo(offset))
                 .willReturn(okJson("{\"result\": " + rows + "}")));
     }

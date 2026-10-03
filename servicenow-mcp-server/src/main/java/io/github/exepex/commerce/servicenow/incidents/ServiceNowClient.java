@@ -38,7 +38,7 @@ class ServiceNowClient {
      * long-lived incident's history cannot flood the agent.
      */
     private static final int MAX_JOURNAL_LENGTH = 20_000;
-    private static final int SERVICE_DESK_PAGE_SIZE = 100;
+    private static final int PAGE_SIZE = 100;
 
     private final ServiceNowProperties properties;
     private final RestClient restClient;
@@ -115,18 +115,18 @@ class ServiceNowClient {
     }
 
     /**
-     * Open incidents about an order that the shop did not open, so the service desk raised them: they name an order in
-     * their Correlation ID and no case in their Correlation display. All of them, read a page at a time, oldest first.
+     * Open incidents that name something in their Correlation ID, such as an order: the shop's own and the service
+     * desk's. All of them, read a page at a time, oldest first.
      */
-    List<Incident> findOpenServiceDeskIncidents() {
-        String openServiceDeskIncidents = "correlation_idISNOTEMPTY^correlation_displayISEMPTY^stateNOT IN"
+    List<Incident> findOpenWithCorrelationId() {
+        String openWithCorrelationId = "correlation_idISNOTEMPTY^stateNOT IN"
                 + String.join(",", new TreeSet<>(STATES_FINISHED)) + "^ORDERBYsys_created_on";
         List<Incident> all = new ArrayList<>();
         List<Incident> page;
         do {
-            page = query(openServiceDeskIncidents, SERVICE_DESK_PAGE_SIZE, all.size());
+            page = query(openWithCorrelationId, PAGE_SIZE, all.size());
             all.addAll(page);
-        } while (page.size() == SERVICE_DESK_PAGE_SIZE);
+        } while (page.size() == PAGE_SIZE);
         return all;
     }
 

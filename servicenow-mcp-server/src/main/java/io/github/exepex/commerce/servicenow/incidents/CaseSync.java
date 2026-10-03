@@ -103,13 +103,14 @@ class CaseSync {
 
     /**
      * Records each open incident the service desk raised about an order with the shop, which ignores one it already
-     * has. An incident whose Correlation ID is not an order id names no order and is left out. An incident that cannot
-     * be recorded is tried next poll.
+     * has. An incident whose Correlation display names a case is the shop's own and is left out; any other text there,
+     * such as another system's label, does not make it the shop's. An incident whose Correlation ID is not an order id
+     * names no order and is left out too. An incident that cannot be recorded is tried next poll.
      */
     void recordServiceDeskIncidents() {
-        for (ServiceNowClient.Incident incident : serviceNow.findOpenServiceDeskIncidents()) {
+        for (ServiceNowClient.Incident incident : serviceNow.findOpenWithCorrelationId()) {
             UUID orderId = uuidOrNull(incident.orderId());
-            if (orderId == null) {
+            if (orderId == null || caseIdOf(incident) != null) {
                 continue;
             }
             try {
