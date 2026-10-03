@@ -262,11 +262,16 @@ public class CaseService {
      * then, the reopened case stays resolved, and the open case gets a note that the earlier incident is being worked
      * again, so whoever works it leaves the money to the people on that incident.
      *
+     * <p>A service-desk incident that names no order any more, because the service desk cleared or changed its
+     * Correlation ID, is not about the case's order: the case is resolved, so the order's money is free again. It stays
+     * so until the incident names an order again, which the poller records like a new one.
+     *
      * @param incidentFinal whether a resolved incident is closed or cancelled, so it can no longer be reopened
+     * @param incidentOrderId the order the incident names now, if any
      */
     @Transactional
     public SupportCase followIncident(UUID caseId, String number, SupportCase.Status status, String assignmentGroup,
-            boolean incidentFinal) {
+            boolean incidentFinal, UUID incidentOrderId) {
         if (status == SupportCase.Status.PENDING) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "An incident in ServiceNow is not pending");
         }
@@ -279,6 +284,15 @@ public class CaseService {
             lockProblem(supportCase.getOrderId(), supportCase.getType());
         }
         Instant now = Instant.now(clock);
+        if (supportCase.getType() == CaseType.SERVICE_DESK && incidentOrderId == null) {
+            if (supportCase.getStatus() != SupportCase.Status.RESOLVED
+                    && supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, now)) {
+                audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
+                        AuditEvent.Outcome.SUCCEEDED, number + " no longer names this order, so its case is closed and "
+                                + "agents may handle the order's money again", null);
+            }
+            return supportCase;
+        }
         boolean reopened = supportCase.getStatus() == SupportCase.Status.RESOLVED
                 && status != SupportCase.Status.RESOLVED;
         if (reopened) {

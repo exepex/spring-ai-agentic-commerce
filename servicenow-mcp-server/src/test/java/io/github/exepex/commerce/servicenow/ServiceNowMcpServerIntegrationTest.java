@@ -601,7 +601,30 @@ class ServiceNowMcpServerIntegrationTest {
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/incident-state"))
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010034", "status": "WITH_TEAM", "assignmentGroup": "Payments",
-                         "incidentFinal": false}""")));
+                         "incidentFinal": false,
+                         "orderId": "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c"}""")));
+    }
+
+    @Test
+    void readsBackAnIncidentThatNamesNoOrderAnyMoreWithoutAnOrder() {
+        String caseId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okCases("""
+                [{"id": "%s", "type": "SERVICE_DESK", "status": "WITH_TEAM", "incidentNumber": "INC0010035"}]"""
+                .formatted(caseId))));
+        String cleared = incidentRow("INC0010035", "sys-35", "2", "Payments", "", "", Instant.now())
+                .replace(LINKED_ORDER, "");
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-35"))
+                .willReturn(okJson("{\"result\": [" + cleared + "]}")));
+
+        poller.poll();
+
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/incident-state"))
+                .withRequestBody(equalToJson("""
+                        {"number": "INC0010035", "status": "WITH_TEAM", "assignmentGroup": "Payments",
+                         "incidentFinal": false, "orderId": null}""")));
     }
 
     @Test
@@ -629,22 +652,26 @@ class ServiceNowMcpServerIntegrationTest {
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + withAgent + "/incident-state"))
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010011", "status": "WITH_AGENT", "assignmentGroup": "Online Shop Agent",
-                         "incidentFinal": false}""")));
+                         "incidentFinal": false,
+                         "orderId": "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c"}""")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + withTeam + "/incident-state"))
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010012", "status": "WITH_TEAM", "assignmentGroup": "Payments",
-                         "incidentFinal": false}""")));
+                         "incidentFinal": false,
+                         "orderId": "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c"}""")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + resolved + "/incident-state"))
                 .withRequestBody(matchingJsonPath("$.status", equalTo("RESOLVED")))
                 .withRequestBody(matchingJsonPath("$.incidentFinal", equalTo("true"))));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + takenByAPerson + "/incident-state"))
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010014", "status": "WITH_TEAM",
-                         "assignmentGroup": "Online Shop Agent (Incident Agent)", "incidentFinal": false}""")));
+                         "assignmentGroup": "Online Shop Agent (Incident Agent)", "incidentFinal": false,
+                         "orderId": "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c"}""")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + onHold + "/incident-state"))
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010016", "status": "WITH_TEAM", "assignmentGroup": "Online Shop Agent (On Hold)",
-                         "incidentFinal": false}""")));
+                         "incidentFinal": false,
+                         "orderId": "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c"}""")));
     }
 
     @Test
@@ -781,7 +808,8 @@ class ServiceNowMcpServerIntegrationTest {
                 .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010001", "status": "WITH_TEAM", "assignmentGroup": "Fulfilment",
-                         "incidentFinal": false}""")));
+                         "incidentFinal": false,
+                         "orderId": "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c"}""")));
     }
 
     private void stubJournal(String body) {

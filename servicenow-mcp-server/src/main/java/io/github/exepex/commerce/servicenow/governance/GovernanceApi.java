@@ -40,9 +40,10 @@ public interface GovernanceApi {
 
     /**
      * Who has the case's incident now; {@code status} is WITH_AGENT, WITH_TEAM or RESOLVED. {@code incidentFinal} means
-     * a resolved incident is closed or cancelled, so it can no longer be reopened.
+     * a resolved incident is closed or cancelled, so it can no longer be reopened. {@code orderId} is the order the
+     * incident names now, in its Correlation ID; null when it names none.
      */
-    record IncidentState(String number, String status, String assignmentGroup, boolean incidentFinal) {}
+    record IncidentState(String number, String status, String assignmentGroup, boolean incidentFinal, UUID orderId) {}
 
     /** An incident the service desk raised about an order, and who has it; {@code status} is WITH_AGENT or WITH_TEAM. */
     record ServiceDeskIncident(UUID orderId, String number, String url, String shortDescription, String status,
