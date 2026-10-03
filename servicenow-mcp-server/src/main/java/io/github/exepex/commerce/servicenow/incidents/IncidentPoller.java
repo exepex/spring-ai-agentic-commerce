@@ -5,8 +5,10 @@ import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -22,7 +24,9 @@ import org.springframework.stereotype.Component;
  * Feeds ServiceNow incidents to the incident agent. Every poll first sends the shop's new cases to ServiceNow as
  * incidents in the agent's group (see {@link CaseSync}), then claims new incidents, then reads back who has each case's
  * incident. Each step runs even when another failed, so a governance API that is down does not stop incidents the
- * service desk raised from being worked.
+ * service desk raised from being worked. Only the read-back waits on the sending: it reports a case resolved only
+ * once its notes are settled, so never while a note sent for it may have reached its incident unconfirmed, or while
+ * the cases to send could not be listed (see {@link CaseSync#readBackIncidents}).
  *
  * <p>Each new, unassigned incident in the agent's group is claimed by
  * assigning it to the integration user, then announced on Kafka: a claimed incident is no longer new, so it is never
@@ -74,17 +78,22 @@ public class IncidentPoller {
         if (!properties.isConfigured()) {
             return;
         }
-        step("send the shop's cases to ServiceNow", cases::sendCases);
+        Set<UUID> unsent = new HashSet<>();
+        boolean listed = step("send the shop's cases to ServiceNow", () -> unsent.addAll(cases.sendCases()));
         step("hand over stale claims", this::handOverStaleClaims);
         step("claim new incidents", this::claimNewIncidents);
-        step("read back the cases' incidents", cases::readBackIncidents);
+        step("read back the cases' incidents",
+                () -> cases.readBackIncidents(caseId -> listed && !unsent.contains(caseId)));
     }
 
-    private static void step(String what, Runnable step) {
+    /** Whether the step ran to the end. */
+    private static boolean step(String what, Runnable step) {
         try {
             step.run();
+            return true;
         } catch (RuntimeException unavailable) {
             LOGGER.warn("Could not {}; trying again next poll", what, unavailable);
+            return false;
         }
     }
 
