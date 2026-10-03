@@ -21,10 +21,9 @@ import org.springframework.stereotype.Component;
 @Component
 class IncidentTools {
 
-    record Note(Instant at, String by, String kind, String text) {}
-
     record IncidentView(String number, String shortDescription, String description, String state, String caller,
-            String assignmentGroup, String assignedTo, String linkedOrderId, Instant openedAt, List<Note> notes) {}
+            String assignmentGroup, String assignedTo, String linkedOrderId, Instant openedAt, String workNotes,
+            String comments) {}
 
     record TeamView(String team, String handles) {}
 
@@ -47,16 +46,17 @@ class IncidentTools {
 
     @McpTool(name = "get_incident", description = """
             Read an incident you are working: what was reported, by whom and when, its state and assignment, the \
-            order it is linked to (empty when none), and its latest work notes and comments, oldest first.""")
+            order it is linked to (empty when none), and its work notes and comments as ServiceNow shows them, newest \
+            first. Each note starts with a line "<time> - <who> (<kind>)"; those times are in the ServiceNow user's \
+            time zone, not UTC like openedAt.""")
     IncidentView getIncident(McpTransportContext context,
             @McpToolParam(description = "The incident number, such as INC0010001") String number) {
         return guard.run(context, "get_incident", "Read incident " + number, agentId -> {
             ServiceNowClient.Incident incident = owned(number);
-            List<Note> notes = serviceNow.journalOf(incident.sysId()).stream()
-                    .map(entry -> new Note(entry.at(), entry.by(), entry.kind(), entry.text()))
-                    .toList();
+            ServiceNowClient.Journal journal = serviceNow.journalOf(incident.sysId());
             return new IncidentView(incident.number(), incident.shortDescription(), incident.description(),
-                    incident.stateName(), incident.caller(), incident.assignmentGroup(), incident.assignedTo(), incident.orderId(), incident.openedAt(), notes);
+                    incident.stateName(), incident.caller(), incident.assignmentGroup(), incident.assignedTo(),
+                    incident.orderId(), incident.openedAt(), journal.workNotes(), journal.comments());
         });
     }
 
