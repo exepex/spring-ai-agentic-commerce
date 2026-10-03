@@ -282,11 +282,37 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
                 "customerEmail", "ada@example.com"));
         McpSchema.CallToolResult byTheIncidentAgent = call(incidentAgent, "issue_refund", Map.of("orderId",
                 orderId.toString(), "amount", 39.50, "reason", "changed my mind", "idempotencyKey",
-                "refund-" + orderId + "-INC0010004"));
+                "refund-" + orderId + "-INC0010004", "incidentNumber", "INC0010004"));
 
         assertThat(byTheAssistant.isError()).isTrue();
         assertThat(text(byTheAssistant)).contains("open HANDOFF case (INC0010004)");
         assertThat(byTheIncidentAgent.isError()).isFalse();
+        assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
+    }
+
+    @Test
+    void theIncidentAgentPaysOnlyWhileNoOtherIncidentOfTheOrderCouldBeAPersons() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
+        handOff(orderId, "the customer wants to talk to a person");
+        String handOffCase = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", handOffCase, Map.of("number", "INC0010006"));
+        kafka.send("shipment.events", orderId.toString(), shipmentEvent(orderId, "SHIPMENT_LOST", "The carrier lost it"))
+                .join();
+        await().atMost(Duration.ofSeconds(20)).until(() -> ((List<?>) JsonPath.read(cases(orderId), "$")).size() == 2);
+        String lostCase = JsonPath.<List<String>>read(cases(orderId), "$[?(@.type == 'PARCEL_LOST')].id").getFirst();
+        sync("/api/agent/cases/{id}/incident", lostCase, Map.of("number", "INC0010007"));
+        Map<String, Object> refund = Map.of("orderId", orderId.toString(), "amount", 39.50, "reason", "lost parcel",
+                "idempotencyKey", "refund-" + orderId + "-INC0010007", "incidentNumber", "INC0010007");
+
+        // A person may have taken the hand-off's incident since ServiceNow was last read.
+        McpSchema.CallToolResult whileTheHandOffIsOpen = call(incidentAgent, "issue_refund", refund);
+        followIncident(handOffCase, "INC0010006", "RESOLVED", "Online Shop Agent");
+        McpSchema.CallToolResult onceItIsResolved = call(incidentAgent, "issue_refund", refund);
+
+        assertThat(whileTheHandOffIsOpen.isError()).isTrue();
+        assertThat(text(whileTheHandOffIsOpen)).contains("open HANDOFF case (INC0010006)");
+        assertThat(onceItIsResolved.isError()).isFalse();
         assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
     }
 

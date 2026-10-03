@@ -36,8 +36,14 @@ final class AgentToolCallback implements ToolCallback {
     static final String NOTIFY_CUSTOMER = "notify_customer";
     /** The parameter that makes a message go out once; set by code from the run's work, never by the model. */
     static final String IDEMPOTENCY_KEY = "idempotencyKey";
+    static final String ISSUE_REFUND = "issue_refund";
+    /**
+     * The incident a refund is for, which decides whether the incident agent may pay while the order has other cases;
+     * set by code from the run's work, never by the model.
+     */
+    static final String INCIDENT_NUMBER = "incidentNumber";
     /** The tools that change an order or tell its customer something. */
-    static final Set<String> ORDER_CHANGING_TOOLS = Set.of("cancel_order", "issue_refund", NOTIFY_CUSTOMER);
+    static final Set<String> ORDER_CHANGING_TOOLS = Set.of("cancel_order", ISSUE_REFUND, NOTIFY_CUSTOMER);
     /** The ServiceNow tools that act on one incident, named by its number. */
     static final Set<String> INCIDENT_TOOLS = Set.of("get_incident", "add_work_note", "assign_to_team", "resolve_incident");
 
@@ -58,6 +64,9 @@ final class AgentToolCallback implements ToolCallback {
         }
         if (NOTIFY_CUSTOMER.equals(mcpTool.getToolDefinition().name())) {
             setByCode.add(IDEMPOTENCY_KEY);
+        }
+        if (ISSUE_REFUND.equals(mcpTool.getToolDefinition().name())) {
+            setByCode.add(INCIDENT_NUMBER);
         }
         this.definition = setByCode.isEmpty() ? mcpTool.getToolDefinition()
                 : without(setByCode, mcpTool.getToolDefinition());
@@ -104,7 +113,7 @@ final class AgentToolCallback implements ToolCallback {
             return "Refused: this agent has been switched off. Stop calling tools; a human will take over.";
         }
         String input = toolInput;
-        if (injectsCustomer || NOTIFY_CUSTOMER.equals(definition.name())) {
+        if (injectsCustomer || NOTIFY_CUSTOMER.equals(definition.name()) || ISSUE_REFUND.equals(definition.name())) {
             ObjectNode arguments = (ObjectNode) JSON.readTree(toolInput == null || toolInput.isBlank() ? "{}" : toolInput);
             if (injectsCustomer) {
                 arguments.put(CUSTOMER_EMAIL, run.customerEmail());
@@ -114,6 +123,12 @@ final class AgentToolCallback implements ToolCallback {
                 String key = run.notificationKeyFor(arguments.path("orderId").asString(""));
                 if (key != null) {
                     arguments.put(IDEMPOTENCY_KEY, key);
+                }
+            }
+            if (ISSUE_REFUND.equals(definition.name())) {
+                arguments.remove(INCIDENT_NUMBER);
+                if (run.workId() != null) {
+                    arguments.put(INCIDENT_NUMBER, run.workId());
                 }
             }
             input = JSON.writeValueAsString(arguments);
