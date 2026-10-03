@@ -12,7 +12,7 @@ import org.springframework.http.HttpStatus;
 public abstract class OrderException extends RuntimeException {
 
     private final HttpStatus status;
-    private final Map<String, Object> properties;
+    private final transient Map<String, Object> properties;
 
     protected OrderException(HttpStatus status, String message) {
         this(status, message, Map.of(), null);

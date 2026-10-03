@@ -7,7 +7,7 @@ import io.github.exepex.commerce.servicenow.constants.RefusalMessages;
  * {@value RefusalMessages#PREFIX}, so a caller can tell a refusal, which asking again will not change, from a failure
  * such as ServiceNow being down.
  */
-public abstract class ToolRefusedException extends ServiceNowMcpException {
+public abstract class ToolRefusedException extends RuntimeException {
 
     protected ToolRefusedException(String message) {
         super(RefusalMessages.PREFIX + message);

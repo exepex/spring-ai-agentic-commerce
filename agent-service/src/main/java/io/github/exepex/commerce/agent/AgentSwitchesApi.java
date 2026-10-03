@@ -16,6 +16,6 @@ public interface AgentSwitchesApi {
     @GetExchange
     Map<String, Boolean> all();
 
-    @PutExchange(ApiPaths.AGENT_SWITCH)
+    @PutExchange(ApiPaths.AGENT_ID)
     Map<String, Boolean> set(@PathVariable String agentId, @RequestBody Change change);
 }

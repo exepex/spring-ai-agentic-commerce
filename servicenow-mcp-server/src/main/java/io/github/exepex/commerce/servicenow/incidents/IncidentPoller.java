@@ -8,6 +8,7 @@ import io.github.exepex.commerce.servicenow.constants.IncidentStates;
 import io.github.exepex.commerce.servicenow.constants.IncidentTexts;
 import io.github.exepex.commerce.servicenow.constants.ServiceNowFields;
 import io.github.exepex.commerce.servicenow.constants.ToolNames;
+import io.github.exepex.commerce.servicenow.dto.Team;
 import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.governance.LogValues;
 import io.github.exepex.commerce.servicenow.governance.dto.ToolCall;
@@ -120,32 +121,38 @@ public class IncidentPoller {
     private void claimNewIncidents(Map<String, UUID> recorded) {
         var switchedOn = Boolean.TRUE.equals(governance.switches().get(properties.agent()));
         for (var found : serviceNow.findNewForAgent()) {
-            var incident = serviceNow.findByNumber(found.number()).orElse(null);
-            if (incident == null || incident.isAssigned() || !IncidentStates.NEW.equals(incident.state())
-                    || !properties.agentGroup().equals(incident.assignmentGroup())) {
-                continue;
-            }
-            if (!switchedOn) {
-                handOverWhileSwitchedOff(incident);
-                continue;
-            }
-            if (cases.isServiceDeskIncidentAboutAnOrder(incident)
-                    && !CaseSync.isRecordedForItsOrder(incident, recorded)) {
-                log.info("{} waits until the shop has it as a case", incident.number());
-                continue;
-            }
-            var claim = new LinkedHashMap<String, String>();
-            claim.put(ServiceNowFields.ASSIGNED_TO, serviceNow.integrationUserSysId());
-            claim.put(ServiceNowFields.STATE, IncidentStates.IN_PROGRESS);
-            claim.put(ServiceNowFields.WORK_NOTES, IncidentTexts.CLAIMED.formatted(properties.agent()));
-            serviceNow.update(incident.sysId(), claim);
-            if (!announce(incident)) {
-                giveBack(incident.number());
-                continue;
-            }
-            record(ToolNames.CLAIM_INCIDENT,
-                    AuditValues.CLAIMED.formatted(incident.number(), incident.shortDescription()));
+            serviceNow.findByNumber(found.number())
+                    .filter(this::isNewInTheAgentsGroup)
+                    .ifPresent(incident -> claim(incident, switchedOn, recorded));
         }
+    }
+
+    /** Read again right before claiming: a person may have taken or moved the incident since it was listed. */
+    private boolean isNewInTheAgentsGroup(Incident incident) {
+        return !incident.isAssigned() && IncidentStates.NEW.equals(incident.state())
+                && properties.agentGroup().equals(incident.assignmentGroup());
+    }
+
+    /** Claims the incident for the agent and announces it; a switched-off agent's incident goes to a team instead. */
+    private void claim(Incident incident, boolean switchedOn, Map<String, UUID> recorded) {
+        if (!switchedOn) {
+            handOverWhileSwitchedOff(incident);
+            return;
+        }
+        if (cases.isServiceDeskIncidentAboutAnOrder(incident) && !CaseSync.isRecordedForItsOrder(incident, recorded)) {
+            log.info("{} waits until the shop has it as a case", incident.number());
+            return;
+        }
+        var claim = new LinkedHashMap<String, String>();
+        claim.put(ServiceNowFields.ASSIGNED_TO, serviceNow.integrationUserSysId());
+        claim.put(ServiceNowFields.STATE, IncidentStates.IN_PROGRESS);
+        claim.put(ServiceNowFields.WORK_NOTES, IncidentTexts.CLAIMED.formatted(properties.agent()));
+        serviceNow.update(incident.sysId(), claim);
+        if (!announce(incident)) {
+            giveBack(incident.number());
+            return;
+        }
+        record(ToolNames.CLAIM_INCIDENT, AuditValues.CLAIMED.formatted(incident.number(), incident.shortDescription()));
     }
 
     private void handOverWhileSwitchedOff(Incident incident) {
@@ -196,23 +203,24 @@ public class IncidentPoller {
         var staleBefore = Instant.now(clock).minus(properties.staleAfter());
         var team = properties.teams().get(properties.defaultTeam());
         for (var found : serviceNow.findClaimedByAgent()) {
-            if (!isStaleClaim(found, staleBefore)) {
-                continue;
+            if (isStaleClaim(found, staleBefore)) {
+                serviceNow.findByNumber(found.number())
+                        .filter(incident -> isStaleClaim(incident, staleBefore))
+                        .ifPresent(incident -> handOverStaleClaim(incident, team));
             }
-            var incident = serviceNow.findByNumber(found.number()).orElse(null);
-            if (incident == null || !isStaleClaim(incident, staleBefore)) {
-                continue;
-            }
-            var handOver = new LinkedHashMap<String, String>();
-            handOver.put(ServiceNowFields.ASSIGNMENT_GROUP, team.group());
-            handOver.put(ServiceNowFields.ASSIGNED_TO, "");
-            handOver.put(ServiceNowFields.WORK_NOTES, IncidentTexts.HANDED_OVER_UNFINISHED.formatted(properties.agent(),
-                    properties.staleAfter().toMinutes(), team.group()));
-            serviceNow.updateByDisplayValue(incident.sysId(), handOver);
-            cases.reportHandedToTeam(incident, team.group());
-            record(ToolNames.ASSIGN_TO_TEAM,
-                    AuditValues.HANDED_OVER_UNFINISHED.formatted(incident.number(), team.group()));
         }
+    }
+
+    /** Hands a claim the agent did not finish in time to the default team. */
+    private void handOverStaleClaim(Incident incident, Team team) {
+        var handOver = new LinkedHashMap<String, String>();
+        handOver.put(ServiceNowFields.ASSIGNMENT_GROUP, team.group());
+        handOver.put(ServiceNowFields.ASSIGNED_TO, "");
+        handOver.put(ServiceNowFields.WORK_NOTES, IncidentTexts.HANDED_OVER_UNFINISHED.formatted(properties.agent(),
+                properties.staleAfter().toMinutes(), team.group()));
+        serviceNow.updateByDisplayValue(incident.sysId(), handOver);
+        cases.reportHandedToTeam(incident, team.group());
+        record(ToolNames.ASSIGN_TO_TEAM, AuditValues.HANDED_OVER_UNFINISHED.formatted(incident.number(), team.group()));
     }
 
     /**

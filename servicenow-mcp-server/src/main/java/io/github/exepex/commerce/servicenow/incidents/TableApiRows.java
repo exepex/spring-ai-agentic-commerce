@@ -11,6 +11,8 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import tools.jackson.databind.JsonNode;
@@ -30,11 +32,9 @@ final class TableApiRows {
     private static final int MAX_JOURNAL_LENGTH = 20_000;
 
     static List<Incident> incidentsOf(JsonNode body) {
-        var incidents = new ArrayList<Incident>();
-        for (var row : body.path(TableApi.RESULT)) {
-            incidents.add(incidentOf(row));
-        }
-        return incidents;
+        return StreamSupport.stream(body.path(TableApi.RESULT).spliterator(), false)
+                .map(TableApiRows::incidentOf)
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     static Incident incidentOf(JsonNode row) {

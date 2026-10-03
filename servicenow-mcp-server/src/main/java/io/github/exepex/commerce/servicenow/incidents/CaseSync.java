@@ -229,9 +229,19 @@ class CaseSync {
         }
         // A person who took the incident has it, even while it is still in the agent's group.
         var group = incident.assignmentGroup().isBlank() ? IncidentTexts.NO_GROUP : incident.assignmentGroup();
-        var owner = takenByAPerson ? IncidentTexts.GROUP_WITH_DETAIL.formatted(group, incident.assignedTo())
-                : workableByTheAgent ? group : IncidentTexts.GROUP_WITH_DETAIL.formatted(group, incident.stateName());
+        var owner = ownerOf(incident, group, takenByAPerson, workableByTheAgent);
         return new IncidentState(incident.number(), CaseStatuses.WITH_TEAM, owner, false, orderId);
+    }
+
+    /** Who has the incident: the person who took it, the group, or the group and the state keeping the agent out. */
+    private static String ownerOf(Incident incident, String group, boolean takenByAPerson, boolean workableByTheAgent) {
+        if (takenByAPerson) {
+            return IncidentTexts.GROUP_WITH_DETAIL.formatted(group, incident.assignedTo());
+        }
+        if (workableByTheAgent) {
+            return group;
+        }
+        return IncidentTexts.GROUP_WITH_DETAIL.formatted(group, incident.stateName());
     }
 
     private void report(UUID caseId, IncidentState state) {

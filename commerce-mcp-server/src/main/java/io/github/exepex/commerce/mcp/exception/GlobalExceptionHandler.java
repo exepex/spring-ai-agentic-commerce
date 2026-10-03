@@ -20,4 +20,11 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         exception.getProperties().forEach(problem::setProperty);
         return ResponseEntity.status(exception.getStatus()).body(problem);
     }
+
+    @ExceptionHandler(DownstreamException.class)
+    ResponseEntity<ProblemDetail> handleDownstreamException(DownstreamException exception) {
+        var problem = ProblemDetail.forStatusAndDetail(exception.getStatus(), exception.getMessage());
+        exception.getProperties().forEach(problem::setProperty);
+        return ResponseEntity.status(exception.getStatus()).body(problem);
+    }
 }

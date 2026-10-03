@@ -18,6 +18,6 @@ public final class ErrorMessages {
     public static final String CARD_DECLINED = "Your card was declined.";
     public static final String PAYMENT_ENDED_IN_STATUS = "Payment ended in status %s";
     public static final String STRIPE_TEST_KEY_REQUIRED = "This demo only accepts a Stripe test-mode key (sk_test_...)";
-    public static final String SIMULATED_OUTAGE = """
-            {"status": 503, "title": "Service Unavailable", "detail": "The payment service is down (simulated outage)"}""";
+    public static final String SIMULATED_OUTAGE = "{\"status\": 503, \"title\": \"Service Unavailable\", "
+            + "\"detail\": \"The payment service is down (simulated outage)\"}";
 }

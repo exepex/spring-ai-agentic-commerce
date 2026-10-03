@@ -5,7 +5,6 @@ import io.github.exepex.commerce.mcp.constants.ToolNames;
 import io.github.exepex.commerce.mcp.downstream.dto.Order;
 import io.github.exepex.commerce.mcp.exception.AgentSwitchedOffException;
 import io.github.exepex.commerce.mcp.exception.CustomerScopeViolationException;
-import io.github.exepex.commerce.mcp.exception.DownstreamException;
 import io.github.exepex.commerce.mcp.exception.GovernanceException;
 import io.github.exepex.commerce.mcp.exception.ToolNotPermittedException;
 import io.github.exepex.commerce.mcp.governance.AgentSwitches;
@@ -84,7 +83,7 @@ class ToolGuard {
      * too, whatever status that service answered with.
      */
     private static AuditEvent.Outcome outcomeOf(GovernanceException refused) {
-        return !(refused instanceof DownstreamException) && refused.getStatus().value() == HttpStatus.FORBIDDEN.value()
+        return refused.getStatus().value() == HttpStatus.FORBIDDEN.value()
                 ? AuditEvent.Outcome.DENIED
                 : AuditEvent.Outcome.FAILED;
     }

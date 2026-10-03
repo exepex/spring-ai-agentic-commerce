@@ -15,6 +15,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 /**
@@ -53,12 +54,10 @@ class Tables {
      */
     synchronized List<Map<String, String>> find(String table, String encodedQuery, int offset, int limit) {
         var query = EncodedQuery.parse(encodedQuery);
-        var found = new ArrayList<Map<String, String>>();
-        for (var row : rows.get(table)) {
-            if (query.matches(row, this::valueOf)) {
-                found.add(Map.copyOf(row));
-            }
-        }
+        var found = rows.get(table).stream()
+                .filter(row -> query.matches(row, this::valueOf))
+                .map(Map::copyOf)
+                .collect(Collectors.toCollection(ArrayList::new));
         query.order(found);
         var from = Math.min(offset, found.size());
         return found.subList(from, Math.min(from + limit, found.size()));
