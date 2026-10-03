@@ -22,6 +22,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>An incident carries its case's id in its Correlation display field, so a case whose incident was opened but not
  * yet reported to the shop, because the poller stopped in between, is found again instead of opened twice.
+ *
+ * <p>An open incident the service desk raised about an order is recorded with the shop as a case of its own, and from
+ * then on read back like the others, so agents leave the order's money to whoever works it.
  */
 @Component
 class CaseSync {
@@ -107,6 +110,30 @@ class CaseSync {
     /** The line that ends a case note's work note, so the incident shows which notes it already holds. */
     private static String markerOf(GovernanceApi.Note note) {
         return "[shop note " + note.id() + "]";
+    }
+
+    /**
+     * Records each open incident the service desk raised about an order with the shop, which ignores one it already
+     * has. An incident whose Correlation display names a case is the shop's own and is left out; any other text there,
+     * such as another system's label, does not make it the shop's. An incident whose Correlation ID is not an order id
+     * names no order and is left out too. An incident that cannot be recorded is tried next poll.
+     */
+    void recordServiceDeskIncidents() {
+        for (ServiceNowClient.Incident incident : serviceNow.findOpenWithCorrelationId()) {
+            UUID orderId = uuidOrNull(incident.orderId());
+            if (orderId == null || caseIdOf(incident) != null) {
+                continue;
+            }
+            try {
+                GovernanceApi.IncidentState state = stateOf(incident);
+                String title = incident.shortDescription().isBlank() ? "Incident " + incident.number()
+                        : incident.shortDescription();
+                governance.recordServiceDeskIncident(authorization(), new GovernanceApi.ServiceDeskIncident(orderId,
+                        incident.number(), serviceNow.linkTo(incident), title, state.status(), state.assignmentGroup()));
+            } catch (RuntimeException failure) {
+                LOGGER.warn("Could not record incident {} with the shop; trying again next time", incident.number(), failure);
+            }
+        }
     }
 
     /**
@@ -199,9 +226,13 @@ class CaseSync {
 
     /** The case the incident was opened for; null for an incident the service desk raised. */
     private static UUID caseIdOf(ServiceNowClient.Incident incident) {
+        return uuidOrNull(incident.caseId());
+    }
+
+    private static UUID uuidOrNull(String text) {
         try {
-            return incident.caseId().isBlank() ? null : UUID.fromString(incident.caseId());
-        } catch (IllegalArgumentException notACase) {
+            return text.isBlank() ? null : UUID.fromString(text.strip());
+        } catch (IllegalArgumentException notAnId) {
             return null;
         }
     }

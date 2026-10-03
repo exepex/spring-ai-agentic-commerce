@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jayway.jsonpath.JsonPath;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -79,12 +80,37 @@ class TableApiIntegrationTest {
     }
 
     @Test
+    void findsTheOpenIncidentsAboutAnOrderThatNoCaseOpened() {
+        String order = UUID.randomUUID().toString();
+        String raised = create(Map.of("assignment_group", "Payments", "short_description", "Customer called",
+                "correlation_id", order));
+        String ofACase = create(Map.of("assignment_group", "Online Shop Agent", "short_description", "[HANDOFF] help",
+                "correlation_id", order, "correlation_display", UUID.randomUUID().toString()));
+        String resolvedSysId = create(Map.of("assignment_group", "Payments", "short_description", "Refunded already",
+                "correlation_id", order));
+        patch(resolvedSysId, false, Map.of("state", "6"));
+
+        String found = get("/api/now/table/incident?sysparm_query=correlation_id=" + order
+                + "^correlation_idISNOTEMPTY^correlation_displayISEMPTY^stateNOT IN6,7,8&sysparm_display_value=all");
+
+        assertThat(JsonPath.<List<String>>read(found, "$.result[*].sys_id.value"))
+                .containsExactly(raised).doesNotContain(ofACase, resolvedSysId);
+    }
+
+    @Test
     void refusesAGroupThatDoesNotExist() {
         int status = api().post().uri("/api/now/table/incident?sysparm_input_display_value=true")
                 .contentType(MediaType.APPLICATION_JSON).body(Map.of("assignment_group", "Legal"))
                 .exchange((request, response) -> response.getStatusCode().value());
 
         assertThat(status).isEqualTo(400);
+    }
+
+    /** Opens an incident and returns its sys_id. */
+    private String create(Map<String, String> fields) {
+        String created = api().post().uri("/api/now/table/incident?sysparm_input_display_value=true&sysparm_fields=sys_id")
+                .contentType(MediaType.APPLICATION_JSON).body(fields).retrieve().body(String.class);
+        return JsonPath.read(created, "$.result.sys_id");
     }
 
     private String get(String uri) {

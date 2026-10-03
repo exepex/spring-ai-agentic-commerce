@@ -66,8 +66,11 @@ class Tables {
         return REFERENCES.get(field);
     }
 
-    /** The rows that match an encoded query such as {@code assigned_toISEMPTY^state=1^ORDERBYDESCsys_created_on}. */
-    synchronized List<Map<String, String>> find(String table, String encodedQuery, int limit) {
+    /**
+     * One page of the rows that match an encoded query such as
+     * {@code assigned_toISEMPTY^state=1^ORDERBYDESCsys_created_on}.
+     */
+    synchronized List<Map<String, String>> find(String table, String encodedQuery, int offset, int limit) {
         List<Map<String, String>> found = new ArrayList<>();
         Predicate<Map<String, String>> matches = row -> true;
         String orderBy = null;
@@ -95,7 +98,8 @@ class Tables {
                 Collections.reverse(found);
             }
         }
-        return found.subList(0, Math.min(limit, found.size()));
+        int from = Math.min(offset, found.size());
+        return found.subList(from, Math.min(from + limit, found.size()));
     }
 
     synchronized Optional<Map<String, String>> get(String table, String sysId) {
@@ -193,9 +197,19 @@ class Tables {
     }
 
     private Predicate<Map<String, String>> condition(String term) {
+        if (term.endsWith("ISNOTEMPTY")) {
+            String field = term.substring(0, term.length() - "ISNOTEMPTY".length());
+            return row -> !valueOf(row, field).isEmpty();
+        }
         if (term.endsWith("ISEMPTY")) {
             String field = term.substring(0, term.length() - "ISEMPTY".length());
             return row -> valueOf(row, field).isEmpty();
+        }
+        int notIn = term.indexOf("NOT IN");
+        if (notIn > 0) {
+            String field = term.substring(0, notIn);
+            List<String> excluded = Arrays.asList(term.substring(notIn + "NOT IN".length()).split(","));
+            return row -> !excluded.contains(valueOf(row, field));
         }
         int equals = term.indexOf('=');
         if (equals < 0) {

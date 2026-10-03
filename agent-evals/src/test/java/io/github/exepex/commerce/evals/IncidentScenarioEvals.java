@@ -77,6 +77,11 @@ class IncidentScenarioEvals {
             return FINISHED_STATES.contains(serviceNow.stateOf(number))
                     || !group.isBlank() && !serviceNow.agentGroup().equals(group);
         });
+        assertThat(demo.casesOf(orderId)).as("the shop records the service desk's incident as a case of the order")
+                .anySatisfy(supportCase -> {
+                    assertThat(supportCase.path("type").asString()).isEqualTo("SERVICE_DESK");
+                    assertThat(supportCase.path("incidentNumber").asString()).isEqualTo(number);
+                });
         List<JsonNode> refunds = demo.refundRequests(orderId);
         assertThat(refunds).hasSizeLessThanOrEqualTo(1);
         if (FINISHED_STATES.contains(serviceNow.stateOf(number))) {

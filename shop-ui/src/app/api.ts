@@ -154,7 +154,7 @@ export interface CustomerNotification {
 export interface SupportCase {
   id: string;
   orderId: string | null;
-  type: 'STOCK_OUT' | 'DELIVERY_FAILED' | 'PARCEL_LOST' | 'REFUND_FAILED' | 'HANDOFF';
+  type: 'STOCK_OUT' | 'DELIVERY_FAILED' | 'PARCEL_LOST' | 'REFUND_FAILED' | 'HANDOFF' | 'SERVICE_DESK';
   /** PENDING until its incident is in ServiceNow; then with the incident agent, with a team, or resolved. */
   status: 'PENDING' | 'WITH_AGENT' | 'WITH_TEAM' | 'RESOLVED';
   title: string;

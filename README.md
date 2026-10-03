@@ -118,19 +118,21 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    by code and the MCP server checks ownership, so the attempt is refused and recorded as *denied*.
 7. **One case per problem, one owner at a time.** Code opens the cases: for a stock-out, a delivery that failed, a
    lost parcel, a refund that failed at the card processor after it was accepted, and when the shopping assistant
-   hands something over with `escalate_to_human`. An order has at most one open case of each kind; the same problem
-   raised again adds a work note to its incident. The incident agent works each case first; a failed delivery goes
-   to Fulfilment and a failed refund to Payments. The console's **Cases** card shows who has each incident now. While
-   a team or a person has one of an order's incidents, agents leave the order's money to them: their refunds are
-   refused. While any case of an order is open, the shopping assistant may not refund it either, and the incident
-   agent refunds only for the incident it is working, while the order's other cases have not reached ServiceNow yet.
-8. **Incident from the service desk.** The service desk raises an incident in the agent's assignment group, for example
-   "Order arrived broken, the customer wants their money back", with the order's id in the incident's Correlation ID
-   field. The incident agent claims it, reads it, checks
-   the order, payment and shipment, refunds within its limit, tells the customer, writes what it found and did as
-   work notes, and resolves the incident. When it cannot decide, it hands the incident to the team whose work it is
-   (customer care, payments or fulfilment) with a note of what that team needs to do; ServiceNow notifies the team.
-   It needs a ServiceNow instance; see "ServiceNow incidents" below.
+   hands something over with `escalate_to_human`. An open incident the service desk raises about an order, in any
+   group, is recorded as a `SERVICE_DESK` case of that order. An order has at most one open case of each kind except
+   `SERVICE_DESK`; the same problem raised again adds a work note to its incident. The incident agent works each case
+   the shop opens first; a failed delivery goes to Fulfilment and a failed refund to Payments. The console's
+   **Cases** card shows who has each incident now. While a team or a person has one of an order's incidents, agents
+   leave the order's money to them: their refunds are refused. While any case of an order is open, the shopping
+   assistant may not refund it either, and the incident agent refunds only for the incident it is working, while the
+   order's other cases have not reached ServiceNow yet.
+8. **Incident from the service desk.** The service desk raises an incident in the agent's assignment group, for
+   example "Order arrived broken, the customer wants their money back", with the order's id in the incident's
+   Correlation ID field. The shop records it as a `SERVICE_DESK` case of the order (see workflow 7). The incident
+   agent claims it, reads it, checks the order, payment and shipment, refunds within its limit, tells the customer,
+   writes what it found and did as work notes, and resolves the incident. When it cannot decide, it hands the
+   incident to the team whose work it is (customer care, payments or fulfilment) with a note of what that team needs
+   to do; ServiceNow notifies the team. It needs a ServiceNow instance; see "ServiceNow incidents" below.
 9. **Shipping and delivery.** In the operations console, **Ship** sends a paid order: the catalog takes its units
    out of the warehouse and the order becomes *shipped*. From then on it can no longer be cancelled, by a person or an
    agent. An order that a stock-out left without stock cannot ship. Playing the carrier, an operator then reports the

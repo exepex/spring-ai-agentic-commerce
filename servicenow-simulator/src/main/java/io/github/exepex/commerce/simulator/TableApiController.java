@@ -41,7 +41,8 @@ class TableApiController {
             @RequestParam(name = "sysparm_query", required = false) String query,
             @RequestParam(name = "sysparm_fields", required = false) String fields,
             @RequestParam(name = "sysparm_display_value", defaultValue = "false") String displayValue,
-            @RequestParam(name = "sysparm_limit", defaultValue = "10000") int limit) {
+            @RequestParam(name = "sysparm_limit", defaultValue = "10000") int limit,
+            @RequestParam(name = "sysparm_offset", defaultValue = "0") int offset) {
         if (!tables.exists(table)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid table " + table);
         }
@@ -50,7 +51,7 @@ class TableApiController {
             // which then answers with none; the notes are read through the incident's own journal fields.
             return Map.of("result", List.of());
         }
-        return Map.of("result", tables.find(table, query, limit).stream()
+        return Map.of("result", tables.find(table, query, offset, limit).stream()
                 .map(row -> render(table, row, fields, displayValue))
                 .toList());
     }
