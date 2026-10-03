@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.order;
 
+import io.github.exepex.commerce.order.constants.ConfigKeys;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -16,7 +17,7 @@ class OrderEventPublisher {
 
     private final KafkaTemplate<String, OrderEvent> kafkaTemplate;
 
-    @Value("${commerce.topics.order-events}")
+    @Value(ConfigKeys.ORDER_EVENTS_TOPIC)
     private final String topic;
 
     @TransactionalEventListener

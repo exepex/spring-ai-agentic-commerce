@@ -1,6 +1,12 @@
 package io.github.exepex.commerce.order;
 
-import io.github.exepex.commerce.order.CatalogHttpApi.CatalogProduct;
+import io.github.exepex.commerce.order.constants.OrderValues;
+import io.github.exepex.commerce.order.dto.CatalogProduct;
+import io.github.exepex.commerce.order.dto.ReserveStockRequest;
+import io.github.exepex.commerce.order.exception.DependencyUnavailableException;
+import io.github.exepex.commerce.order.exception.DispatchRefusedException;
+import io.github.exepex.commerce.order.exception.InsufficientStockException;
+import io.github.exepex.commerce.order.exception.ProductNotFoundException;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -19,19 +25,19 @@ class CatalogGateway {
         try {
             return catalog.getProduct(productId);
         } catch (HttpClientErrorException.NotFound notFound) {
-            throw OrderRejectedException.unknownProduct(productId);
+            throw new ProductNotFoundException(productId);
         } catch (RestClientException failure) {
-            throw new DependencyUnavailableException("catalog", failure);
+            throw new DependencyUnavailableException(OrderValues.CATALOG, failure);
         }
     }
 
     void reserveStock(UUID productId, UUID orderId, int quantity) {
         try {
-            catalog.reserveStock(productId, new CatalogHttpApi.ReserveStockRequest(orderId, quantity));
+            catalog.reserveStock(productId, new ReserveStockRequest(orderId, quantity));
         } catch (HttpClientErrorException.Conflict conflict) {
-            throw OrderRejectedException.stockUnavailable(catalogDetail(conflict));
+            throw new InsufficientStockException(catalogDetail(conflict));
         } catch (RestClientException failure) {
-            throw new DependencyUnavailableException("catalog", failure);
+            throw new DependencyUnavailableException(OrderValues.CATALOG, failure);
         }
     }
 
@@ -39,7 +45,7 @@ class CatalogGateway {
         try {
             catalog.releaseOrderReservations(orderId);
         } catch (RestClientException failure) {
-            throw new DependencyUnavailableException("catalog", failure);
+            throw new DependencyUnavailableException(OrderValues.CATALOG, failure);
         }
     }
 
@@ -48,9 +54,9 @@ class CatalogGateway {
         try {
             catalog.dispatchOrder(orderId);
         } catch (HttpClientErrorException.Conflict conflict) {
-            throw OrderRejectedException.notShippable(catalogDetail(conflict));
+            throw new DispatchRefusedException(catalogDetail(conflict));
         } catch (RestClientException failure) {
-            throw new DependencyUnavailableException("catalog", failure);
+            throw new DependencyUnavailableException(OrderValues.CATALOG, failure);
         }
     }
 

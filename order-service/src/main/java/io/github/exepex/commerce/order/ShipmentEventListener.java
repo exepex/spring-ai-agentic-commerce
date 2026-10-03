@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.order;
 
+import io.github.exepex.commerce.order.constants.ConfigKeys;
 import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
@@ -14,7 +15,7 @@ class ShipmentEventListener {
 
     private final OrderService orderService;
 
-    @KafkaListener(topics = "${commerce.topics.shipment-events}")
+    @KafkaListener(topics = ConfigKeys.SHIPMENT_EVENTS_TOPIC)
     void onShipmentEvent(ShipmentEvent event) {
         orderService.recordCarrierOutcome(event.orderId(), event.type().orderStatus());
     }
