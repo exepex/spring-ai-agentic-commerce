@@ -7,6 +7,7 @@ import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.util.backoff.FixedBackOff;
@@ -25,12 +26,12 @@ class IncidentListener {
 
     /**
      * An incident that could not be handed to anyone is delivered again every 15 seconds until the hand-off succeeds,
-     * so no work is dropped however long the ServiceNow MCP server is down. Any other failure is not retried, so a
-     * malformed event cannot block the ones behind it.
+     * so no work is dropped however long the ServiceNow MCP server is down. Any other failure is not retried: the
+     * event goes to the dead-letter topic at once, so a malformed event cannot block the ones behind it.
      */
     @Bean
-    static DefaultErrorHandler handOffRetries() {
-        var retries = new DefaultErrorHandler(
+    static DefaultErrorHandler handOffRetries(DeadLetterPublishingRecoverer deadLetters) {
+        var retries = new DefaultErrorHandler(deadLetters,
                 new FixedBackOff(Duration.ofSeconds(15).toMillis(), FixedBackOff.UNLIMITED_ATTEMPTS));
         retries.defaultFalse();
         retries.addRetryableExceptions(HandOffFailedException.class);

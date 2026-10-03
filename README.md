@@ -420,6 +420,13 @@ running, use `mvn -pl agent-evals -Pevals test`. Point them at a UI run with `np
   sent again, so consumers may see an event twice but never miss one. One instance of a service relays at a time (a
   Postgres advisory lock), so an order's events leave in order however many instances run. The event carries the
   trace it was raised in, so the consumer's work still joins the request's trace in Jaeger.
+- **An event a service cannot handle is parked, not lost or retried forever.** A listener that fails tries again a
+  few times with growing pauses (`commerce.consumers`), then the event goes to its topic's dead-letter topic
+  (`<topic>.DLT`) exactly as it arrived, and the events behind it go on. An event that is not even valid JSON goes
+  there at once. Each listener runs up to three consumers (`spring.kafka.listener.concurrency`) and topics have six
+  partitions; an order's or product's events share a partition, so they are still handled in order. The incident
+  agent's listener keeps retrying a failed hand-off until it succeeds, and takes one incident per poll with time for a
+  whole agent run.
 - **Events can arrive twice, and that is harmless.** The audit trail records each event once per order, and opens its
   case once per order, by the id its service gave it. A case's incident carries the case id in its Correlation display
   field, so a poller that stopped after creating it finds it again instead of opening a second one. An incident

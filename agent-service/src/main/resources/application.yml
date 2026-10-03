@@ -17,6 +17,10 @@ spring:
       group-id: agent-service
       # An incident claimed before this service first joined its group is still worked.
       auto-offset-reset: earliest
+      # One incident per poll, and time for a whole agent run before Kafka gives the incident to another consumer.
+      max-poll-records: 1
+      properties:
+        max.poll.interval.ms: 900000
   http:
     clients:
       connect-timeout: 2s

@@ -12,16 +12,23 @@ import static org.awaitility.Awaitility.await;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.jayway.jsonpath.JsonPath;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
+import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /** Shipping an order from the warehouse, and the order following its parcel to the customer. */
@@ -136,20 +143,58 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
         return mockMvc.post().uri("/api/orders/{orderId}/dispatch", orderId).exchange();
     }
 
+    @Test
+    void anUnreadableCarrierReportIsParkedAndTheReportsBehindItStillArrive() throws Exception {
+        String orderId = orderIdOf(placeOrder(newCustomer(), SHOE, 1));
+        ship(orderId);
+
+        publish(orderId, "the carrier's system sent this by mistake");
+        publishCarrierReport(orderId, "SHIPMENT_DELIVERED");
+
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> assertThat(status(orderId)).isEqualTo("DELIVERED"));
+        assertThat(deadLettersFor(orderId)).containsExactly("the carrier's system sent this by mistake");
+    }
+
     private String status(String orderId) throws Exception {
         return JsonPath.read(mockMvc.get().uri("/api/orders/{orderId}", orderId).exchange()
                 .getResponse().getContentAsString(), "$.status");
     }
 
     private void publishCarrierReport(String orderId, String type) {
+        publish(orderId, """
+                {"eventId": "%s", "type": "%s", "orderId": "%s", "occurredAt": "2026-10-02T10:00:00Z"}"""
+                .formatted(UUID.randomUUID(), type, orderId));
+    }
+
+    private void publish(String orderId, String value) {
         Map<String, Object> producerProperties = Map.of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         try (KafkaProducer<String, String> producer = new KafkaProducer<>(producerProperties)) {
-            producer.send(new ProducerRecord<>("shipment.events", orderId, """
-                    {"eventId": "%s", "type": "%s", "orderId": "%s", "occurredAt": "2026-10-02T10:00:00Z"}"""
-                    .formatted(UUID.randomUUID(), type, orderId)));
+            producer.send(new ProducerRecord<>("shipment.events", orderId, value));
+        }
+    }
+
+    private List<String> deadLettersFor(String orderId) {
+        Map<String, Object> consumerProperties = Map.of(
+                ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBootstrapServers(),
+                ConsumerConfig.GROUP_ID_CONFIG, "dead-letters-" + UUID.randomUUID(),
+                ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
+            consumer.subscribe(List.of("shipment.events.DLT"));
+            List<String> parked = new ArrayList<>();
+            long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+            while (parked.isEmpty() && System.nanoTime() < deadline) {
+                for (ConsumerRecord<String, String> record : KafkaTestUtils.getRecords(consumer, Duration.ofSeconds(2))) {
+                    if (orderId.equals(record.key())) {
+                        parked.add(record.value());
+                    }
+                }
+            }
+            return parked;
         }
     }
 }

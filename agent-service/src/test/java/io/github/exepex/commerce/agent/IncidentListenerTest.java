@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.agent;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 import io.github.exepex.commerce.agent.exception.HandOffRejectedException;
 import io.github.exepex.commerce.agent.exception.HandOffUnreachableException;
@@ -8,6 +9,7 @@ import io.github.exepex.commerce.agent.exception.KillSwitchUnreadableException;
 import io.github.exepex.commerce.agent.exception.ToolCalledOutsideRunException;
 import io.github.exepex.commerce.agent.exception.UnknownAgentException;
 import org.junit.jupiter.api.Test;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.ExceptionClassifier;
 import org.springframework.kafka.support.ExceptionMatcher;
 
@@ -31,6 +33,7 @@ class IncidentListenerTest {
     private static ExceptionMatcher retryClassifier() throws ReflectiveOperationException {
         var getter = ExceptionClassifier.class.getDeclaredMethod("getExceptionMatcher");
         getter.setAccessible(true);
-        return (ExceptionMatcher) getter.invoke(IncidentListener.handOffRetries());
+        var handler = IncidentListener.handOffRetries(mock(DeadLetterPublishingRecoverer.class));
+        return (ExceptionMatcher) getter.invoke(handler);
     }
 }
