@@ -29,26 +29,26 @@ class ToolCallAuditTrail implements ToolCallAudit {
 
     @Override
     public void notPermitted(String agentId, ToolCall call) {
-        record(agentId, call, ToolCallOutcome.DENIED, AuditValues.NOT_PERMITTED.formatted(call.summary()));
+        report(agentId, call, ToolCallOutcome.DENIED, AuditValues.NOT_PERMITTED.formatted(call.summary()));
     }
 
     @Override
     public void switchedOff(String agentId, ToolCall call) {
-        record(agentId, call, ToolCallOutcome.DENIED, AuditValues.SWITCHED_OFF.formatted(call.summary()));
+        report(agentId, call, ToolCallOutcome.DENIED, AuditValues.SWITCHED_OFF.formatted(call.summary()));
     }
 
     @Override
     public void succeeded(String agentId, ToolCall call) {
-        record(agentId, call, ToolCallOutcome.SUCCEEDED, call.summary());
+        report(agentId, call, ToolCallOutcome.SUCCEEDED, call.summary());
     }
 
     @Override
     public void stopped(String agentId, ToolCall call, StoppedCallOutcome outcome, String reason) {
-        record(agentId, call, ToolCallOutcome.valueOf(outcome.name()),
+        report(agentId, call, ToolCallOutcome.valueOf(outcome.name()),
                 AuditValues.NOT_DONE.formatted(call.summary(), reason));
     }
 
-    private void record(String agentId, ToolCall call, ToolCallOutcome outcome, String summary) {
+    private void report(String agentId, ToolCall call, ToolCallOutcome outcome, String summary) {
         try {
             governance.recordToolCall(BearerTokens.authorization(agents.tokenOf(agentId)),
                     new ToolCallReport(call.orderId(), AuditValues.ACTION_PREFIX + call.tool(), outcome, summary,

@@ -102,8 +102,10 @@ class GovernedToolCallsTest {
 
     @Test
     void aToolOutsideTheAgentsAllowlistIsDeniedBeforeAnythingRuns() {
-        assertThatThrownBy(() -> calls.run(as("shopping-assistant"), ToolCall.of("notify_customer", "Told them"),
-                agentId -> fail()))
+        var assistant = as("shopping-assistant");
+        var notify = ToolCall.of("notify_customer", "Told them");
+
+        assertThatThrownBy(() -> calls.run(assistant, notify, agentId -> fail()))
                 .isInstanceOf(Refused.class)
                 .hasMessage("shopping-assistant may not call notify_customer");
         assertThat(recorded).containsExactly("not permitted: notify_customer");
@@ -112,19 +114,24 @@ class GovernedToolCallsTest {
     @Test
     void aSwitchedOffAgentIsStoppedButMayStillHandWorkToPeople() {
         switchedOff.add("shopping-assistant");
+        var assistant = as("shopping-assistant");
+        var search = ToolCall.of("search_products", "Searched");
 
-        assertThatThrownBy(() -> calls.run(as("shopping-assistant"), ToolCall.of("search_products", "Searched"),
-                agentId -> fail())).hasMessage("shopping-assistant is switched off");
-        calls.run(as("shopping-assistant"), ToolCall.of("escalate_to_human", "Handed over"), agentId -> "handed over");
+        assertThatThrownBy(() -> calls.run(assistant, search, agentId -> fail()))
+                .hasMessage("shopping-assistant is switched off");
+        calls.run(assistant, ToolCall.of("escalate_to_human", "Handed over"), agentId -> "handed over");
 
         assertThat(recorded).containsExactly("switched off: search_products", "succeeded: Handed over");
     }
 
     @Test
     void aRuleThatStopsTheToolIsDeniedAndAnythingElseFailed() {
-        assertThatThrownBy(() -> calls.run(as("incident-agent"), ToolCall.of("issue_refund", "Refunded"),
-                agentId -> { throw new Refused("above the limit"); })).isInstanceOf(Refused.class);
-        assertThatThrownBy(() -> calls.run(as("incident-agent"), ToolCall.of("issue_refund", "Refunded"),
+        var incidentAgent = as("incident-agent");
+        var refund = ToolCall.of("issue_refund", "Refunded");
+
+        assertThatThrownBy(() -> calls.run(incidentAgent, refund, agentId -> { throw new Refused("above the limit"); }))
+                .isInstanceOf(Refused.class);
+        assertThatThrownBy(() -> calls.run(incidentAgent, refund,
                 agentId -> { throw new IllegalStateException("payments down"); }))
                 .isInstanceOf(IllegalStateException.class);
 
@@ -140,8 +147,11 @@ class GovernedToolCallsTest {
 
     @Test
     void aCallWithoutAnAuthenticatedAgentNeverRuns() {
-        assertThatThrownBy(() -> calls.run(McpTransportContext.create(Map.of()), ToolCall.of("search_products", "x"),
-                agentId -> fail())).isInstanceOf(UnauthenticatedToolCallException.class);
+        var anonymous = McpTransportContext.create(Map.of());
+        var search = ToolCall.of("search_products", "x");
+
+        assertThatThrownBy(() -> calls.run(anonymous, search, agentId -> fail()))
+                .isInstanceOf(UnauthenticatedToolCallException.class);
         assertThat(recorded).isEmpty();
     }
 
