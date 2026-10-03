@@ -11,6 +11,9 @@ interface SupportCaseRepository extends JpaRepository<SupportCase, UUID> {
     Optional<SupportCase> findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(UUID orderId, CaseType type,
             SupportCase.Status status);
 
+    Optional<SupportCase> findFirstByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseTrueOrderByCreatedAtDesc(
+            UUID orderId, CaseType type, SupportCase.Status status);
+
     List<SupportCase> findByOrderIdAndStatusIn(UUID orderId, Collection<SupportCase.Status> statuses);
 
     List<SupportCase> findByStatusInOrderByCreatedAt(Collection<SupportCase.Status> statuses);
