@@ -267,6 +267,9 @@ class ServiceNowMcpServerIntegrationTest {
                   "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
         stubClaimed("[]");
         stubIncident("", "1");
+        // The service desk raised it about an order, so the shop records it first.
+        stubServiceDeskIncidents(
+                "[" + incidentRow("INC0010001", "sys-1", "1", "Online Shop Agent", "", "", Instant.now()) + "]");
 
         poller.poll();
 
@@ -341,6 +344,24 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void aServiceDeskIncidentTheShopCouldNotBeToldAboutIsNotClaimedUntilItIs() {
+        String row = incidentRow("INC0010025", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        stubServiceDeskIncidents("[" + row + "]");
+        stubNewIncidents("[" + row + "]");
+        stubClaimed("[]");
+        stubIncident("INC0010025", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        SERVICES.stubFor(post("/api/agent/cases/service-desk").willReturn(aResponse().withStatus(503)));
+
+        poller.poll();
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
+        SERVICES.stubFor(post("/api/agent/cases/service-desk").willReturn(aResponse().withStatus(200)));
+        poller.poll();
+
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withRequestBody(matchingJsonPath("$.assigned_to", equalTo(AGENT_USER))));
+    }
+
+    @Test
     void whileTheAgentIsSwitchedOffANewIncidentGoesStraightToTheDefaultTeam() {
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
         stubNewIncidents("""
@@ -348,6 +369,9 @@ class ServiceNowMcpServerIntegrationTest {
                   "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
         stubClaimed("[]");
         stubIncident("", "1");
+        // The service desk raised it about an order, so the shop records it first.
+        stubServiceDeskIncidents(
+                "[" + incidentRow("INC0010001", "sys-1", "1", "Online Shop Agent", "", "", Instant.now()) + "]");
 
         poller.poll();
 

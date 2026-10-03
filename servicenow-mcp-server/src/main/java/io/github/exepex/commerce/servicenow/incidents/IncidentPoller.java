@@ -82,8 +82,10 @@ public class IncidentPoller {
         Set<UUID> unsent = new HashSet<>();
         boolean listed = step("send the shop's cases to ServiceNow", () -> unsent.addAll(cases.sendCases()));
         step("hand over stale claims", this::handOverStaleClaims);
-        step("record the service desk's incidents with the shop", cases::recordServiceDeskIncidents);
-        step("claim new incidents", this::claimNewIncidents);
+        Set<String> recorded = new HashSet<>();
+        step("record the service desk's incidents with the shop",
+                () -> recorded.addAll(cases.recordServiceDeskIncidents()));
+        step("claim new incidents", () -> claimNewIncidents(recorded));
         step("read back the cases' incidents",
                 () -> cases.readBackIncidents(caseId -> listed && !unsent.contains(caseId)));
     }
@@ -103,13 +105,23 @@ public class IncidentPoller {
      * Claims each new incident in the agent's group, or, while the agent is switched off, hands it straight to the
      * default team: nothing would work a claimed incident then, even with agent-service down. While the switch cannot
      * be read, nothing is claimed or handed over; the incidents wait for the next poll.
+     *
+     * <p>An incident the service desk raised about an order is taken up only once the shop has it as a case, so that
+     * agents leave the order's money to whoever works it from the start. One the shop could not be told about this poll
+     * waits for the next: claimed and resolved before then, it would never be recorded, since only open incidents are.
+     *
+     * @param recorded the numbers of the service desk's incidents the shop has now
      */
-    private void claimNewIncidents() {
+    private void claimNewIncidents(Set<String> recorded) {
         boolean switchedOn = Boolean.TRUE.equals(governance.switches().get(properties.agent()));
         for (ServiceNowClient.Incident found : serviceNow.findNewForAgent()) {
             ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
             if (incident == null || incident.isAssigned() || !ServiceNowClient.STATE_NEW.equals(incident.state())
                     || !properties.agentGroup().equals(incident.assignmentGroup())) {
+                continue;
+            }
+            if (cases.isServiceDeskIncidentAboutAnOrder(incident) && !recorded.contains(incident.number())) {
+                LOGGER.info("{} waits until the shop has it as a case", incident.number());
                 continue;
             }
             if (!switchedOn) {

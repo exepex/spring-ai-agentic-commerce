@@ -117,23 +117,33 @@ class CaseSync {
      * has. An incident whose Correlation display names a case is the shop's own and is left out; any other text there,
      * such as another system's label, does not make it the shop's. An incident whose Correlation ID is not an order id
      * names no order and is left out too. An incident that cannot be recorded is tried next poll.
+     *
+     * @return the numbers of the incidents the shop has now
      */
-    void recordServiceDeskIncidents() {
+    Set<String> recordServiceDeskIncidents() {
+        Set<String> recorded = new HashSet<>();
         for (ServiceNowClient.Incident incident : serviceNow.findOpenWithCorrelationId()) {
-            UUID orderId = uuidOrNull(incident.orderId());
-            if (orderId == null || caseIdOf(incident) != null) {
+            if (!isServiceDeskIncidentAboutAnOrder(incident)) {
                 continue;
             }
+            UUID orderId = uuidOrNull(incident.orderId());
             try {
                 GovernanceApi.IncidentState state = stateOf(incident);
                 String title = incident.shortDescription().isBlank() ? "Incident " + incident.number()
                         : incident.shortDescription();
                 governance.recordServiceDeskIncident(authorization(), new GovernanceApi.ServiceDeskIncident(orderId,
                         incident.number(), serviceNow.linkTo(incident), title, state.status(), state.assignmentGroup()));
+                recorded.add(incident.number());
             } catch (RuntimeException failure) {
                 LOGGER.warn("Could not record incident {} with the shop; trying again next time", incident.number(), failure);
             }
         }
+        return recorded;
+    }
+
+    /** Whether the service desk raised the incident about an order: it names an order, and no case of the shop's. */
+    boolean isServiceDeskIncidentAboutAnOrder(ServiceNowClient.Incident incident) {
+        return uuidOrNull(incident.orderId()) != null && caseIdOf(incident) == null;
     }
 
     /**
