@@ -1,16 +1,17 @@
 package io.github.exepex.commerce.mcp.governance;
 
+import io.github.exepex.commerce.governance.api.GovernancePaths;
+import io.github.exepex.commerce.governance.api.dto.AgentDecision;
+import io.github.exepex.commerce.governance.api.dto.SwitchChange;
+import io.github.exepex.commerce.governance.api.dto.ToolCallReport;
 import io.github.exepex.commerce.mcp.constants.ApiPaths;
 import io.github.exepex.commerce.mcp.constants.AuditActions;
 import io.github.exepex.commerce.mcp.constants.AuditSummaries;
 import io.github.exepex.commerce.mcp.constants.DownstreamApis;
-import io.github.exepex.commerce.mcp.constants.SecurityValues;
-import io.github.exepex.commerce.mcp.governance.dto.AgentDecision;
 import io.github.exepex.commerce.mcp.governance.dto.Confirmation;
 import io.github.exepex.commerce.mcp.governance.dto.Decision;
 import io.github.exepex.commerce.mcp.governance.dto.Proposal;
-import io.github.exepex.commerce.mcp.governance.dto.SwitchChange;
-import io.github.exepex.commerce.mcp.governance.dto.ToolCallReport;
+import io.github.exepex.commerce.mcpserver.security.CallingAgent;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
@@ -93,26 +94,26 @@ class GovernanceController {
         return orderId == null ? notifications.recent() : notifications.forOrder(orderId);
     }
 
-    @GetMapping(ApiPaths.AGENT_SWITCHES)
+    @GetMapping(GovernancePaths.AGENT_SWITCHES)
     Map<String, Boolean> agentSwitches() {
         return switches.all();
     }
 
-    @PutMapping(ApiPaths.AGENT_SWITCH)
+    @PutMapping(GovernancePaths.AGENT_SWITCH)
     Map<String, Boolean> switchAgent(@PathVariable String agentId, @Valid @RequestBody SwitchChange change) {
         return switches.set(agentId, change.enabled(), change.by());
     }
 
-    @PostMapping(ApiPaths.TOOL_CALLS)
-    void recordToolCall(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId,
+    @PostMapping(GovernancePaths.TOOL_CALLS)
+    void recordToolCall(@RequestAttribute(CallingAgent.REQUEST_ATTRIBUTE) String agentId,
             @Valid @RequestBody ToolCallReport call) {
-        audit.record(call.orderId(), AuditEvent.ActorType.AGENT, agentId, call.action(), call.outcome(), call.summary(),
-                call.details());
+        audit.record(call.orderId(), AuditEvent.ActorType.AGENT, agentId, call.action(),
+                AuditEvent.Outcome.valueOf(call.outcome().name()), call.summary(), call.details());
     }
 
     /** An agent records why it did what it did, with the model and token usage behind it. */
-    @PostMapping(ApiPaths.DECISIONS)
-    void recordDecision(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId,
+    @PostMapping(GovernancePaths.DECISIONS)
+    void recordDecision(@RequestAttribute(CallingAgent.REQUEST_ATTRIBUTE) String agentId,
             @Valid @RequestBody AgentDecision decision) {
         var usage = decision.model() == null ? null : AuditSummaries.DECISION_USAGE.formatted(decision.model(),
                 decision.inputTokens(), decision.outputTokens(), decision.durationMillis());

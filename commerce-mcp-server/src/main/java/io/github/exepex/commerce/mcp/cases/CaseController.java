@@ -1,14 +1,15 @@
 package io.github.exepex.commerce.mcp.cases;
 
-import io.github.exepex.commerce.mcp.cases.dto.CaseView;
-import io.github.exepex.commerce.mcp.cases.dto.IncidentLink;
-import io.github.exepex.commerce.mcp.cases.dto.IncidentState;
-import io.github.exepex.commerce.mcp.cases.dto.OutgoingView;
-import io.github.exepex.commerce.mcp.cases.dto.ServiceDeskIncident;
+import io.github.exepex.commerce.governance.api.GovernancePaths;
+import io.github.exepex.commerce.governance.api.dto.CaseView;
+import io.github.exepex.commerce.governance.api.dto.IncidentLink;
+import io.github.exepex.commerce.governance.api.dto.IncidentState;
+import io.github.exepex.commerce.governance.api.dto.OutgoingCase;
+import io.github.exepex.commerce.governance.api.dto.ServiceDeskIncident;
 import io.github.exepex.commerce.mcp.constants.ApiPaths;
 import io.github.exepex.commerce.mcp.constants.ConfigKeys;
-import io.github.exepex.commerce.mcp.constants.SecurityValues;
 import io.github.exepex.commerce.mcp.exception.NotTheCaseWorkerException;
+import io.github.exepex.commerce.mcpserver.security.CallingAgent;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -44,46 +45,46 @@ class CaseController {
         return found.stream().map(CaseMapper::toView).toList();
     }
 
-    @GetMapping(ApiPaths.OUTGOING_CASES)
-    List<OutgoingView> outgoing(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId) {
+    @GetMapping(GovernancePaths.OUTGOING_CASES)
+    List<OutgoingCase> outgoing(@RequestAttribute(CallingAgent.REQUEST_ATTRIBUTE) String agentId) {
         ensureWorker(agentId);
         return cases.toSend().stream().map(CaseMapper::toView).toList();
     }
 
-    @PostMapping(ApiPaths.CASE_INCIDENT)
-    CaseView linkIncident(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId,
+    @PostMapping(GovernancePaths.CASE_INCIDENT)
+    CaseView linkIncident(@RequestAttribute(CallingAgent.REQUEST_ATTRIBUTE) String agentId,
             @PathVariable UUID caseId, @Valid @RequestBody IncidentLink link) {
         ensureWorker(agentId);
         return CaseMapper.toView(cases.linkIncident(caseId, link.number(), link.url()));
     }
 
-    @PostMapping(ApiPaths.SERVICE_DESK_CASES)
-    CaseView recordServiceDeskIncident(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId,
+    @PostMapping(GovernancePaths.SERVICE_DESK_CASES)
+    CaseView recordServiceDeskIncident(@RequestAttribute(CallingAgent.REQUEST_ATTRIBUTE) String agentId,
             @Valid @RequestBody ServiceDeskIncident incident) {
         ensureWorker(agentId);
         return CaseMapper.toView(cases.recordServiceDeskIncident(incident.orderId(), incident.number(), incident.url(),
-                incident.shortDescription(), incident.status(), incident.assignmentGroup()));
+                incident.shortDescription(), CaseMapper.toStatus(incident.status()), incident.assignmentGroup()));
     }
 
-    @PostMapping(ApiPaths.CASE_NOTE_SENT)
-    void markNoteSent(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId,
+    @PostMapping(GovernancePaths.CASE_NOTE_SENT)
+    void markNoteSent(@RequestAttribute(CallingAgent.REQUEST_ATTRIBUTE) String agentId,
             @PathVariable UUID caseId, @PathVariable UUID noteId) {
         ensureWorker(agentId);
         cases.markNoteSent(caseId, noteId);
     }
 
-    @GetMapping(ApiPaths.CASES_IN_SERVICENOW)
-    List<CaseView> inServiceNow(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId) {
+    @GetMapping(GovernancePaths.CASES_IN_SERVICENOW)
+    List<CaseView> inServiceNow(@RequestAttribute(CallingAgent.REQUEST_ATTRIBUTE) String agentId) {
         ensureWorker(agentId);
         return cases.inServiceNow().stream().map(CaseMapper::toView).toList();
     }
 
-    @PostMapping(ApiPaths.CASE_INCIDENT_STATE)
-    CaseView followIncident(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId,
+    @PostMapping(GovernancePaths.CASE_INCIDENT_STATE)
+    CaseView followIncident(@RequestAttribute(CallingAgent.REQUEST_ATTRIBUTE) String agentId,
             @PathVariable UUID caseId, @Valid @RequestBody IncidentState state) {
         ensureWorker(agentId);
-        return CaseMapper.toView(cases.followIncident(caseId, state.number(), state.status(), state.assignmentGroup(),
-                state.incidentFinal(), state.orderId()));
+        return CaseMapper.toView(cases.followIncident(caseId, state.number(), CaseMapper.toStatus(state.status()),
+                state.assignmentGroup(), state.incidentFinal(), state.orderId()));
     }
 
     private void ensureWorker(String agentId) {

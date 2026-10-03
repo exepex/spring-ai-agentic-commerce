@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.mcp;
 
 import com.jayway.jsonpath.JsonPath;
+import io.github.exepex.commerce.platform.security.BearerTokens;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.util.List;
 import java.util.Map;
@@ -63,7 +64,7 @@ abstract class CaseTestSupport extends McpServerTestSupport {
 
     protected RestClient asCaseWorker() {
         return RestClient.builder().baseUrl("http://localhost:" + port)
-                .defaultHeader("Authorization", "Bearer " + INCIDENT_AGENT_TOKEN)
+                .defaultHeader("Authorization", BearerTokens.authorization(INCIDENT_AGENT_TOKEN))
                 .build();
     }
 
