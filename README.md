@@ -8,6 +8,21 @@ assistant** that customers chat with, and an **incident agent** that works every
 lost parcel, as a ServiceNow incident, and hands it to the right team when it cannot finish it. Every action they take goes through MCP tools whose rules are **enforced in code**, and every step is
 **traceable and auditable** afterwards.
 
+## See it in action
+
+A customer orders a headlamp through the shopping assistant; operations writes off the damaged stock; the incident
+agent works the stock-out as a ServiceNow incident (cancels the order, refunds it, tells the customer) and resolves it.
+Shown at double speed, recorded with the real model and the ServiceNow simulator.
+[Watch the video at normal speed (MP4)](docs/demo/demo.mp4).
+
+![The demo: order through chat, a stock-out worked by the incident agent, the order's timeline](docs/demo/demo.gif)
+
+| The assistant proposes, only the customer pays | The incident agent resolves the stock-out |
+|---|---|
+| ![The chat with a proposed order and its Confirm and pay button](docs/demo/1-chat-proposal.png) | ![The operations console with the resolved STOCK_OUT case and its incident](docs/demo/2-case-resolved.png) |
+| **Every step on the order's timeline** | **The customer is told, and refunded** |
+| ![The order's timeline: system, human and agent steps with their traces](docs/demo/3-order-timeline.png) | ![The customer's inbox with the agent's explanation](docs/demo/4-customer-inbox.png) |
+
 ## The idea in one paragraph
 
 The normal path (browse, order, pay, ship) stays plain, fast, deterministic code. **No AI agent sits on the
