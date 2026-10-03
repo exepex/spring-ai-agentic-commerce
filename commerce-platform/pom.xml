@@ -10,27 +10,34 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>agent-definitions</artifactId>
-    <name>agent-definitions</name>
-    <description>One definition file per agent (model, effort, tools, budget, prompt), read by agent-service and commerce-mcp-server</description>
+    <artifactId>commerce-platform</artifactId>
+    <name>commerce-platform</name>
+    <description>What every service shares: error responses, event publishing, log safety, calling other services, time and observability defaults</description>
 
     <dependencies>
-        <dependency>
-            <groupId>org.springframework</groupId>
-            <artifactId>spring-core</artifactId>
-        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-autoconfigure</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.yaml</groupId>
-            <artifactId>snakeyaml</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-kafka</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>

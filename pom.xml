@@ -20,6 +20,9 @@
 
     <modules>
         <module>agent-definitions</module>
+        <module>commerce-platform</module>
+        <module>governance-api</module>
+        <module>mcp-server-support</module>
         <module>catalog-service</module>
         <module>order-service</module>
         <module>payment-service</module>

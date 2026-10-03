@@ -10,27 +10,32 @@
         <version>0.1.0-SNAPSHOT</version>
     </parent>
 
-    <artifactId>agent-definitions</artifactId>
-    <name>agent-definitions</name>
-    <description>One definition file per agent (model, effort, tools, budget, prompt), read by agent-service and commerce-mcp-server</description>
+    <artifactId>governance-api</artifactId>
+    <name>governance-api</name>
+    <description>The commerce MCP server's agent governance API: its contract, and the client agent-service and the ServiceNow MCP server call it with</description>
 
     <dependencies>
         <dependency>
             <groupId>org.springframework</groupId>
-            <artifactId>spring-core</artifactId>
+            <artifactId>spring-web</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-autoconfigure</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.yaml</groupId>
-            <artifactId>snakeyaml</artifactId>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
         </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-restclient</artifactId>
             <scope>test</scope>
         </dependency>
     </dependencies>
