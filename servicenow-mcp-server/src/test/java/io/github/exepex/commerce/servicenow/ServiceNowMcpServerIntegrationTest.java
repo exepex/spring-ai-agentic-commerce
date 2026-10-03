@@ -362,6 +362,22 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void whileTheAgentIsSwitchedOffAServiceDeskIncidentTheShopCouldNotBeToldAboutStillGoesToTheDefaultTeam() {
+        SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
+        String row = incidentRow("INC0010026", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        stubServiceDeskIncidents("[" + row + "]");
+        stubNewIncidents("[" + row + "]");
+        stubClaimed("[]");
+        stubIncident("INC0010026", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        SERVICES.stubFor(post("/api/agent/cases/service-desk").willReturn(aResponse().withStatus(503)));
+
+        poller.poll();
+
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withRequestBody(matchingJsonPath("$.assignment_group", equalTo("Customer Care"))));
+    }
+
+    @Test
     void whileTheAgentIsSwitchedOffANewIncidentGoesStraightToTheDefaultTeam() {
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
         stubNewIncidents("""

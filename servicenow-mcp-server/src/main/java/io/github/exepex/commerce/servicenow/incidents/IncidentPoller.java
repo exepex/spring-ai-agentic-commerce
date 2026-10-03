@@ -106,9 +106,11 @@ public class IncidentPoller {
      * default team: nothing would work a claimed incident then, even with agent-service down. While the switch cannot
      * be read, nothing is claimed or handed over; the incidents wait for the next poll.
      *
-     * <p>An incident the service desk raised about an order is taken up only once the shop has it as a case, so that
+     * <p>An incident the service desk raised about an order is claimed only once the shop has it as a case, so that
      * agents leave the order's money to whoever works it from the start. One the shop could not be told about this poll
      * waits for the next: claimed and resolved before then, it would never be recorded, since only open incidents are.
+     * Handing it to the default team while the agent is switched off does not wait: it stays open with a person, and
+     * the shop records it once it can be told.
      *
      * @param recorded the numbers of the service desk's incidents the shop has now
      */
@@ -120,12 +122,12 @@ public class IncidentPoller {
                     || !properties.agentGroup().equals(incident.assignmentGroup())) {
                 continue;
             }
-            if (cases.isServiceDeskIncidentAboutAnOrder(incident) && !recorded.contains(incident.number())) {
-                LOGGER.info("{} waits until the shop has it as a case", incident.number());
-                continue;
-            }
             if (!switchedOn) {
                 handOverWhileSwitchedOff(incident);
+                continue;
+            }
+            if (cases.isServiceDeskIncidentAboutAnOrder(incident) && !recorded.contains(incident.number())) {
+                LOGGER.info("{} waits until the shop has it as a case", incident.number());
                 continue;
             }
             Map<String, String> claim = new LinkedHashMap<>();
