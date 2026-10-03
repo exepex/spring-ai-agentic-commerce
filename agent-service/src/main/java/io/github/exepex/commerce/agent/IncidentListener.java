@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.agent;
 
 import java.time.Duration;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.listener.DefaultErrorHandler;
@@ -14,15 +15,11 @@ import tools.jackson.databind.json.JsonMapper;
  * is configured.
  */
 @Component
+@RequiredArgsConstructor
 class IncidentListener {
 
     private final IncidentAgent agent;
     private final JsonMapper jsonMapper;
-
-    IncidentListener(IncidentAgent agent, JsonMapper jsonMapper) {
-        this.agent = agent;
-        this.jsonMapper = jsonMapper;
-    }
 
     /**
      * An incident that could not be handed to anyone is delivered again every 15 seconds until the hand-off succeeds,

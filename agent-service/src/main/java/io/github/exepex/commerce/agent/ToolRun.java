@@ -17,14 +17,14 @@ public final class ToolRun {
 
     public static final String CONTEXT_KEY = "commerce.toolRun";
 
+    /** One successful tool call: the tool, the arguments it was called with, and what it returned. */
+    public record ToolResult(String tool, String arguments, String result) {}
+
     private final String customerEmail;
     private final String workId;
     private final Set<String> changeableOrders;
     private final Predicate<String> workStillAllows;
     private final AtomicInteger callsLeft;
-    /** One successful tool call: the tool, the arguments it was called with, and what it returned. */
-    public record ToolResult(String tool, String arguments, String result) {}
-
     private final List<ToolResult> succeeded = new ArrayList<>();
 
     public ToolRun(String customerEmail, int callBudget) {

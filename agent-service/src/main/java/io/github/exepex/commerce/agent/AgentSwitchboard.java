@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.agent;
 
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 /**
@@ -10,16 +11,13 @@ import org.springframework.stereotype.Component;
  * turned off mid-run stops the run.
  */
 @Component
+@RequiredArgsConstructor
 public class AgentSwitchboard {
 
     public static final String SHOPPING_ASSISTANT = "shopping-assistant";
     public static final String INCIDENT_AGENT = "incident-agent";
 
     private final AgentSwitchesApi switches;
-
-    AgentSwitchboard(AgentSwitchesApi switches) {
-        this.switches = switches;
-    }
 
     /** Read before every run. Throws if the MCP server cannot be reached; callers decide what that means. */
     public boolean isEnabled(String agentId) {

@@ -2,24 +2,19 @@ package io.github.exepex.commerce.agent;
 
 import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.agents.AgentDefinitions;
-import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
-import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.annotation.PreDestroy;
-import java.net.http.HttpRequest;
-import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.ai.mcp.McpToolNamePrefixGenerator;
-import org.springframework.ai.mcp.SyncMcpToolCallbackProvider;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.stereotype.Component;
 
@@ -30,10 +25,11 @@ import org.springframework.stereotype.Component;
  * <p>Connections open on first use and are reopened after a failure, so the agents start even when an MCP server is
  * not up yet, and carry on after it restarts.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 class McpToolboxes {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(McpToolboxes.class);
     private static final String SLACK = "slack";
     private static final String SERVICENOW = "servicenow";
     /** The commerce MCP server enforces the kill switch on every call itself. */
@@ -43,12 +39,6 @@ class McpToolboxes {
     private final AgentDefinitions definitions;
     private final AgentSwitchboard switchboard;
     private final Map<String, McpSyncClient> clients = new ConcurrentHashMap<>();
-
-    McpToolboxes(AgentProperties properties, AgentDefinitions definitions, AgentSwitchboard switchboard) {
-        this.properties = properties;
-        this.definitions = definitions;
-        this.switchboard = switchboard;
-    }
 
     /** The shopping assistant's tools; {@code customerEmail} is always the signed-in customer's. */
     List<ToolCallback> shoppingAssistantTools() {
@@ -71,7 +61,7 @@ class McpToolboxes {
                 tools.addAll(toolsFrom(SLACK, this::slackClient, agent.slackTools(), false,
                         () -> isSwitchedOn(AgentSwitchboard.INCIDENT_AGENT)));
             } catch (RuntimeException slackDown) {
-                LOGGER.warn("Slack MCP server unavailable; the agent runs without Slack", slackDown);
+                log.warn("Slack MCP server unavailable; the agent runs without Slack", slackDown);
                 clients.remove(SLACK);
             }
         }
@@ -86,12 +76,11 @@ class McpToolboxes {
 
     private List<ToolCallback> toolsFrom(String connection, Supplier<McpSyncClient> client, List<String> allowedTools,
             boolean injectsCustomer, BooleanSupplier agentSwitchedOn) {
-        ToolCallback[] mcpTools = onLiveConnection(connection, client, live -> listTools(live, allowedTools));
-        List<ToolCallback> tools = new ArrayList<>();
-        for (ToolCallback mcpTool : mcpTools) {
-            tools.add(new AgentToolCallback(mcpTool, injectsCustomer, agentSwitchedOn));
-        }
-        return tools;
+        ToolCallback[] mcpTools = onLiveConnection(connection, client,
+                live -> McpClients.allowedTools(live, allowedTools));
+        return Arrays.stream(mcpTools)
+                .<ToolCallback>map(mcpTool -> new AgentToolCallback(mcpTool, injectsCustomer, agentSwitchedOn))
+                .toList();
     }
 
     /** Fails closed: if the switch cannot be read, the third-party tool is not called. */
@@ -99,7 +88,7 @@ class McpToolboxes {
         try {
             return switchboard.isEnabled(agentId);
         } catch (RuntimeException unreadable) {
-            LOGGER.warn("Could not read the kill switch of {}; refusing its third-party tool call", agentId, unreadable);
+            log.warn("Could not read the kill switch of {}; refusing its third-party tool call", agentId, unreadable);
             return false;
         }
     }
@@ -113,22 +102,13 @@ class McpToolboxes {
         try {
             return request.apply(client.get());
         } catch (RuntimeException connectionLost) {
-            LOGGER.info("MCP request on {} failed ({}); reconnecting once", connection, connectionLost.getMessage());
+            log.info("MCP request on {} failed ({}); reconnecting once", connection, connectionLost.getMessage());
             McpSyncClient lost = clients.remove(connection);
             if (lost != null) {
                 lost.close();
             }
             return request.apply(client.get());
         }
-    }
-
-    private static ToolCallback[] listTools(McpSyncClient client, List<String> allowedTools) {
-        return SyncMcpToolCallbackProvider.builder()
-                .mcpClients(client)
-                .toolFilter((connection, tool) -> allowedTools.contains(tool.name()))
-                .toolNamePrefixGenerator(McpToolNamePrefixGenerator.noPrefix())
-                .build()
-                .getToolCallbacks();
     }
 
     private McpSyncClient commerceClient(String agentId) {
@@ -144,19 +124,9 @@ class McpToolboxes {
     }
 
     private McpSyncClient connect(String name, String url, String bearerToken) {
-        return clients.compute(name, (key, existing) -> {
-            if (existing != null && existing.isInitialized()) {
-                return existing;
-            }
-            McpSyncClient client = McpClient.sync(HttpClientStreamableHttpTransport.builder(url)
-                            .requestBuilder(HttpRequest.newBuilder().header("Authorization", "Bearer " + bearerToken))
-                            .build())
-                    .clientInfo(new McpSchema.Implementation("agent-service/" + name, "1.0.0"))
-                    .requestTimeout(Duration.ofSeconds(60))
-                    .build();
-            client.initialize();
-            return client;
-        });
+        return clients.compute(name, (key, existing) -> existing != null && existing.isInitialized()
+                ? existing
+                : McpClients.open(name, url, bearerToken));
     }
 
     @PreDestroy
