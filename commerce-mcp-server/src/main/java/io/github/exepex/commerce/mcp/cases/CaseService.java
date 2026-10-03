@@ -254,9 +254,17 @@ public class CaseService {
                         AuditEvent.Outcome.SUCCEEDED, number + " is now about order " + orderId, null);
             }
             audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                    AuditEvent.Outcome.SUCCEEDED, number + (wasResolved ? " was reopened" : " is now about this order")
-                            + "; agents leave its money to whoever works it", null);
+                    AuditEvent.Outcome.SUCCEEDED, describeServiceDeskIncident(number, status, wasResolved), null);
         }
+    }
+
+    /** A resolved incident blocks nobody, so only an open one tells agents to leave the order's money alone. */
+    private static String describeServiceDeskIncident(String number, SupportCase.Status status, boolean wasResolved) {
+        if (status == SupportCase.Status.RESOLVED) {
+            return number + " is now about this order and is resolved";
+        }
+        String change = wasResolved ? " was reopened" : " is now about this order";
+        return number + change + "; agents leave its money to whoever works it";
     }
 
     @Transactional

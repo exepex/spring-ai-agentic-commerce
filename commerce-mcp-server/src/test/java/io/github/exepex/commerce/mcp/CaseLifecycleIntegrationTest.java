@@ -537,6 +537,24 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void aServiceDeskIncidentMovedToAnotherOrderAsItIsResolvedSaysSoOnThatOrdersTimeline() {
+        UUID mistyped = stubOrder("ada@example.com", "39.50");
+        UUID meant = stubOrder("ada@example.com", "39.50");
+        assertThat(recordServiceDeskIncident(Map.of("orderId", mistyped.toString(), "number", "INC0010039",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-39", "shortDescription", "Arrived broken",
+                "status", "WITH_TEAM", "assignmentGroup", "Payments"))).isEqualTo(200);
+        String caseId = JsonPath.read(cases(mistyped), "$[0].id");
+
+        assertThat(sync("/api/agent/cases/{id}/incident-state", caseId, Map.of("number", "INC0010039",
+                "status", "RESOLVED", "assignmentGroup", "Payments", "incidentFinal", false,
+                "orderId", meant.toString()))).isEqualTo(200);
+
+        List<String> steps = JsonPath.read(timeline(meant), "$[?(@.action == 'follow_incident')].summary");
+        assertThat(steps).containsExactly("INC0010039 is now about this order and is resolved");
+        assertThat((String) JsonPath.read(cases(meant), "$[0].status")).isEqualTo("RESOLVED");
+    }
+
+    @Test
     void aServiceDeskCaseFreedFromItsOrderIsNoLongerReadBackOnceItsIncidentIsClosed() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         assertThat(recordServiceDeskIncident(Map.of("orderId", orderId.toString(), "number", "INC0010037",
