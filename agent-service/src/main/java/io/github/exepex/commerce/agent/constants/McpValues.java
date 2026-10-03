@@ -13,7 +13,6 @@ public final class McpValues {
     public static final String SLACK_TOOL_PREFIX = SLACK + ":";
     public static final String SERVICENOW_TOOL_PREFIX = SERVICENOW + ":";
 
-    public static final String BEARER = "Bearer ";
     public static final String CLIENT_NAME_PREFIX = "agent-service/";
     public static final String CLIENT_VERSION = "1.0.0";
     /** Where a run's {@code ToolRun} is kept in Spring AI's tool context. */

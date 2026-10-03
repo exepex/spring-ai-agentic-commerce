@@ -1,11 +1,12 @@
 package io.github.exepex.commerce.payment.exception;
 
 import io.github.exepex.commerce.payment.constants.ErrorMessages;
+import io.github.exepex.commerce.platform.error.CommerceException;
 import java.math.BigDecimal;
 import org.springframework.http.HttpStatus;
 
 /** The refund asks for more than is left of what the customer paid. */
-public class RefundExceedsPaymentException extends PaymentException {
+public class RefundExceedsPaymentException extends CommerceException {
 
     public RefundExceedsPaymentException(BigDecimal requested, BigDecimal refundable) {
         super(HttpStatus.UNPROCESSABLE_CONTENT, ErrorMessages.REFUND_EXCEEDS_PAYMENT.formatted(requested, refundable));

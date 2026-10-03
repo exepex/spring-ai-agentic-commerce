@@ -1,12 +1,12 @@
 package io.github.exepex.commerce.mcp;
 
-import io.github.exepex.commerce.agents.AgentDefinitions;
+import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.mcp.constants.ConfigKeys;
 import io.github.exepex.commerce.mcp.downstream.CatalogApi;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
 import io.github.exepex.commerce.mcp.downstream.ShippingApi;
-import java.time.Clock;
+import io.github.exepex.commerce.mcpserver.security.ServerTools;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
@@ -27,13 +27,9 @@ public class CommerceMcpServerApplication {
         SpringApplication.run(CommerceMcpServerApplication.class, arguments);
     }
 
+    /** An agent may call the shop's tools its definition lists under {@code commerce}. */
     @Bean
-    AgentDefinitions agentDefinitions() {
-        return AgentDefinitions.load();
-    }
-
-    @Bean
-    Clock clock() {
-        return Clock.systemUTC();
+    ServerTools serverTools() {
+        return AgentDefinition::commerceTools;
     }
 }

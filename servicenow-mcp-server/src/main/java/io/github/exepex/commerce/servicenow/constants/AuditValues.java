@@ -3,16 +3,12 @@ package io.github.exepex.commerce.servicenow.constants;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
-/** How the server's calls are recorded in the shared audit trail: their action, outcome and summary. */
+/** How the server's calls are recorded in the shared audit trail: their action and summary. */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class AuditValues {
 
     /** Prefixes a tool's name, so the trail tells ServiceNow actions from the commerce tools. */
     public static final String ACTION_PREFIX = "servicenow:";
-
-    public static final String SUCCEEDED = "SUCCEEDED";
-    public static final String FAILED = "FAILED";
-    public static final String DENIED = "DENIED";
 
     public static final String NOT_PERMITTED = "%s: tool not permitted for this agent";
     public static final String SWITCHED_OFF = "%s: agent is switched off";

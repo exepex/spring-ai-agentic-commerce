@@ -72,6 +72,7 @@ commerce:
   governance:
     # Refunds up to this amount run straight away; larger ones wait for a human to approve them.
     refund-approval-threshold: 100.00
+  mcp:
     # Each agent authenticates with its own bearer token. Which tools it may call comes from its definition in
     # agent-definitions/src/main/resources/agents.
     agents:
@@ -79,18 +80,5 @@ commerce:
         token: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:dev-shopping-assistant-token}
       incident-agent:
         token: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:dev-incident-agent-token}
-
-management:
-  otlp:
-    metrics:
-      export:
-        # Jaeger only takes traces; without this every service fails to push metrics to it once a minute.
-        enabled: false
-  tracing:
-    sampling:
-      probability: 1.0
-  opentelemetry:
-    tracing:
-      export:
-        otlp:
-          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+    # Only an agent with its token may use the MCP endpoint and the agent API it reports to.
+    protected-paths: [/mcp, /api/agent/]

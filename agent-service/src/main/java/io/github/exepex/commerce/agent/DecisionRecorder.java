@@ -1,8 +1,10 @@
 package io.github.exepex.commerce.agent;
 
-import io.github.exepex.commerce.agent.constants.McpValues;
-import io.github.exepex.commerce.agent.dto.Decision;
 import io.github.exepex.commerce.agents.AgentDefinitions;
+import io.github.exepex.commerce.governance.api.client.AgentGovernanceClient;
+import io.github.exepex.commerce.governance.api.dto.AgentDecision;
+import io.github.exepex.commerce.platform.logging.LogValues;
+import io.github.exepex.commerce.platform.security.BearerTokens;
 import java.time.Duration;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -16,19 +18,19 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 class DecisionRecorder {
 
-    private final GovernanceApi governance;
+    private final AgentGovernanceClient governance;
     private final AgentProperties properties;
     private final AgentDefinitions definitions;
 
     void record(String agentId, UUID orderId, String summary, String reasoning, ChatResponse response, Duration took) {
         var usage = response == null ? null : response.getMetadata().getUsage();
-        var decision = new Decision(orderId, summary, reasoning,
+        var decision = new AgentDecision(orderId, summary, reasoning,
                 definitions.get(agentId).model(),
                 usage == null ? null : usage.getPromptTokens().longValue(),
                 usage == null ? null : usage.getCompletionTokens().longValue(),
                 took.toMillis());
         try {
-            governance.recordDecision(McpValues.BEARER + properties.agents().tokenOf(agentId), decision);
+            governance.recordDecision(BearerTokens.authorization(properties.agents().tokenOf(agentId)), decision);
         } catch (RuntimeException unavailable) {
             log.warn("Could not record {}'s decision in the audit trail: {}", LogValues.safe(agentId), LogValues.safe(summary),
                     unavailable);

@@ -20,11 +20,12 @@ import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 
 /**
- * Talks to ServiceNow's Table API as the integration user. Fields are read with {@code sysparm_display_value=all}, so
- * each comes with its stored value (a state code, a sys_id, a UTC time) and the name a person sees.
+ * The {@link IncidentSystem} on ServiceNow's Table API, called as the integration user. Fields are read with
+ * {@code sysparm_display_value=all}, so each comes with its stored value (a state code, a sys_id, a UTC time) and the
+ * name a person sees.
  */
 @Component
-class ServiceNowClient {
+class ServiceNowClient implements IncidentSystem {
 
     private static final int PAGE_SIZE = 100;
     private static final int NEW_INCIDENTS_PER_POLL = 20;
@@ -48,21 +49,18 @@ class ServiceNowClient {
                 .build();
     }
 
-    Optional<Incident> findByNumber(String number) {
+    @Override
+    public Optional<Incident> findByNumber(String number) {
         return query(IncidentQueries.BY_NUMBER.formatted(number), 1).stream().findFirst();
     }
 
-    /** The incident opened for a shop case, if one was, so a case never gets two. */
-    Optional<Incident> findByCaseId(UUID caseId) {
+    @Override
+    public Optional<Incident> findByCaseId(UUID caseId) {
         return query(IncidentQueries.BY_CASE.formatted(caseId), 1).stream().findFirst();
     }
 
-    /**
-     * Opens an incident. Fields are given as a person sees them, such as the assignment group by its name.
-     *
-     * @return the incident as created
-     */
-    Incident create(Map<String, String> fields) {
+    @Override
+    public Incident create(Map<String, String> fields) {
         var body = restClient.post()
                 .uri(uri -> uri.path(TableApi.INCIDENTS)
                         .queryParam(TableApi.INPUT_DISPLAY_VALUE, true)
@@ -75,17 +73,14 @@ class ServiceNowClient {
         return TableApiRows.incidentOf(body.path(TableApi.RESULT));
     }
 
-    /** Where a person opens the incident in ServiceNow. */
-    String linkTo(Incident incident) {
+    @Override
+    public String linkTo(Incident incident) {
         return linkPrefix() + incident.sysId();
     }
 
-    /**
-     * The incident a link from {@link #linkTo} points at, read by its sys_id. A link to another instance, such as one an
-     * earlier simulator run handed out, points at none of this instance's incidents, whatever its number: numbers
-     * repeat across instances.
-     */
-    Optional<Incident> findLinked(String link) {
+    /** Read by the sys_id that ends the link. */
+    @Override
+    public Optional<Incident> findLinked(String link) {
         if (link == null || !link.startsWith(linkPrefix())) {
             return Optional.empty();
         }
@@ -101,16 +96,14 @@ class ServiceNowClient {
         return properties.instanceUrl().replaceAll(Patterns.TRAILING_SLASHES, "") + TableApi.INCIDENT_LINK;
     }
 
-    /** New incidents in the agent's group that nobody has taken yet. */
-    List<Incident> findNewForAgent() {
+    @Override
+    public List<Incident> findNewForAgent() {
         return query(IncidentQueries.NEW_IN_GROUP.formatted(properties.agentGroup()), NEW_INCIDENTS_PER_POLL);
     }
 
-    /**
-     * Open incidents that name something in their Correlation ID, such as an order: the shop's own and the service
-     * desk's. All of them, read a page at a time, oldest first.
-     */
-    List<Incident> findOpenWithCorrelationId() {
+    /** Read a page at a time. */
+    @Override
+    public List<Incident> findOpenWithCorrelationId() {
         var all = new ArrayList<Incident>();
         List<Incident> page;
         do {
@@ -120,24 +113,25 @@ class ServiceNowClient {
         return all;
     }
 
-    /** Incidents the agent has claimed and not finished: still in its group, assigned to it and in progress. */
-    List<Incident> findClaimedByAgent() {
+    @Override
+    public List<Incident> findClaimedByAgent() {
         var claimed = IncidentQueries.IN_PROGRESS_IN_GROUP_WITH.formatted(properties.agentGroup(), integrationUserSysId());
         return query(claimed, CLAIMED_INCIDENTS_PER_POLL);
     }
 
     /**
-     * The incident's work notes and comments, read from the incident's own journal fields and passed on as shown. The
-     * journal table, {@code sys_journal_field}, is not used: a user with only the {@code itil} role cannot read its
-     * rows, and ServiceNow then returns none rather than an error. The text is not split into entries: a note can
-     * contain a line that looks like another entry's heading.
+     * Read from the incident's own journal fields and passed on as shown. The journal table, {@code sys_journal_field},
+     * is not used: a user with only the {@code itil} role cannot read its rows, and ServiceNow then returns none rather
+     * than an error. The text is not split into entries: a note can contain a line that looks like another entry's
+     * heading.
      */
-    Journal journalOf(String incidentSysId) {
+    @Override
+    public Journal journalOf(String incidentSysId) {
         return TableApiRows.journalOf(journalFieldsOf(incidentSysId));
     }
 
-    /** All of the incident's work notes as shown, not cut like {@link #journalOf}: for finding what was sent before. */
-    String allWorkNotesOf(String incidentSysId) {
+    @Override
+    public String allWorkNotesOf(String incidentSysId) {
         return TableApiRows.allWorkNotesOf(journalFieldsOf(incidentSysId));
     }
 
@@ -153,13 +147,13 @@ class ServiceNowClient {
         return TableApiRows.firstRowOf(body);
     }
 
-    /** Updates fields of an incident with their stored values: state codes and sys_ids. */
-    void update(String sysId, Map<String, String> fields) {
+    @Override
+    public void update(String sysId, Map<String, String> fields) {
         patch(sysId, fields, false);
     }
 
-    /** Updates fields of an incident given as a person sees them, such as an assignment group by its name. */
-    void updateByDisplayValue(String sysId, Map<String, String> fields) {
+    @Override
+    public void updateByDisplayValue(String sysId, Map<String, String> fields) {
         patch(sysId, fields, true);
     }
 
@@ -174,8 +168,9 @@ class ServiceNowClient {
                 .toBodilessEntity();
     }
 
-    /** The integration user's sys_id, looked up once: incidents the agent claims are assigned to it. */
-    String integrationUserSysId() {
+    /** Looked up once. */
+    @Override
+    public String integrationUserSysId() {
         if (integrationUserSysId == null) {
             var body = restClient.get()
                     .uri(uri -> uri.path(TableApi.USERS)

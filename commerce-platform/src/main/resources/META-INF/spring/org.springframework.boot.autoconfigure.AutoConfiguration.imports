@@ -1,0 +1,3 @@
+io.github.exepex.commerce.platform.error.ErrorHandlingAutoConfiguration
+io.github.exepex.commerce.platform.events.EventPublishingAutoConfiguration
+io.github.exepex.commerce.platform.time.ClockAutoConfiguration

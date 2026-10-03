@@ -1,9 +1,7 @@
 package io.github.exepex.commerce.mcp.downstream;
 
 import io.github.exepex.commerce.mcp.exception.DownstreamException;
-import io.github.exepex.commerce.mcp.exception.DownstreamRefusedException;
-import io.github.exepex.commerce.mcp.exception.DownstreamUnavailableException;
-import io.github.exepex.commerce.mcp.exception.DownstreamUnreachableException;
+import io.github.exepex.commerce.platform.remote.RemoteProblems;
 import java.util.Map;
 import java.util.function.Supplier;
 import lombok.AccessLevel;
@@ -25,25 +23,15 @@ public final class Downstream {
             return request.get();
         } catch (HttpStatusCodeException refused) {
             var status = refused.getStatusCode();
-            var problem = problemOf(refused);
-            var detail = problem != null && problem.getDetail() != null ? problem.getDetail() : status.toString();
-            var properties = problem != null && problem.getProperties() != null
-                    ? problem.getProperties()
-                    : Map.<String, Object>of();
+            var problem = RemoteProblems.problemOf(refused);
+            var detail = problem.map(ProblemDetail::getDetail).orElse(status.toString());
+            var properties = problem.map(ProblemDetail::getProperties).orElse(Map.of());
             if (status.is5xxServerError()) {
-                throw new DownstreamUnavailableException(service, status, detail, properties, refused);
+                throw DownstreamException.unavailable(service, status, detail, properties, refused);
             }
-            throw new DownstreamRefusedException(status, detail, properties, refused);
+            throw DownstreamException.refused(status, detail, properties, refused);
         } catch (RestClientException unreachable) {
-            throw new DownstreamUnreachableException(service, unreachable);
-        }
-    }
-
-    private static ProblemDetail problemOf(HttpStatusCodeException refused) {
-        try {
-            return refused.getResponseBodyAs(ProblemDetail.class);
-        } catch (RuntimeException unreadableBody) {
-            return null;
+            throw DownstreamException.unreachable(service, unreachable);
         }
     }
 }

@@ -7,6 +7,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
+import io.github.exepex.commerce.platform.security.BearerTokens;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -95,7 +96,8 @@ abstract class McpServerTestSupport {
 
     protected McpSyncClient connect(String token) {
         McpSyncClient client = McpClient.sync(HttpClientStreamableHttpTransport.builder("http://localhost:" + port)
-                        .requestBuilder(HttpRequest.newBuilder().header("Authorization", "Bearer " + token))
+                        .requestBuilder(HttpRequest.newBuilder()
+                                .header("Authorization", BearerTokens.authorization(token)))
                         .build())
                 .requestTimeout(Duration.ofSeconds(20))
                 .build();

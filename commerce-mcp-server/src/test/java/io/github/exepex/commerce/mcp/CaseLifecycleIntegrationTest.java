@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.jayway.jsonpath.JsonPath;
+import io.github.exepex.commerce.platform.security.BearerTokens;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -192,7 +193,7 @@ class CaseLifecycleIntegrationTest extends CaseTestSupport {
     @Test
     void onlyTheCaseWorkerMaySyncCases() {
         int asAssistant = RestClient.create("http://localhost:" + port).get().uri("/api/agent/cases/outgoing")
-                .header("Authorization", "Bearer " + ASSISTANT_TOKEN)
+                .header("Authorization", BearerTokens.authorization(ASSISTANT_TOKEN))
                 .exchange((request, response) -> response.getStatusCode().value());
         int anonymous = rest().get().uri("/api/agent/cases/outgoing")
                 .exchange((request, response) -> response.getStatusCode().value());

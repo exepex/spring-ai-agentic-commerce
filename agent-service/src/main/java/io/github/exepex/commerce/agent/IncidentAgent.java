@@ -13,6 +13,7 @@ import io.github.exepex.commerce.agent.exception.HandOffUnreachableException;
 import io.github.exepex.commerce.agent.exception.KillSwitchUnreadableException;
 import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.agents.AgentDefinitions;
+import io.github.exepex.commerce.platform.logging.LogValues;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.time.Duration;
 import java.time.Instant;

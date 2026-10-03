@@ -25,6 +25,21 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
+            <groupId>io.github.exepex.commerce</groupId>
+            <artifactId>commerce-platform</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.exepex.commerce</groupId>
+            <artifactId>mcp-server-support</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.exepex.commerce</groupId>
+            <artifactId>governance-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
         </dependency>

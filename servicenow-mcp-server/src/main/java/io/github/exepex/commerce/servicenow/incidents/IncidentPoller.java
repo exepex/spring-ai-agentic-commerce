@@ -1,19 +1,21 @@
 package io.github.exepex.commerce.servicenow.incidents;
 
+import io.github.exepex.commerce.governance.api.client.AgentGovernanceClient;
+import io.github.exepex.commerce.governance.api.client.AgentSwitchesClient;
+import io.github.exepex.commerce.governance.api.dto.ToolCallOutcome;
+import io.github.exepex.commerce.governance.api.dto.ToolCallReport;
+import io.github.exepex.commerce.mcpserver.security.AgentRegistry;
+import io.github.exepex.commerce.platform.logging.LogValues;
+import io.github.exepex.commerce.platform.security.BearerTokens;
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
 import io.github.exepex.commerce.servicenow.constants.AuditValues;
-import io.github.exepex.commerce.servicenow.constants.AuthValues;
 import io.github.exepex.commerce.servicenow.constants.ConfigKeys;
 import io.github.exepex.commerce.servicenow.constants.IncidentStates;
 import io.github.exepex.commerce.servicenow.constants.IncidentTexts;
 import io.github.exepex.commerce.servicenow.constants.ServiceNowFields;
 import io.github.exepex.commerce.servicenow.constants.ToolNames;
 import io.github.exepex.commerce.servicenow.dto.Team;
-import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
-import io.github.exepex.commerce.servicenow.governance.LogValues;
-import io.github.exepex.commerce.servicenow.governance.dto.ToolCall;
 import io.github.exepex.commerce.servicenow.incidents.dto.Incident;
-import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.HashMap;
@@ -63,7 +65,7 @@ public class IncidentPoller {
 
     private static final long SEND_TIMEOUT_SECONDS = 10;
 
-    private final ServiceNowClient serviceNow;
+    private final IncidentSystem serviceNow;
     private final CaseSync cases;
     private final ServiceNowProperties properties;
     private final KafkaTemplate<String, IncidentEvent> kafka;
@@ -71,7 +73,8 @@ public class IncidentPoller {
     @Value(ConfigKeys.INCIDENTS_TOPIC)
     private final String topic;
 
-    private final GovernanceApi governance;
+    private final AgentSwitchesClient switches;
+    private final AgentGovernanceClient governance;
     private final AgentRegistry agents;
     private final Clock clock;
 
@@ -119,7 +122,7 @@ public class IncidentPoller {
      * @param recorded the service desk's incidents the shop has now, by number, each with its order
      */
     private void claimNewIncidents(Map<String, UUID> recorded) {
-        var switchedOn = Boolean.TRUE.equals(governance.switches().get(properties.agent()));
+        var switchedOn = Boolean.TRUE.equals(switches.all().get(properties.agent()));
         for (var found : serviceNow.findNewForAgent()) {
             serviceNow.findByNumber(found.number())
                     .filter(this::isNewInTheAgentsGroup)
@@ -235,8 +238,9 @@ public class IncidentPoller {
     /** Recorded in the shared audit trail as the agent the poller works for. */
     private void record(String tool, String summary) {
         try {
-            governance.recordToolCall(AuthValues.BEARER_PREFIX + agents.tokenOf(properties.agent()),
-                    new ToolCall(null, AuditValues.ACTION_PREFIX + tool, AuditValues.SUCCEEDED, summary, null));
+            governance.recordToolCall(BearerTokens.authorization(agents.tokenOf(properties.agent())),
+                    new ToolCallReport(null, AuditValues.ACTION_PREFIX + tool, ToolCallOutcome.SUCCEEDED, summary,
+                            null));
         } catch (RuntimeException unreachable) {
             log.warn("Could not record {} in the audit trail: {}", tool, LogValues.safe(summary), unreachable);
         }

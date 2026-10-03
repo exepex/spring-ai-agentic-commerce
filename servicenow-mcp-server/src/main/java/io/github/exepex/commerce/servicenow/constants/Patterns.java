@@ -11,7 +11,4 @@ public final class Patterns {
     /** A plain sys_id: nothing that could add terms of its own to an encoded query. */
     public static final String SYS_ID = "[A-Za-z0-9-]+";
     public static final String TRAILING_SLASHES = "/+$";
-    /** What could start a forged log entry, and what replaces it. */
-    public static final String LINE_BREAKS = "[\\r\\n\\t]";
-    public static final String LINE_BREAK_REPLACEMENT = "_";
 }

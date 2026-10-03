@@ -12,6 +12,4 @@ public final class ConfigKeys {
     /** The incident listener only starts when the ServiceNow MCP server is configured. */
     public static final String INCIDENT_LISTENER_AUTO_STARTUP = "#{'${commerce.servicenow.mcp-url:}' != ''}";
     public static final String ANTHROPIC_API_KEY = "spring.ai.anthropic.api-key";
-    /** The HTTP service group for the commerce MCP server, under {@code spring.http.serviceclient}. */
-    public static final String GOVERNANCE_CLIENTS = "governance";
 }

@@ -9,8 +9,5 @@ public final class ErrorMessages {
 
     public static final String UNKNOWN_DEFAULT_TEAM =
             "commerce.servicenow.default-team must name one of the configured teams";
-    public static final String MISSING_AGENT_TOKEN = "No token is configured for agent %s";
     public static final String INTEGRATION_USER_NOT_FOUND = "ServiceNow has no user %s";
-    public static final String UNAUTHENTICATED_TOOL_CALL = "Tool called without an authenticated agent";
-    public static final String AGENT_TOKEN_REQUIRED = "An agent bearer token is required";
 }

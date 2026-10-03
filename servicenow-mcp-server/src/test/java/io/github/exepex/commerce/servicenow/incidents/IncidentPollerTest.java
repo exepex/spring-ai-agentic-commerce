@@ -8,12 +8,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.github.exepex.commerce.governance.api.client.AgentGovernanceClient;
+import io.github.exepex.commerce.governance.api.client.AgentSwitchesClient;
+import io.github.exepex.commerce.mcpserver.security.AgentRegistry;
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
 import io.github.exepex.commerce.servicenow.constants.IncidentStates;
 import io.github.exepex.commerce.servicenow.dto.Team;
-import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.incidents.dto.Incident;
-import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,15 +36,16 @@ class IncidentPollerTest {
             "Order arrived broken", "", IncidentStates.NEW, "New", "Online Shop Agent", "", "", "Ada", "", "", null, null);
     private static final Instant NOW = Instant.parse("2026-10-02T12:00:00Z");
 
-    private final ServiceNowClient serviceNow = mock(ServiceNowClient.class);
-    private final GovernanceApi governance = mock(GovernanceApi.class);
+    private final IncidentSystem serviceNow = mock(IncidentSystem.class);
+    private final AgentSwitchesClient switches = mock(AgentSwitchesClient.class);
+    private final AgentGovernanceClient governance = mock(AgentGovernanceClient.class);
 
     @SuppressWarnings("unchecked")
     private final KafkaTemplate<String, IncidentEvent> kafka = mock(KafkaTemplate.class);
 
     @BeforeEach
     void switchTheAgentOn() {
-        when(governance.switches()).thenReturn(Map.of("incident-agent", true));
+        when(switches.all()).thenReturn(Map.of("incident-agent", true));
     }
 
     @Test
@@ -58,8 +60,8 @@ class IncidentPollerTest {
         when(kafka.send(eq("servicenow.incidents"), eq("INC0010001"), any()))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("Kafka is down")));
 
-        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", governance, mock(AgentRegistry.class),
-                Clock.systemUTC()).poll();
+        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", switches,
+                governance, mock(AgentRegistry.class), Clock.systemUTC()).poll();
 
         verify(serviceNow).update("sys-1", Map.of("assigned_to", "agent-sys-id", "state", IncidentStates.IN_PROGRESS,
                 "work_notes", "Picked up by the incident-agent."));
@@ -79,8 +81,8 @@ class IncidentPollerTest {
         when(kafka.send(eq("servicenow.incidents"), eq("INC0010001"), any()))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("Kafka is down")));
 
-        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", governance,
-                mock(AgentRegistry.class), Clock.systemUTC()).poll();
+        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", switches,
+                governance, mock(AgentRegistry.class), Clock.systemUTC()).poll();
 
         verify(serviceNow, never()).update("sys-1", Map.of("assigned_to", "", "state", IncidentStates.NEW));
     }
@@ -97,8 +99,8 @@ class IncidentPollerTest {
         when(kafka.send(eq("servicenow.incidents"), eq("INC0010001"), any()))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("Kafka is down")));
 
-        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", governance,
-                mock(AgentRegistry.class), Clock.systemUTC()).poll();
+        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", switches,
+                governance, mock(AgentRegistry.class), Clock.systemUTC()).poll();
 
         verify(serviceNow, never()).update("sys-1", Map.of("assigned_to", "", "state", IncidentStates.NEW));
     }
@@ -137,7 +139,7 @@ class IncidentPollerTest {
     }
 
     private void pollAt(Instant now) {
-        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", governance,
-                mock(AgentRegistry.class), Clock.fixed(now, ZoneOffset.UTC)).poll();
+        new IncidentPoller(serviceNow, mock(CaseSync.class), PROPERTIES, kafka, "servicenow.incidents", switches,
+                governance, mock(AgentRegistry.class), Clock.fixed(now, ZoneOffset.UTC)).poll();
     }
 }

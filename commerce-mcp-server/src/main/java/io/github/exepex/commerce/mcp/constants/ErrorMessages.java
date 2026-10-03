@@ -10,9 +10,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class ErrorMessages {
 
-    public static final String AGENT_TOKEN_REQUIRED = "An agent bearer token is required";
-    public static final String MISSING_AGENT_TOKEN = "No token is configured for agent %s";
-    public static final String UNAUTHENTICATED_TOOL_CALL = "Tool called without an authenticated agent";
     public static final String TOOL_NOT_PERMITTED = "Agent %s is not permitted to call %s";
     public static final String AGENT_SWITCHED_OFF = "Agent %s is switched off. Stop, and hand any work that needs doing "
             + "to a human with " + ToolNames.ESCALATE_TO_HUMAN + ".";

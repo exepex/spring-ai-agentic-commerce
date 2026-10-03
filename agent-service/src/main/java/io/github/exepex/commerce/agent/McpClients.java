@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.agent;
 
 import io.github.exepex.commerce.agent.constants.McpValues;
+import io.github.exepex.commerce.platform.security.BearerTokens;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
@@ -23,7 +24,7 @@ final class McpClients {
     static McpSyncClient open(String name, String url, String bearerToken) {
         var client = McpClient.sync(HttpClientStreamableHttpTransport.builder(url)
                         .requestBuilder(HttpRequest.newBuilder()
-                                .header(HttpHeaders.AUTHORIZATION, McpValues.BEARER + bearerToken))
+                                .header(HttpHeaders.AUTHORIZATION, BearerTokens.authorization(bearerToken)))
                         .build())
                 .clientInfo(new McpSchema.Implementation(McpValues.CLIENT_NAME_PREFIX + name, McpValues.CLIENT_VERSION))
                 .requestTimeout(Duration.ofSeconds(60))
