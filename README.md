@@ -250,6 +250,7 @@ Everything is set in `.env` (copied from `.env.example`); Docker Compose passes 
 | `AGENTIC_COMMERCE_SERVICENOW_AGENT_GROUP`, `_CUSTOMER_CARE_GROUP`, `_PAYMENTS_GROUP`, `_FULFILMENT_GROUP` | no | Assignment group names, if yours differ from `Online Shop Agent`, `Customer Care`, `Payments` and `Fulfilment`. |
 | `AGENTIC_COMMERCE_SLACK_BOT_TOKEN`, `AGENTIC_COMMERCE_SLACK_CHANNEL_ID` | no | Slack bot and channel for `--slack`; the scopes are listed in `.env.example`. |
 | `AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN`, `AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN` | yes (defaults in `.env.example`) | Each agent's bearer token, shared by agent-service and the MCP servers. Change them for anything beyond a local demo. |
+| `AGENTIC_COMMERCE_INTERNAL_API_TOKEN` | yes (default in `.env.example`) | The token services present to each other's internal endpoints: placing and cancelling orders, charging, refunding, reserving stock. Without it nobody can call them directly, so the refund approval limit cannot be bypassed. Change it for anything beyond a local demo. |
 | `AGENTIC_COMMERCE_SLACK_MCP_API_KEY` | with `--slack` | The key agent-service presents to the Slack MCP server. |
 
 Behaviour that is not a secret lives in each service's `src/main/resources/application.yml`, for example the refund
@@ -379,6 +380,10 @@ running, use `mvn -pl agent-evals -Pevals test`. Point them at a UI run with `np
   does: identity, permissions, ownership, limits, approvals and idempotency are all enforced in code.
 - **Defence in depth.** The agent service only hands each agent its allowlisted tools; the MCP server checks the same
   permissions again on every call.
+- **Only services call the internal endpoints.** Placing and cancelling orders, charging, refunding and reserving stock
+  need the service token (`commerce.internal-api` in each service's `application.yml`, built once in
+  `commerce-platform`). The browser reaches the services through nginx, but cannot call these, so a refund always goes
+  through the MCP server's approval limit and an order is only placed from a confirmed proposal.
 - **Deterministic work stays in code.** Which orders a stock-out affects is calculated by the catalog, not guessed by
   a model.
 - **ServiceNow is the one case system.** Every problem is a case, opened by code rather than by a model's judgement,

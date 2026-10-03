@@ -2,6 +2,7 @@ package io.github.exepex.commerce.order;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.deleteRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
@@ -14,11 +15,14 @@ import static org.awaitility.Awaitility.await;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.jayway.jsonpath.JsonPath;
 import java.time.Duration;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /** Checkout and cancellation through the HTTP API. */
@@ -33,14 +37,33 @@ class OrderApiIntegrationTest extends OrderServiceTestSupport {
         assertThat(placed).bodyJson().extractingPath("$.total").isEqualTo(299.30);
         String orderId = orderIdOf(placed);
         DEPENDENCIES.verify(postRequestedFor(urlEqualTo("/api/products/" + SHOE + "/reservations"))
+                .withHeader(HttpHeaders.AUTHORIZATION, equalTo(SERVICE_TOKEN))
                 .withRequestBody(equalToJson("""
                         {"orderId": "%s", "quantity": 2}""".formatted(orderId))));
-        DEPENDENCIES.verify(postRequestedFor(urlEqualTo("/api/payments")).withRequestBody(equalToJson("""
+        DEPENDENCIES.verify(postRequestedFor(urlEqualTo("/api/payments"))
+                .withHeader(HttpHeaders.AUTHORIZATION, equalTo(SERVICE_TOKEN)).withRequestBody(equalToJson("""
                 {"orderId": "%s", "customerEmail": "ada@example.com", "amount": 299.30, "currency": "EUR",
                  "paymentMethod": "pm_card_visa"}""".formatted(orderId))));
         assertThat(mockMvc.get().uri("/api/orders/{orderId}", orderId))
                 .bodyJson().extractingPath("$.lines.length()").isEqualTo(2);
         assertThat(orderEventTypesFor(orderId, 1)).containsExactly("ORDER_CONFIRMED");
+    }
+
+    @Test
+    void onlyTheShopsMcpServerCanPlaceOrCancelAnOrder() {
+        assertThat(mockMvc.post().uri("/api/orders")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"customerEmail": "mallory@example.com", "lines": [{"productId": "%s", "quantity": 1}]}"""
+                        .formatted(SHOE)))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(mockMvc.post().uri("/api/orders/{orderId}/cancellation", UUID.randomUUID())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"reason": "not mine"}"""))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(mockMvc.get().uri("/api/orders?customerEmail=mallory@example.com"))
+                .bodyJson().extractingPath("$.length()").isEqualTo(0);
     }
 
     @Test

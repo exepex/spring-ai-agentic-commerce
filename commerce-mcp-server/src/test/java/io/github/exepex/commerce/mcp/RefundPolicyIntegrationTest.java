@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 
 /**
@@ -37,7 +38,8 @@ class RefundPolicyIntegrationTest extends McpServerTestSupport {
 
         assertThat((String) JsonPath.read(first, "$.status")).isEqualTo("EXECUTED");
         assertThat((String) JsonPath.read(second, "$.refundRequestId")).isEqualTo(JsonPath.read(first, "$.refundRequestId"));
-        SERVICES.verify(1, postRequestedFor(urlEqualTo("/api/payments/" + orderId + "/refunds")));
+        SERVICES.verify(1, postRequestedFor(urlEqualTo("/api/payments/" + orderId + "/refunds"))
+                .withHeader(HttpHeaders.AUTHORIZATION, equalTo("Bearer dev-internal-api-token")));
     }
 
     @Test

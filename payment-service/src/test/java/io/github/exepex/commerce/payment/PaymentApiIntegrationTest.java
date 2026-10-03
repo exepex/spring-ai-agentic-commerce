@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
@@ -34,6 +35,9 @@ import org.testcontainers.kafka.KafkaContainer;
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
 class PaymentApiIntegrationTest {
+
+    /** What the services that call this one present; anyone else is refused. */
+    private static final String SERVICE_TOKEN = "Bearer dev-internal-api-token";
 
     @Autowired
     private MockMvcTester mockMvc;
@@ -177,6 +181,7 @@ class PaymentApiIntegrationTest {
         charge(orderId, "50.00", "pm_card_visa");
 
         assertThat(mockMvc.post().uri("/api/payments/{orderId}/refunds", orderId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"amount": 10.00, "reason": "%s", "idempotencyKey": "long-reason-%s"}"""
@@ -197,6 +202,28 @@ class PaymentApiIntegrationTest {
     }
 
     @Test
+    void onlyAServiceWithTheTokenCanChargeOrRefund() {
+        UUID orderId = UUID.randomUUID();
+        charge(orderId, "150.00", "pm_card_visa");
+
+        // Calling the payment service directly must not get around the refund approval limit of the MCP server.
+        assertThat(mockMvc.post().uri("/api/payments/{orderId}/refunds", orderId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"amount": 150.00, "reason": "direct", "idempotencyKey": "direct-%s"}""".formatted(orderId)))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(mockMvc.post().uri("/api/payments")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer dev-shopping-assistant-token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"orderId": "%s", "customerEmail": "ada@example.com", "amount": 1.00, "currency": "EUR",
+                         "paymentMethod": "pm_card_visa"}""".formatted(UUID.randomUUID())))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(mockMvc.get().uri("/api/payments/{orderId}", orderId))
+                .bodyJson().extractingPath("$.refundable").isEqualTo(150.0);
+    }
+
+    @Test
     void theSimulatedOutageTakesThePaymentApiDownButNotTheSwitch() {
         setOutage(true);
 
@@ -207,7 +234,7 @@ class PaymentApiIntegrationTest {
     }
 
     private MvcTestResult charge(UUID orderId, String amount, String paymentMethod) {
-        return mockMvc.post().uri("/api/payments")
+        return mockMvc.post().uri("/api/payments").header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"orderId": "%s", "customerEmail": "ada@example.com", "amount": %s, "currency": "EUR",
@@ -217,6 +244,7 @@ class PaymentApiIntegrationTest {
 
     private MvcTestResult refund(UUID orderId, String amount, String idempotencyKey) {
         return mockMvc.post().uri("/api/payments/{orderId}/refunds", orderId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"amount": %s, "reason": "item out of stock", "idempotencyKey": "%s"}"""

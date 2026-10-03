@@ -17,6 +17,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
@@ -36,6 +37,9 @@ final class Demo {
     private final RestClient api = RestClient.builder()
             .baseUrl(System.getProperty("evals.baseUrl", "http://localhost:8080/svc"))
             .requestFactory(httpOneOneWithTimeouts())
+            // Orders are set up the way the shop's MCP server places them, so the evals present the service token.
+            .defaultHeader(HttpHeaders.AUTHORIZATION,
+                    "Bearer " + System.getProperty("evals.internalApiToken", "dev-internal-api-token"))
             .build();
 
     String placeOrder(String customerEmail, String productId) {
