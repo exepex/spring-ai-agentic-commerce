@@ -35,6 +35,12 @@ interface IncidentSystem {
      */
     Optional<Incident> findLinked(String link);
 
+    /**
+     * The incidents several links point at, by link, read in as few requests as ServiceNow allows. A link to another
+     * instance, or to an incident ServiceNow no longer has, has no entry.
+     */
+    Map<String, Incident> findAllLinked(List<String> links);
+
     /** New incidents in the agent's group that nobody has taken yet. */
     List<Incident> findNewForAgent();
 

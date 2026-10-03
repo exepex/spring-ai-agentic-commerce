@@ -144,8 +144,9 @@ class CaseSync {
 
     /**
      * Reads who has each case's incident now and tells the shop. Each incident is found by the case's link, so a case
-     * whose incident is on another instance is left alone, even if this instance has an incident with its number. An
-     * incident that cannot be read is tried next poll.
+     * whose incident is on another instance is left alone, even if this instance has an incident with its number. The
+     * incidents are read together, a hundred per request, so the poll does not cost one request per case; if they
+     * cannot be read, every case is tried again next poll.
      *
      * <p>A case's resolution is reported only once its notes are settled: a note may have reached its incident though
      * ServiceNow's answer was lost, and the shop carries a resolved case's unsent notes over to a new case. The next
@@ -155,22 +156,28 @@ class CaseSync {
      * @param notesSettled whether a case's notes are settled, so its resolution may be reported
      */
     void readBackIncidents(Predicate<UUID> notesSettled) {
-        for (var supportCase : governance.casesInServiceNow(authorization())) {
-            try {
-                serviceNow.findLinked(supportCase.incidentUrl()).ifPresentOrElse(
-                        incident -> {
-                            var state = stateOf(incident);
-                            if (state.status() == CaseStatus.RESOLVED && !notesSettled.test(supportCase.id())) {
-                                log.info("{} is resolved; telling the shop once its notes are settled", incident.number());
-                                return;
-                            }
-                            report(supportCase.id(), state);
-                        },
-                        () -> log.warn("Incident {} of case {} is not on this instance", supportCase.incidentNumber(),
-                                supportCase.id()));
-            } catch (RuntimeException failure) {
-                log.warn("Could not read incident {} back; trying again next time", supportCase.incidentNumber(), failure);
+        var inServiceNow = governance.casesInServiceNow(authorization());
+        var incidents = serviceNow.findAllLinked(inServiceNow.stream().map(CaseView::incidentUrl).toList());
+        for (var supportCase : inServiceNow) {
+            var incident = incidents.get(supportCase.incidentUrl());
+            if (incident == null) {
+                log.warn("Incident {} of case {} is not on this instance", supportCase.incidentNumber(), supportCase.id());
+            } else {
+                readBack(supportCase, incident, notesSettled);
             }
+        }
+    }
+
+    private void readBack(CaseView supportCase, Incident incident, Predicate<UUID> notesSettled) {
+        try {
+            var state = stateOf(incident);
+            if (state.status() == CaseStatus.RESOLVED && !notesSettled.test(supportCase.id())) {
+                log.info("{} is resolved; telling the shop once its notes are settled", incident.number());
+            } else {
+                report(supportCase.id(), state);
+            }
+        } catch (RuntimeException failure) {
+            log.warn("Could not read incident {} back; trying again next time", supportCase.incidentNumber(), failure);
         }
     }
 

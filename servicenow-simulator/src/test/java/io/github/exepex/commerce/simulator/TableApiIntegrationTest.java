@@ -98,6 +98,19 @@ class TableApiIntegrationTest {
     }
 
     @Test
+    void findsSeveralIncidentsAtOnceByTheirSysIds() {
+        String first = create(Map.of("assignment_group", "Payments", "short_description", "First"));
+        String second = create(Map.of("assignment_group", "Payments", "short_description", "Second"));
+        String other = create(Map.of("assignment_group", "Payments", "short_description", "Not asked for"));
+
+        String found = get("/api/now/table/incident?sysparm_query=sys_idIN" + first + "," + second
+                + "&sysparm_display_value=all");
+
+        assertThat(JsonPath.<List<String>>read(found, "$.result[*].sys_id.value"))
+                .containsExactlyInAnyOrder(first, second).doesNotContain(other);
+    }
+
+    @Test
     void refusesAGroupThatDoesNotExist() {
         int status = api().post().uri("/api/now/table/incident?sysparm_input_display_value=true")
                 .contentType(MediaType.APPLICATION_JSON).body(Map.of("assignment_group", "Legal"))

@@ -143,7 +143,10 @@ abstract class ServiceNowMcpServerIntegrationTestSupport {
         stubIncident("INC0010001", "sys-1", state, "Online Shop Agent", assignedTo, "", updatedAt);
     }
 
-    /** The incident, found by its number, as the tools and the claim find it, and by its link, as a case finds it. */
+    /**
+     * The incident, found by its number, as the tools and the claim find it, and by its link, as a case finds it on its
+     * own or in a read-back of that one case.
+     */
     void stubIncident(String number, String sysId, String state, String group, String assignedTo, String caseId,
             Instant updatedAt) {
         String found = "{\"result\": [" + incidentRow(number, sysId, state, group, assignedTo, caseId, updatedAt) + "]}";
@@ -152,6 +155,15 @@ abstract class ServiceNowMcpServerIntegrationTestSupport {
                 .willReturn(okJson(found)));
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
                 .withQueryParam("sysparm_query", equalTo("sys_id=" + sysId))
+                .withQueryParam("sysparm_display_value", equalTo("all"))
+                .willReturn(okJson(found)));
+        stubLinkedIncidents(List.of(sysId), found);
+    }
+
+    /** The incidents a read-back of several cases asks ServiceNow for together, by their sys_ids in that order. */
+    void stubLinkedIncidents(List<String> sysIds, String found) {
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("sys_idIN" + String.join(",", sysIds)))
                 .withQueryParam("sysparm_display_value", equalTo("all"))
                 .willReturn(okJson(found)));
     }

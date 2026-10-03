@@ -4,6 +4,8 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalToJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.matching;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.patch;
@@ -83,7 +85,7 @@ class CaseReadBackIntegrationTest extends ServiceNowMcpServerIntegrationTestSupp
         String cleared = incidentRow("INC0010035", "sys-35", "2", "Payments", "", "", Instant.now())
                 .replace(LINKED_ORDER, "");
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
-                .withQueryParam("sysparm_query", equalTo("sys_id=sys-35"))
+                .withQueryParam("sysparm_query", equalTo("sys_idINsys-35"))
                 .willReturn(okJson("{\"result\": [" + cleared + "]}")));
 
         poller.poll();
@@ -113,8 +115,21 @@ class CaseReadBackIntegrationTest extends ServiceNowMcpServerIntegrationTestSupp
         stubIncident("INC0010013", "sys-13", "7", "Payments", "", resolved, Instant.now());
         stubIncident("INC0010014", "sys-14", "2", "Online Shop Agent", "desk-ana", takenByAPerson, Instant.now());
         stubIncident("INC0010016", "sys-16", "3", "Online Shop Agent", "", onHold, Instant.now());
+        stubLinkedIncidents(List.of("sys-11", "sys-12", "sys-13", "sys-14", "sys-16"), "{\"result\": ["
+                + incidentRow("INC0010011", "sys-11", "2", "Online Shop Agent", AGENT_USER, withAgent, Instant.now()) + ","
+                + incidentRow("INC0010012", "sys-12", "2", "Payments", "", withTeam, Instant.now()) + ","
+                + incidentRow("INC0010013", "sys-13", "7", "Payments", "", resolved, Instant.now()) + ","
+                + incidentRow("INC0010014", "sys-14", "2", "Online Shop Agent", "desk-ana", takenByAPerson,
+                        Instant.now()) + ","
+                + incidentRow("INC0010016", "sys-16", "3", "Online Shop Agent", "", onHold, Instant.now()) + "]}");
 
         poller.poll();
+
+        // Five cases, one request: the read-back does not cost ServiceNow a request per case.
+        SERVICES.verify(1, getRequestedFor(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("sys_idINsys-11,sys-12,sys-13,sys-14,sys-16")));
+        SERVICES.verify(0, getRequestedFor(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", matching("sys_id=.*")));
 
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + withAgent + "/incident-state"))
                 .withRequestBody(equalToJson("""
@@ -157,7 +172,7 @@ class CaseReadBackIntegrationTest extends ServiceNowMcpServerIntegrationTestSupp
         // ServiceNow applies the note, but its answer is lost; meanwhile a person resolves the incident.
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
                 .whenScenarioStateIs(Scenario.STARTED)
-                .withQueryParam("sysparm_query", equalTo("sys_id=sys-16"))
+                .withQueryParam("sysparm_query", matching("sys_id(=|IN)sys-16"))
                 .withQueryParam("sysparm_display_value", equalTo("all"))
                 .willReturn(okJson("{\"result\": [" + incidentRow("INC0010016", "sys-16", "2", "Online Shop Agent",
                         AGENT_USER, caseId, Instant.now()) + "]}")));
@@ -171,7 +186,7 @@ class CaseReadBackIntegrationTest extends ServiceNowMcpServerIntegrationTestSupp
                 .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
                 .whenScenarioStateIs("resolved")
-                .withQueryParam("sysparm_query", equalTo("sys_id=sys-16"))
+                .withQueryParam("sysparm_query", matching("sys_id(=|IN)sys-16"))
                 .withQueryParam("sysparm_display_value", equalTo("all"))
                 .willReturn(okJson("{\"result\": [" + incidentRow("INC0010016", "sys-16", "6", "Online Shop Agent",
                         AGENT_USER, caseId, Instant.now()) + "]}")));
@@ -211,6 +226,9 @@ class CaseReadBackIntegrationTest extends ServiceNowMcpServerIntegrationTestSupp
                 .formatted(takenCase, resolvedCase))));
         stubIncident("INC0010017", "sys-17", "2", "Payments", "", takenCase, Instant.now());
         stubIncident("INC0010018", "sys-18", "6", "Online Shop Agent", "", resolvedCase, Instant.now());
+        stubLinkedIncidents(List.of("sys-17", "sys-18"), "{\"result\": ["
+                + incidentRow("INC0010017", "sys-17", "2", "Payments", "", takenCase, Instant.now()) + ","
+                + incidentRow("INC0010018", "sys-18", "6", "Online Shop Agent", "", resolvedCase, Instant.now()) + "]}");
 
         poller.poll();
 

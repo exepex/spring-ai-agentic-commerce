@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
+import java.util.regex.Pattern;
 
 /**
  * An encoded query such as {@code assigned_toISEMPTY^state=1^ORDERBYDESCsys_created_on}, as far as the simulator
@@ -20,6 +21,8 @@ import java.util.function.Predicate;
  * @param descending whether the order is turned round, newest first
  */
 record EncodedQuery(List<Term> terms, String orderBy, boolean descending) {
+
+    private static final Pattern IN = Pattern.compile(QuerySyntax.IN);
 
     /** One term: the field it reads, and which of that field's stored values it accepts. */
     record Term(String field, Predicate<String> accepts) {}
@@ -73,6 +76,11 @@ record EncodedQuery(List<Term> terms, String orderBy, boolean descending) {
             var excluded = Arrays.asList(term.substring(notIn + QuerySyntax.NOT_IN.length())
                     .split(QuerySyntax.LIST_SEPARATOR));
             return new Term(term.substring(0, notIn), value -> !excluded.contains(value));
+        }
+        var in = IN.matcher(term);
+        if (in.matches()) {
+            var included = Arrays.asList(in.group(2).split(QuerySyntax.LIST_SEPARATOR));
+            return new Term(in.group(1), included::contains);
         }
         var equals = term.indexOf('=');
         if (equals < 0) {
