@@ -54,8 +54,8 @@ class GovernedToolCallsTest {
         }
 
         @Override
-        public ToolCallOutcome outcomeOf(RuntimeException stopped) {
-            return stopped instanceof Refused ? ToolCallOutcome.DENIED : ToolCallOutcome.FAILED;
+        public StoppedCallOutcome outcomeOf(RuntimeException stopped) {
+            return stopped instanceof Refused ? StoppedCallOutcome.DENIED : StoppedCallOutcome.FAILED;
         }
     };
 
@@ -77,7 +77,7 @@ class GovernedToolCallsTest {
         }
 
         @Override
-        public void stopped(String agentId, ToolCall call, ToolCallOutcome outcome, String reason) {
+        public void stopped(String agentId, ToolCall call, StoppedCallOutcome outcome, String reason) {
             recorded.add(outcome + ": " + reason);
         }
     };

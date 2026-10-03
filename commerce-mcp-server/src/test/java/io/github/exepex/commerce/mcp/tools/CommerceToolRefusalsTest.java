@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.exepex.commerce.mcp.exception.CustomerScopeViolationException;
 import io.github.exepex.commerce.mcp.exception.DownstreamException;
 import io.github.exepex.commerce.mcp.exception.IdempotencyKeyReusedException;
-import io.github.exepex.commerce.mcpserver.guard.ToolCallOutcome;
+import io.github.exepex.commerce.mcpserver.guard.StoppedCallOutcome;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -19,22 +19,22 @@ class CommerceToolRefusalsTest {
     @Test
     void aRuleThatForbidsTheCallDeniesIt() {
         assertThat(refusals.outcomeOf(new CustomerScopeViolationException(UUID.randomUUID())))
-                .isEqualTo(ToolCallOutcome.DENIED);
+                .isEqualTo(StoppedCallOutcome.DENIED);
     }
 
     @Test
     void aCommerceServiceThatForbidsTheCallMakesItFailNotDenied() {
         var forbidden = DownstreamException.refused(HttpStatus.FORBIDDEN, "Forbidden", Map.of(), null);
 
-        assertThat(refusals.outcomeOf(forbidden)).isEqualTo(ToolCallOutcome.FAILED);
+        assertThat(refusals.outcomeOf(forbidden)).isEqualTo(StoppedCallOutcome.FAILED);
         assertThat(refusals.outcomeOf(DownstreamException.unreachable("payment service", null)))
-                .isEqualTo(ToolCallOutcome.FAILED);
+                .isEqualTo(StoppedCallOutcome.FAILED);
     }
 
     @Test
     void anyOtherRuleOrErrorThatStopsTheCallMakesItFail() {
-        assertThat(refusals.outcomeOf(new IdempotencyKeyReusedException("refund-1"))).isEqualTo(ToolCallOutcome.FAILED);
-        assertThat(refusals.outcomeOf(new IllegalStateException("boom"))).isEqualTo(ToolCallOutcome.FAILED);
+        assertThat(refusals.outcomeOf(new IdempotencyKeyReusedException("refund-1"))).isEqualTo(StoppedCallOutcome.FAILED);
+        assertThat(refusals.outcomeOf(new IllegalStateException("boom"))).isEqualTo(StoppedCallOutcome.FAILED);
     }
 
     @Test

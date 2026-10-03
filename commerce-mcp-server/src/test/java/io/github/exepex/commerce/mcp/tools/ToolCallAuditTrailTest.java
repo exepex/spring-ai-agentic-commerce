@@ -6,7 +6,7 @@ import static org.mockito.Mockito.verify;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.AuditTrail;
 import io.github.exepex.commerce.mcpserver.guard.ToolCall;
-import io.github.exepex.commerce.mcpserver.guard.ToolCallOutcome;
+import io.github.exepex.commerce.mcpserver.guard.StoppedCallOutcome;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -40,8 +40,8 @@ class ToolCallAuditTrailTest {
 
     @Test
     void aStoppedCallIsRecordedWithWhatStoppedIt() {
-        trail.stopped("shopping-assistant", CALL, ToolCallOutcome.DENIED, "Not the customer's order");
-        trail.stopped("incident-agent", CALL, ToolCallOutcome.FAILED, "The order service could not be reached.");
+        trail.stopped("shopping-assistant", CALL, StoppedCallOutcome.DENIED, "Not the customer's order");
+        trail.stopped("incident-agent", CALL, StoppedCallOutcome.FAILED, "The order service could not be reached.");
 
         verify(audit).record(ORDER_ID, AuditEvent.ActorType.AGENT, "shopping-assistant", "get_order",
                 AuditEvent.Outcome.DENIED, "Looked up the order: Not the customer's order", null);

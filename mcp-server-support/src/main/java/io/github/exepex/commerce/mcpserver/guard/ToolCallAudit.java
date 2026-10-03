@@ -10,5 +10,5 @@ public interface ToolCallAudit {
     void succeeded(String agentId, ToolCall call);
 
     /** @param reason what stopped the call, as the model was told */
-    void stopped(String agentId, ToolCall call, ToolCallOutcome outcome, String reason);
+    void stopped(String agentId, ToolCall call, StoppedCallOutcome outcome, String reason);
 }

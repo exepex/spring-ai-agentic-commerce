@@ -3,7 +3,7 @@ package io.github.exepex.commerce.mcp.tools;
 import io.github.exepex.commerce.mcp.exception.AgentSwitchedOffException;
 import io.github.exepex.commerce.mcp.exception.DownstreamException;
 import io.github.exepex.commerce.mcp.exception.ToolNotPermittedException;
-import io.github.exepex.commerce.mcpserver.guard.ToolCallOutcome;
+import io.github.exepex.commerce.mcpserver.guard.StoppedCallOutcome;
 import io.github.exepex.commerce.mcpserver.guard.ToolRefusals;
 import io.github.exepex.commerce.platform.error.CommerceException;
 import org.springframework.http.HttpStatus;
@@ -28,13 +28,13 @@ class CommerceToolRefusals implements ToolRefusals {
      * too, whatever status that service answered with.
      */
     @Override
-    public ToolCallOutcome outcomeOf(RuntimeException stopped) {
+    public StoppedCallOutcome outcomeOf(RuntimeException stopped) {
         if (stopped instanceof DownstreamException) {
-            return ToolCallOutcome.FAILED;
+            return StoppedCallOutcome.FAILED;
         }
         return stopped instanceof CommerceException refused
                 && refused.getStatus().value() == HttpStatus.FORBIDDEN.value()
-                ? ToolCallOutcome.DENIED
-                : ToolCallOutcome.FAILED;
+                ? StoppedCallOutcome.DENIED
+                : StoppedCallOutcome.FAILED;
     }
 }

@@ -10,5 +10,5 @@ public interface ToolRefusals {
 
     RuntimeException switchedOff(String agentId);
 
-    ToolCallOutcome outcomeOf(RuntimeException stopped);
+    StoppedCallOutcome outcomeOf(RuntimeException stopped);
 }

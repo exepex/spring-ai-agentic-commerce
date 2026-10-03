@@ -4,7 +4,7 @@ import io.github.exepex.commerce.mcp.constants.ToolMessages;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.AuditTrail;
 import io.github.exepex.commerce.mcpserver.guard.ToolCall;
-import io.github.exepex.commerce.mcpserver.guard.ToolCallOutcome;
+import io.github.exepex.commerce.mcpserver.guard.StoppedCallOutcome;
 import io.github.exepex.commerce.mcpserver.guard.ToolCallAudit;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -38,7 +38,7 @@ class ToolCallAuditTrail implements ToolCallAudit {
     }
 
     @Override
-    public void stopped(String agentId, ToolCall call, ToolCallOutcome outcome, String reason) {
+    public void stopped(String agentId, ToolCall call, StoppedCallOutcome outcome, String reason) {
         audit.record(call.orderId(), AuditEvent.ActorType.AGENT, agentId, call.tool(),
                 AuditEvent.Outcome.valueOf(outcome.name()), ToolMessages.STOPPED_CALL.formatted(call.summary(), reason),
                 null);
