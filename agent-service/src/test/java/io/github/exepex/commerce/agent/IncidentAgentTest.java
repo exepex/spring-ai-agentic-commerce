@@ -12,6 +12,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.github.exepex.commerce.agent.constants.AgentIds;
+import io.github.exepex.commerce.agent.dto.Agent;
+import io.github.exepex.commerce.agent.dto.Agents;
+import io.github.exepex.commerce.agent.dto.ServiceNow;
+import io.github.exepex.commerce.agent.dto.Slack;
 import io.github.exepex.commerce.agent.exception.HandOffFailedException;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -29,9 +33,9 @@ class IncidentAgentTest {
 
     private static final AgentDefinitions DEFINITIONS = AgentDefinitions.load();
     private static final AgentProperties PROPERTIES = new AgentProperties(
-            new AgentProperties.Agents("http://localhost:8085", new AgentProperties.Agent("token"),
-                    new AgentProperties.Agent("token")),
-            new AgentProperties.Slack("", "", ""), new AgentProperties.ServiceNow("http://localhost:8087"));
+            new Agents("http://localhost:8085", new Agent("token"),
+                    new Agent("token")),
+            new Slack("", "", ""), new ServiceNow("http://localhost:8087"));
     private static final String INCIDENT = "INC0010001";
 
     private final McpToolboxes toolboxes = mock(McpToolboxes.class);
