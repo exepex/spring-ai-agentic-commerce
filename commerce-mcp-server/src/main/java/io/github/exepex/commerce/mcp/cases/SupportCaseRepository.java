@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.mcp.cases;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -13,6 +14,9 @@ interface SupportCaseRepository extends JpaRepository<SupportCase, UUID> {
     List<SupportCase> findByOrderIdAndStatusIn(UUID orderId, Collection<SupportCase.Status> statuses);
 
     List<SupportCase> findByStatusInOrderByCreatedAt(Collection<SupportCase.Status> statuses);
+
+    List<SupportCase> findByStatusAndIncidentFinalFalseAndUpdatedAtAfterOrderByCreatedAt(SupportCase.Status status,
+            Instant updatedAfter);
 
     List<SupportCase> findByIdIn(Collection<UUID> ids);
 

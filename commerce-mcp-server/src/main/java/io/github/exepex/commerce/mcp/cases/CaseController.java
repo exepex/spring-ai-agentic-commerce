@@ -49,8 +49,9 @@ class CaseController {
     record IncidentLink(@NotBlank @Size(max = 40) String number, @Size(max = 500) String url) {}
 
     /** {@code number} is the incident the state was read from; it must be the case's own. */
+    /** Who has a case's incident now; {@code incidentFinal} means a resolved one is closed or cancelled. */
     record IncidentState(@NotBlank @Size(max = 40) String number, @NotNull SupportCase.Status status,
-            @Size(max = 200) String assignmentGroup) {}
+            @Size(max = 200) String assignmentGroup, boolean incidentFinal) {}
 
     /** An incident the service desk raised about an order, as the poller found it; see {@link CaseType#SERVICE_DESK}. */
     record ServiceDeskIncident(@NotNull UUID orderId, @NotBlank @Size(max = 40) String number,
@@ -115,7 +116,8 @@ class CaseController {
     CaseView followIncident(@RequestAttribute(AgentAuthenticationFilter.AGENT_ID_ATTRIBUTE) String agentId,
             @PathVariable UUID caseId, @Valid @RequestBody IncidentState state) {
         ensureWorker(agentId);
-        return CaseView.of(cases.followIncident(caseId, state.number(), state.status(), state.assignmentGroup()));
+        return CaseView.of(cases.followIncident(caseId, state.number(), state.status(), state.assignmentGroup(),
+                state.incidentFinal()));
     }
 
     private void ensureWorker(String agentId) {

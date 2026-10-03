@@ -63,6 +63,10 @@ public class SupportCase {
     @Column(name = "for_people")
     private boolean forPeople;
 
+    /** Its incident is closed or cancelled, so it can no longer be reopened and is not read back any more. */
+    @Column(name = "incident_final")
+    private boolean incidentFinal;
+
     @Column(name = "created_at")
     private Instant createdAt;
 
@@ -132,12 +136,32 @@ public class SupportCase {
         return true;
     }
 
-    /** Takes over who has the incident now. Returns whether anything changed. */
-    boolean followIncident(Status incidentStatus, String group, Instant now) {
+    /**
+     * Takes over who has the incident now, and whether it is final: closed or cancelled rather than only resolved.
+     *
+     * @return whether who has the incident changed
+     */
+    boolean followIncident(Status incidentStatus, String group, boolean finalState, Instant now) {
+        incidentFinal = incidentStatus == Status.RESOLVED && finalState;
         if (incidentStatus == status && Objects.equals(group, assignmentGroup)) {
             return false;
         }
         status = incidentStatus;
+        assignmentGroup = group;
+        updatedAt = now;
+        return true;
+    }
+
+    /**
+     * Follows who has the incident while the case stays resolved, because its reopened incident's problem belongs to a
+     * newer open case of the order.
+     *
+     * @return whether who has the incident changed
+     */
+    boolean followIncidentWhileResolved(String group, Instant now) {
+        if (Objects.equals(group, assignmentGroup)) {
+            return false;
+        }
         assignmentGroup = group;
         updatedAt = now;
         return true;

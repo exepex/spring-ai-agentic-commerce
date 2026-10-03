@@ -30,6 +30,8 @@ class ServiceNowClient {
     static final String STATE_RESOLVED = "6";
     /** Resolved, closed and cancelled: the incident needs nothing more. */
     static final Set<String> STATES_FINISHED = Set.of(STATE_RESOLVED, "7", "8");
+    /** Closed and cancelled: unlike a resolved incident, it can no longer be reopened. */
+    static final Set<String> STATES_FINAL = Set.of("7", "8");
 
     private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String INCIDENT_FIELDS = "sys_id,number,short_description,description,state,assignment_group,"

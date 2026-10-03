@@ -587,6 +587,24 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void aResolvedCasesIncidentThatWasReopenedIsReadBackAsWithItsTeam() {
+        String caseId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okCases("""
+                [{"id": "%s", "type": "HANDOFF", "status": "RESOLVED", "incidentNumber": "INC0010034"}]"""
+                .formatted(caseId))));
+        stubIncident("INC0010034", "sys-34", "2", "Payments", "", caseId, Instant.now());
+
+        poller.poll();
+
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/incident-state"))
+                .withRequestBody(equalToJson("""
+                        {"number": "INC0010034", "status": "WITH_TEAM", "assignmentGroup": "Payments",
+                         "incidentFinal": false}""")));
+    }
+
+    @Test
     void readsBackWhoHasEachCasesIncident() {
         String withAgent = UUID.randomUUID().toString();
         String withTeam = UUID.randomUUID().toString();
@@ -610,19 +628,23 @@ class ServiceNowMcpServerIntegrationTest {
 
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + withAgent + "/incident-state"))
                 .withRequestBody(equalToJson("""
-                        {"number": "INC0010011", "status": "WITH_AGENT", "assignmentGroup": "Online Shop Agent"}""")));
+                        {"number": "INC0010011", "status": "WITH_AGENT", "assignmentGroup": "Online Shop Agent",
+                         "incidentFinal": false}""")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + withTeam + "/incident-state"))
                 .withRequestBody(equalToJson("""
-                        {"number": "INC0010012", "status": "WITH_TEAM", "assignmentGroup": "Payments"}""")));
+                        {"number": "INC0010012", "status": "WITH_TEAM", "assignmentGroup": "Payments",
+                         "incidentFinal": false}""")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + resolved + "/incident-state"))
-                .withRequestBody(matchingJsonPath("$.status", equalTo("RESOLVED"))));
+                .withRequestBody(matchingJsonPath("$.status", equalTo("RESOLVED")))
+                .withRequestBody(matchingJsonPath("$.incidentFinal", equalTo("true"))));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + takenByAPerson + "/incident-state"))
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010014", "status": "WITH_TEAM",
-                         "assignmentGroup": "Online Shop Agent (Incident Agent)"}""")));
+                         "assignmentGroup": "Online Shop Agent (Incident Agent)", "incidentFinal": false}""")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + onHold + "/incident-state"))
                 .withRequestBody(equalToJson("""
-                        {"number": "INC0010016", "status": "WITH_TEAM", "assignmentGroup": "Online Shop Agent (On Hold)"}""")));
+                        {"number": "INC0010016", "status": "WITH_TEAM", "assignmentGroup": "Online Shop Agent (On Hold)",
+                         "incidentFinal": false}""")));
     }
 
     @Test
@@ -758,7 +780,8 @@ class ServiceNowMcpServerIntegrationTest {
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/incident-state"))
                 .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))
                 .withRequestBody(equalToJson("""
-                        {"number": "INC0010001", "status": "WITH_TEAM", "assignmentGroup": "Fulfilment"}""")));
+                        {"number": "INC0010001", "status": "WITH_TEAM", "assignmentGroup": "Fulfilment",
+                         "incidentFinal": false}""")));
     }
 
     private void stubJournal(String body) {

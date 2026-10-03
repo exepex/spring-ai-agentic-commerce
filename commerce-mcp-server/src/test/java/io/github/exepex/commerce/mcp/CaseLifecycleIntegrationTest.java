@@ -222,6 +222,56 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void aResolvedCasesIncidentReopenedWithATeamOpensTheCaseAgain() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        handOff(orderId, "first");
+        String caseId = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", caseId, Map.of("number", "INC0010031"));
+        followIncident(caseId, "INC0010031", "RESOLVED", "Online Shop Agent");
+
+        boolean readBackWhileResolved = inServiceNow().contains(caseId);
+        assertThat(followIncident(caseId, "INC0010031", "WITH_TEAM", "Payments")).isEqualTo(200);
+
+        assertThat(readBackWhileResolved).isTrue();
+        assertThat((String) JsonPath.read(cases(orderId), "$[0].status")).isEqualTo("WITH_TEAM");
+        assertThat((String) JsonPath.read(cases(orderId), "$[0].assignmentGroup")).isEqualTo("Payments");
+        assertThat((List<String>) JsonPath.read(timeline(orderId), "$[?(@.action == 'follow_incident')].summary"))
+                .contains("INC0010031 was reopened and is assigned to Payments");
+    }
+
+    @Test
+    void aCaseWhoseIncidentIsClosedIsNoLongerReadBack() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        handOff(orderId, "first");
+        String caseId = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", caseId, Map.of("number", "INC0010032"));
+
+        assertThat(followIncident(caseId, "INC0010032", "RESOLVED", "Online Shop Agent", true)).isEqualTo(200);
+
+        assertThat(inServiceNow()).doesNotContain(caseId);
+    }
+
+    @Test
+    void anIncidentReopenedWhileANewerCaseOfItsProblemIsOpenLeavesThatCaseTheOnlyOpenOneAndTellsIt() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        handOff(orderId, "first");
+        String earlier = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", earlier, Map.of("number", "INC0010033"));
+        followIncident(earlier, "INC0010033", "RESOLVED", "Online Shop Agent");
+        handOff(orderId, "the customer called again");
+        String newer = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+
+        assertThat(followIncident(earlier, "INC0010033", "WITH_TEAM", "Payments")).isEqualTo(200);
+        assertThat(followIncident(earlier, "INC0010033", "WITH_TEAM", "Payments")).isEqualTo(200);
+
+        assertThat((List<String>) JsonPath.read(cases(orderId), "$[?(@.status != 'RESOLVED')].id"))
+                .containsExactly(newer);
+        List<String> notesOfNewer = JsonPath.read(outgoingFor(orderId), "$[0].unsentNotes[*].text");
+        assertThat(notesOfNewer).filteredOn(text -> text.contains("INC0010033")).singleElement()
+                .asString().contains("was reopened and is with Payments");
+    }
+
+    @Test
     void whatWasRaisedAgainButNeverReachedAResolvedIncidentGoesToANewCase() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         handOff(orderId, "first");
@@ -461,9 +511,19 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
         return JsonPath.parse(forOrder).jsonString();
     }
 
-    private int followIncident(String caseId, String number, String status, String group) {
+    /** The ids of the cases the poller reads back. */
+    private List<String> inServiceNow() {
+        return JsonPath.read(asCaseWorker().get().uri("/api/agent/cases/in-servicenow").retrieve().body(String.class),
+                "$[*].id");
+    }
+
+    private int followIncident(String caseId, String number, String status, String group, boolean incidentFinal) {
         return sync("/api/agent/cases/{id}/incident-state", caseId, Map.of("number", number, "status", status,
-                "assignmentGroup", group));
+                "assignmentGroup", group, "incidentFinal", incidentFinal));
+    }
+
+    private int followIncident(String caseId, String number, String status, String group) {
+        return followIncident(caseId, number, status, group, false);
     }
 
     private int sync(String path, String caseId, Map<String, Object> body) {
