@@ -20,8 +20,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * Feeds ServiceNow incidents to the incident agent. Every poll first sends the shop's new cases to ServiceNow as
- * incidents in the agent's group (see {@link CaseSync}), then claims new incidents, then reads back who has each case's
- * incident. Each step runs even when another failed, so a governance API that is down does not stop incidents the
+ * incidents in the agent's group (see {@link CaseSync}), records with the shop the incidents the service desk raised
+ * about an order, then claims new incidents, then reads back who has each case's incident. Each step runs even when another failed, so a governance API that is down does not stop incidents the
  * service desk raised from being worked.
  *
  * <p>Each new, unassigned incident in the agent's group is claimed by
@@ -76,6 +76,7 @@ public class IncidentPoller {
         }
         step("send the shop's cases to ServiceNow", cases::sendCases);
         step("hand over stale claims", this::handOverStaleClaims);
+        step("record the service desk's incidents with the shop", cases::recordServiceDeskIncidents);
         step("claim new incidents", this::claimNewIncidents);
         step("read back the cases' incidents", cases::readBackIncidents);
     }

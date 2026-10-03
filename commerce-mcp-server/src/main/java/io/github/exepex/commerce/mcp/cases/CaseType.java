@@ -12,7 +12,12 @@ public enum CaseType {
     PARCEL_LOST("was lost by the carrier"),
     REFUND_FAILED("has a refund that failed at the card processor"),
     /** An agent handed over something it could not or should not handle itself. */
-    HANDOFF("needs a person");
+    HANDOFF("needs a person"),
+    /**
+     * An incident the service desk raised in ServiceNow about an order. The shop does not open it; it records it, so
+     * agents leave the order's money to whoever works it. Its title is the incident's own short description.
+     */
+    SERVICE_DESK("has an incident the service desk raised");
 
     private final String problem;
 

@@ -20,7 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Opens a case for every problem that needs handling, and keeps it in step with its ServiceNow incident. Code opens
  * cases, never a model's judgement: a stock-out, a delivery that failed, a lost parcel, a refund that failed at the
- * card processor, and every hand-off an agent asks for.
+ * card processor, and every hand-off an agent asks for. An incident the service desk raised about an order is recorded
+ * as a case too.
  *
  * <p>An order has at most one unresolved case of each type, so the same problem raised again adds a note to the open
  * case instead of opening a second one. The ServiceNow MCP server's poller carries cases and notes to ServiceNow and
@@ -175,6 +176,31 @@ public class CaseService {
                     AuditEvent.Outcome.SUCCEEDED, "Opened ServiceNow incident " + number + " for the "
                             + supportCase.getType() + " case", null);
         }
+        return supportCase;
+    }
+
+    /**
+     * Records an incident the service desk raised about an order as a case of its own, so agents leave the order's
+     * money to whoever works it, as for the shop's own cases; the read-back then keeps it in step until it is resolved.
+     * The incident is known by its link, which names the instance and the incident's sys_id: its number alone repeats
+     * across instances, such as the simulator and a real one. Recording it again changes nothing.
+     */
+    @Transactional
+    public SupportCase recordServiceDeskIncident(UUID orderId, String number, String url, String shortDescription,
+            SupportCase.Status status, String assignmentGroup) {
+        if (status != SupportCase.Status.WITH_AGENT && status != SupportCase.Status.WITH_TEAM) {
+            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
+                    "A service-desk incident being worked is with the agent or a team");
+        }
+        Optional<SupportCase> recorded = cases.findByTypeAndIncidentUrl(CaseType.SERVICE_DESK, url);
+        if (recorded.isPresent()) {
+            return recorded.get();
+        }
+        SupportCase supportCase = cases.save(SupportCase.forServiceDeskIncident(orderId, number, url, shortDescription,
+                status, assignmentGroup, Instant.now(clock)));
+        audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, "raise_case", AuditEvent.Outcome.SUCCEEDED,
+                "The service desk raised incident " + number + " about this order; agents leave its money to whoever "
+                        + "works it", shortDescription);
         return supportCase;
     }
 

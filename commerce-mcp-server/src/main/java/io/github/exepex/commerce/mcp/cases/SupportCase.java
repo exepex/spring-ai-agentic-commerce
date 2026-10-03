@@ -29,6 +29,8 @@ public class SupportCase {
         RESOLVED
     }
 
+    private static final int MAX_TITLE_LENGTH = 160;
+
     @Id
     private UUID id;
 
@@ -81,6 +83,20 @@ public class SupportCase {
         this.raisedBy = raisedBy;
         this.createdAt = now;
         this.updatedAt = now;
+    }
+
+    /** A case for an incident the service desk raised: it starts in ServiceNow, with whoever has the incident. */
+    static SupportCase forServiceDeskIncident(UUID orderId, String number, String url, String shortDescription,
+            Status status, String group, Instant now) {
+        SupportCase supportCase = new SupportCase(orderId, CaseType.SERVICE_DESK,
+                "Raised by the service desk in ServiceNow as " + number + ".", CaseService.SERVICENOW, now);
+        supportCase.title = shortDescription.length() <= MAX_TITLE_LENGTH ? shortDescription
+                : shortDescription.substring(0, MAX_TITLE_LENGTH);
+        supportCase.incidentNumber = number;
+        supportCase.incidentUrl = url;
+        supportCase.status = status;
+        supportCase.assignmentGroup = group;
+        return supportCase;
     }
 
     /** Links the case to the incident created for it. Only the first incident counts. */

@@ -19,4 +19,6 @@ interface SupportCaseRepository extends JpaRepository<SupportCase, UUID> {
     List<SupportCase> findTop100ByOrderByCreatedAtDesc();
 
     List<SupportCase> findByOrderIdOrderByCreatedAt(UUID orderId);
+
+    Optional<SupportCase> findByTypeAndIncidentUrl(CaseType type, String incidentUrl);
 }

@@ -40,6 +40,10 @@ public interface GovernanceApi {
     /** Who has the case's incident now; {@code status} is WITH_AGENT, WITH_TEAM or RESOLVED. */
     record IncidentState(String number, String status, String assignmentGroup) {}
 
+    /** An incident the service desk raised about an order, and who has it; {@code status} is WITH_AGENT or WITH_TEAM. */
+    record ServiceDeskIncident(UUID orderId, String number, String url, String shortDescription, String status,
+            String assignmentGroup) {}
+
     @GetExchange("/api/agent-switches")
     Map<String, Boolean> switches();
 
@@ -56,6 +60,10 @@ public interface GovernanceApi {
     @PostExchange("/api/agent/cases/{caseId}/notes/{noteId}/sent")
     void markNoteSent(@RequestHeader("Authorization") String authorization, @PathVariable UUID caseId,
             @PathVariable UUID noteId);
+
+    @PostExchange("/api/agent/cases/service-desk")
+    void recordServiceDeskIncident(@RequestHeader("Authorization") String authorization,
+            @RequestBody ServiceDeskIncident incident);
 
     @GetExchange("/api/agent/cases/in-servicenow")
     List<Case> casesInServiceNow(@RequestHeader("Authorization") String authorization);

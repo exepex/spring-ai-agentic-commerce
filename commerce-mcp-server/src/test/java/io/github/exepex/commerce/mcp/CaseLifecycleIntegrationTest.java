@@ -317,6 +317,80 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void anIncidentTheServiceDeskRaisedAboutAnOrderIsACaseThatKeepsOtherAgentsFromRefundingIt() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
+        Map<String, Object> incident = Map.of("orderId", orderId.toString(), "number", "INC0010008",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-8",
+                "shortDescription", "Order arrived broken, the customer wants their money back",
+                "status", "WITH_TEAM", "assignmentGroup", "Customer Care");
+
+        int recorded = recordServiceDeskIncident(incident);
+        int recordedAgain = recordServiceDeskIncident(incident);
+        McpSchema.CallToolResult byTheAssistant = call(assistant, "issue_refund", Map.of("orderId", orderId.toString(),
+                "amount", 39.50, "reason", "arrived broken", "idempotencyKey", "refund-" + orderId + "-broken",
+                "customerEmail", "ada@example.com"));
+
+        assertThat(recorded).isEqualTo(200);
+        assertThat(recordedAgain).isEqualTo(200);
+        assertThat((List<String>) JsonPath.read(cases(orderId), "$[*].type")).containsExactly("SERVICE_DESK");
+        assertThat((String) JsonPath.read(cases(orderId), "$[0].title"))
+                .isEqualTo("Order arrived broken, the customer wants their money back");
+        assertThat((String) JsonPath.read(cases(orderId), "$[0].incidentNumber")).isEqualTo("INC0010008");
+        assertThat(byTheAssistant.isError()).isTrue();
+        assertThat(text(byTheAssistant)).contains("with the Customer Care team in ServiceNow (INC0010008)");
+        assertThat(JsonPath.<List<String>>read(asCaseWorker().get().uri("/api/agent/cases/in-servicenow").retrieve()
+                .body(String.class), "$[*].incidentNumber")).contains("INC0010008");
+    }
+
+    @Test
+    void theIncidentAgentWorkingAServiceDeskIncidentMayRefundForIt() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
+        assertThat(recordServiceDeskIncident(Map.of("orderId", orderId.toString(), "number", "INC0010009",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-9", "shortDescription", "Arrived broken",
+                "status", "WITH_AGENT", "assignmentGroup", "Online Shop Agent"))).isEqualTo(200);
+
+        McpSchema.CallToolResult forAnotherIncident = call(incidentAgent, "issue_refund", Map.of("orderId",
+                orderId.toString(), "amount", 39.50, "reason", "arrived broken", "idempotencyKey",
+                "refund-" + orderId + "-INC0010010", "incidentNumber", "INC0010010"));
+        McpSchema.CallToolResult forItsIncident = call(incidentAgent, "issue_refund", Map.of("orderId",
+                orderId.toString(), "amount", 39.50, "reason", "arrived broken", "idempotencyKey",
+                "refund-" + orderId + "-INC0010009", "incidentNumber", "INC0010009"));
+
+        assertThat(forAnotherIncident.isError()).isTrue();
+        assertThat(forItsIncident.isError()).isFalse();
+        assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
+    }
+
+    @Test
+    void anOrderCanHaveSeveralServiceDeskIncidentsAtOnceEvenWithTheSameNumberOnAnotherInstance() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        Map<String, Object> first = Map.of("orderId", orderId.toString(), "number", "INC0010011",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-11", "shortDescription", "Wrong colour",
+                "status", "WITH_AGENT", "assignmentGroup", "Online Shop Agent");
+        Map<String, Object> second = Map.of("orderId", orderId.toString(), "number", "INC0010012",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-12", "shortDescription", "Late delivery",
+                "status", "WITH_AGENT", "assignmentGroup", "Online Shop Agent");
+        // The simulator numbers its incidents from INC0010001 again each time it starts.
+        Map<String, Object> sameNumberElsewhere = Map.of("orderId", orderId.toString(), "number", "INC0010011",
+                "url", "http://localhost:8088/incident.do?sys_id=sim-11", "shortDescription", "Parcel damaged",
+                "status", "WITH_AGENT", "assignmentGroup", "Online Shop Agent");
+
+        assertThat(recordServiceDeskIncident(first)).isEqualTo(200);
+        assertThat(recordServiceDeskIncident(second)).isEqualTo(200);
+        assertThat(recordServiceDeskIncident(sameNumberElsewhere)).isEqualTo(200);
+
+        assertThat((List<String>) JsonPath.read(cases(orderId), "$[*].title"))
+                .containsExactlyInAnyOrder("Wrong colour", "Late delivery", "Parcel damaged");
+    }
+
+    private int recordServiceDeskIncident(Map<String, Object> incident) {
+        return asCaseWorker().post().uri("/api/agent/cases/service-desk").contentType(MediaType.APPLICATION_JSON)
+                .body(incident).exchange((request, response) -> response.getStatusCode().value());
+    }
+
+    @Test
     void onlyTheCaseWorkerMaySyncCases() {
         int asAssistant = RestClient.create("http://localhost:" + port).get().uri("/api/agent/cases/outgoing")
                 .header("Authorization", "Bearer " + ASSISTANT_TOKEN)

@@ -278,6 +278,44 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void aNewIncidentTheServiceDeskRaisedAboutAnOrderIsRecordedWithTheShopAsTheAgentsAndClaimed() {
+        String row = incidentRow("INC0010020", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        stubServiceDeskIncidents("[" + row + "]");
+        stubNewIncidents("[" + row + "]");
+        stubClaimed("[]");
+        stubIncident("INC0010020", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+
+        poller.poll();
+
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/service-desk"))
+                .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))
+                .withRequestBody(equalToJson("""
+                        {"orderId": "%s", "number": "INC0010020", "url": "%s/incident.do?sys_id=sys-1",
+                         "shortDescription": "Order arrived broken", "status": "WITH_AGENT",
+                         "assignmentGroup": "Online Shop Agent"}""".formatted(LINKED_ORDER, SERVICES.baseUrl()))));
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withRequestBody(matchingJsonPath("$.assigned_to", equalTo(AGENT_USER))));
+    }
+
+    @Test
+    void anIncidentTheServiceDeskGaveATeamIsRecordedAsTheTeamsAndOneNamingNoOrderIsLeftOut() {
+        String withPayments = incidentRow("INC0010021", "sys-21", "2", "Payments", "", "", Instant.now());
+        String noOrder = incidentRow("INC0010022", "sys-22", "2", "Payments", "", "", Instant.now())
+                .replace(LINKED_ORDER, "the blue one");
+        stubServiceDeskIncidents("[" + withPayments + ", " + noOrder + "]");
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+
+        poller.poll();
+
+        SERVICES.verify(1, postRequestedFor(urlEqualTo("/api/agent/cases/service-desk")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/service-desk"))
+                .withRequestBody(matchingJsonPath("$.number", equalTo("INC0010021")))
+                .withRequestBody(matchingJsonPath("$.status", equalTo("WITH_TEAM")))
+                .withRequestBody(matchingJsonPath("$.assignmentGroup", equalTo("Payments"))));
+    }
+
+    @Test
     void whileTheAgentIsSwitchedOffANewIncidentGoesStraightToTheDefaultTeam() {
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
         stubNewIncidents("""
@@ -638,6 +676,13 @@ class ServiceNowMcpServerIntegrationTest {
     private void stubNewIncidents(String rows) {
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
                 .withQueryParam("sysparm_query", containing("assigned_toISEMPTY"))
+                .willReturn(okJson("{\"result\": " + rows + "}")));
+    }
+
+    private void stubServiceDeskIncidents(String rows) {
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("correlation_idISNOTEMPTY^correlation_displayISEMPTY"
+                        + "^stateNOT IN6,7,8^ORDERBYDESCsys_created_on"))
                 .willReturn(okJson("{\"result\": " + rows + "}")));
     }
 

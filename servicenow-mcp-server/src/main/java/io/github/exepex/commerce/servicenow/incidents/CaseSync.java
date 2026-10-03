@@ -19,6 +19,9 @@ import org.springframework.stereotype.Component;
  *
  * <p>An incident carries its case's id in its Correlation display field, so a case whose incident was opened but not
  * yet reported to the shop, because the poller stopped in between, is found again instead of opened twice.
+ *
+ * <p>An open incident the service desk raised about an order is recorded with the shop as a case of its own, and from
+ * then on read back like the others, so agents leave the order's money to whoever works it.
  */
 @Component
 class CaseSync {
@@ -98,6 +101,29 @@ class CaseSync {
         return "[shop note " + note.id() + "]";
     }
 
+    /**
+     * Records each open incident the service desk raised about an order with the shop, which ignores one it already
+     * has. An incident whose Correlation ID is not an order id names no order and is left out. An incident that cannot
+     * be recorded is tried next poll.
+     */
+    void recordServiceDeskIncidents() {
+        for (ServiceNowClient.Incident incident : serviceNow.findOpenServiceDeskIncidents()) {
+            UUID orderId = uuidOrNull(incident.orderId());
+            if (orderId == null) {
+                continue;
+            }
+            try {
+                GovernanceApi.IncidentState state = stateOf(incident);
+                String title = incident.shortDescription().isBlank() ? "Incident " + incident.number()
+                        : incident.shortDescription();
+                governance.recordServiceDeskIncident(authorization(), new GovernanceApi.ServiceDeskIncident(orderId,
+                        incident.number(), serviceNow.linkTo(incident), title, state.status(), state.assignmentGroup()));
+            } catch (RuntimeException failure) {
+                LOGGER.warn("Could not record incident {} with the shop; trying again next time", incident.number(), failure);
+            }
+        }
+    }
+
     /** Reads who has each case's incident now and tells the shop. An incident that cannot be read is tried next poll. */
     void readBackIncidents() {
         for (GovernanceApi.Case supportCase : governance.casesInServiceNow(authorization())) {
@@ -172,9 +198,13 @@ class CaseSync {
 
     /** The case the incident was opened for; null for an incident the service desk raised. */
     private static UUID caseIdOf(ServiceNowClient.Incident incident) {
+        return uuidOrNull(incident.caseId());
+    }
+
+    private static UUID uuidOrNull(String text) {
         try {
-            return incident.caseId().isBlank() ? null : UUID.fromString(incident.caseId());
-        } catch (IllegalArgumentException notACase) {
+            return text.isBlank() ? null : UUID.fromString(text.strip());
+        } catch (IllegalArgumentException notAnId) {
             return null;
         }
     }

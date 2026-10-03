@@ -52,6 +52,11 @@ class CaseController {
     record IncidentState(@NotBlank @Size(max = 40) String number, @NotNull SupportCase.Status status,
             @Size(max = 200) String assignmentGroup) {}
 
+    /** An incident the service desk raised about an order, as the poller found it; see {@link CaseType#SERVICE_DESK}. */
+    record ServiceDeskIncident(@NotNull UUID orderId, @NotBlank @Size(max = 40) String number,
+            @NotBlank @Size(max = 500) String url, @NotBlank @Size(max = 4000) String shortDescription,
+            @NotNull SupportCase.Status status, @Size(max = 200) String assignmentGroup) {}
+
     private final CaseService cases;
     private final String worker;
 
@@ -83,6 +88,14 @@ class CaseController {
             @PathVariable UUID caseId, @Valid @RequestBody IncidentLink link) {
         ensureWorker(agentId);
         return CaseView.of(cases.linkIncident(caseId, link.number(), link.url()));
+    }
+
+    @PostMapping("/api/agent/cases/service-desk")
+    CaseView recordServiceDeskIncident(@RequestAttribute(AgentAuthenticationFilter.AGENT_ID_ATTRIBUTE) String agentId,
+            @Valid @RequestBody ServiceDeskIncident incident) {
+        ensureWorker(agentId);
+        return CaseView.of(cases.recordServiceDeskIncident(incident.orderId(), incident.number(), incident.url(),
+                incident.shortDescription(), incident.status(), incident.assignmentGroup()));
     }
 
     @PostMapping("/api/agent/cases/{caseId}/notes/{noteId}/sent")

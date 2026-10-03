@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -110,6 +111,15 @@ class ServiceNowClient {
     /** New incidents in the agent's group that nobody has taken yet. */
     List<Incident> findNewForAgent() {
         return query("assignment_group.name=" + properties.agentGroup() + "^assigned_toISEMPTY^state=" + STATE_NEW, 20);
+    }
+
+    /**
+     * Open incidents about an order that the shop did not open, so the service desk raised them: they name an order in
+     * their Correlation ID and no case in their Correlation display. Newest first.
+     */
+    List<Incident> findOpenServiceDeskIncidents() {
+        return query("correlation_idISNOTEMPTY^correlation_displayISEMPTY^stateNOT IN"
+                + String.join(",", new TreeSet<>(STATES_FINISHED)) + "^ORDERBYDESCsys_created_on", 50);
     }
 
     /** Incidents the agent has claimed and not finished: still in its group, assigned to it and in progress. */

@@ -193,9 +193,19 @@ class Tables {
     }
 
     private Predicate<Map<String, String>> condition(String term) {
+        if (term.endsWith("ISNOTEMPTY")) {
+            String field = term.substring(0, term.length() - "ISNOTEMPTY".length());
+            return row -> !valueOf(row, field).isEmpty();
+        }
         if (term.endsWith("ISEMPTY")) {
             String field = term.substring(0, term.length() - "ISEMPTY".length());
             return row -> valueOf(row, field).isEmpty();
+        }
+        int notIn = term.indexOf("NOT IN");
+        if (notIn > 0) {
+            String field = term.substring(0, notIn);
+            List<String> excluded = Arrays.asList(term.substring(notIn + "NOT IN".length()).split(","));
+            return row -> !excluded.contains(valueOf(row, field));
         }
         int equals = term.indexOf('=');
         if (equals < 0) {
