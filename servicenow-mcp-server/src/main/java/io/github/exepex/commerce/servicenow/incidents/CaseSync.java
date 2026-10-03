@@ -64,18 +64,21 @@ class CaseSync {
     /**
      * Sends the notes as work notes, each ending with its {@link #markerOf marker}. A note whose marker the incident
      * already shows was applied before, though ServiceNow's answer or the shop's confirmation was lost: it is only
-     * marked sent, so a retry never adds it twice. An incident already resolved gets none: nobody reads it any more.
-     * The shop learns of the resolution from the read-back and opens a new case for the notes that did not reach it.
+     * marked sent, so a retry never adds it twice, even once the incident is resolved. An incident already resolved
+     * gets no new notes: nobody reads it any more. The shop learns of the resolution from the read-back and opens a new
+     * case for the notes that did not reach it.
      */
     private void sendNotes(GovernanceApi.Case supportCase, String number, List<GovernanceApi.Note> notes) {
         ServiceNowClient.Incident incident = serviceNow.findByNumber(number)
                 .orElseThrow(() -> new IllegalStateException("Incident " + number + " is gone"));
-        if (ServiceNowClient.STATES_FINISHED.contains(incident.state())) {
-            return;
-        }
+        boolean finished = ServiceNowClient.STATES_FINISHED.contains(incident.state());
         String workNotes = serviceNow.allWorkNotesOf(incident.sysId());
         for (GovernanceApi.Note note : notes) {
-            if (!workNotes.contains(markerOf(note))) {
+            boolean applied = workNotes.contains(markerOf(note));
+            if (!applied && finished) {
+                continue;
+            }
+            if (!applied) {
                 serviceNow.update(incident.sysId(), Map.of("work_notes", workNoteOf(note)));
             }
             governance.markNoteSent(authorization(), supportCase.id(), note.id());

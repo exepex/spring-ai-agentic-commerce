@@ -523,20 +523,27 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
-    void notesForAnIncidentAlreadyResolvedAreNotSentThere() {
+    void notesForAnIncidentAlreadyResolvedAreNotSentThereButOnesItAlreadyHoldsAreMarkedSent() {
         String caseId = UUID.randomUUID().toString();
+        String appliedNoteId = UUID.randomUUID().toString();
+        String newNoteId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
         SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
                 [{"supportCase": {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010015"},
-                  "unsentNotes": [{"id": "%s", "text": "The customer called again."}]}]"""
-                .formatted(caseId, UUID.randomUUID()))));
+                  "unsentNotes": [{"id": "%s", "text": "The customer wrote."}, {"id": "%s", "text": "The customer called again."}]}]"""
+                .formatted(caseId, appliedNoteId, newNoteId))));
         stubIncident("INC0010015", "sys-15", "6", "Online Shop Agent", "", caseId, Instant.now());
+        // ServiceNow applied the first note, but its answer never arrived; then a person resolved the incident.
+        stubJournal("sys-15", """
+                {"result": [{"work_notes": "2026-10-02 02:05:00 - Trailhead Agent (Work notes)\\nThe customer wrote.\\n\\n[shop note %s]\\n\\n",
+                             "comments": ""}]}""".formatted(appliedNoteId));
 
         poller.poll();
 
         SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-15")));
-        SERVICES.verify(0, postRequestedFor(urlPathMatching("/api/agent/cases/.*/notes/.*/sent")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + appliedNoteId + "/sent")));
+        SERVICES.verify(0, postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + newNoteId + "/sent")));
     }
 
     @Test
