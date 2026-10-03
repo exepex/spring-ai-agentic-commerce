@@ -4,6 +4,7 @@ import io.github.exepex.commerce.order.constants.ErrorMessages;
 import io.github.exepex.commerce.order.dto.ChargeRequest;
 import io.github.exepex.commerce.order.exception.PaymentDeclinedException;
 import io.github.exepex.commerce.order.exception.PaymentUnavailableException;
+import io.github.exepex.commerce.platform.remote.RemoteProblems;
 import java.math.BigDecimal;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;

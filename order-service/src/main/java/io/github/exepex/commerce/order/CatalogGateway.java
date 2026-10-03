@@ -7,6 +7,7 @@ import io.github.exepex.commerce.order.exception.DependencyUnavailableException;
 import io.github.exepex.commerce.order.exception.DispatchRefusedException;
 import io.github.exepex.commerce.order.exception.InsufficientStockException;
 import io.github.exepex.commerce.order.exception.ProductNotFoundException;
+import io.github.exepex.commerce.platform.remote.RemoteProblems;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
