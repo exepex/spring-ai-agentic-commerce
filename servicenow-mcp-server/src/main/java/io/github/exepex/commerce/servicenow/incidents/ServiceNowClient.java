@@ -38,6 +38,7 @@ class ServiceNowClient {
      * long-lived incident's history cannot flood the agent.
      */
     private static final int MAX_JOURNAL_LENGTH = 20_000;
+    private static final int SERVICE_DESK_PAGE_SIZE = 100;
 
     private final ServiceNowProperties properties;
     private final RestClient restClient;
@@ -115,11 +116,18 @@ class ServiceNowClient {
 
     /**
      * Open incidents about an order that the shop did not open, so the service desk raised them: they name an order in
-     * their Correlation ID and no case in their Correlation display. Newest first.
+     * their Correlation ID and no case in their Correlation display. All of them, read a page at a time, oldest first.
      */
     List<Incident> findOpenServiceDeskIncidents() {
-        return query("correlation_idISNOTEMPTY^correlation_displayISEMPTY^stateNOT IN"
-                + String.join(",", new TreeSet<>(STATES_FINISHED)) + "^ORDERBYDESCsys_created_on", 50);
+        String openServiceDeskIncidents = "correlation_idISNOTEMPTY^correlation_displayISEMPTY^stateNOT IN"
+                + String.join(",", new TreeSet<>(STATES_FINISHED)) + "^ORDERBYsys_created_on";
+        List<Incident> all = new ArrayList<>();
+        List<Incident> page;
+        do {
+            page = query(openServiceDeskIncidents, SERVICE_DESK_PAGE_SIZE, all.size());
+            all.addAll(page);
+        } while (page.size() == SERVICE_DESK_PAGE_SIZE);
+        return all;
     }
 
     /** Incidents the agent has claimed and not finished: still in its group, assigned to it and in progress. */
@@ -205,12 +213,17 @@ class ServiceNowClient {
     }
 
     private List<Incident> query(String encodedQuery, int limit) {
+        return query(encodedQuery, limit, 0);
+    }
+
+    private List<Incident> query(String encodedQuery, int limit, int offset) {
         JsonNode body = restClient.get()
                 .uri(uri -> uri.path("/api/now/table/incident")
                         .queryParam("sysparm_query", encodedQuery)
                         .queryParam("sysparm_fields", INCIDENT_FIELDS)
                         .queryParam("sysparm_display_value", "all")
                         .queryParam("sysparm_limit", limit)
+                        .queryParam("sysparm_offset", offset)
                         .build())
                 .retrieve().body(JsonNode.class);
         List<Incident> incidents = new ArrayList<>();

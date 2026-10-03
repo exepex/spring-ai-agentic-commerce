@@ -10,6 +10,7 @@ import static org.awaitility.Awaitility.await;
 import com.jayway.jsonpath.JsonPath;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -361,6 +362,47 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
         assertThat(forAnotherIncident.isError()).isTrue();
         assertThat(forItsIncident.isError()).isFalse();
         assertThat(refundStatus(orderId)).isEqualTo("EXECUTED");
+    }
+
+    @Test
+    void aServiceDeskIncidentWhoseOrderTheServiceDeskCorrectedTakesItsCaseToThatOrder() {
+        UUID mistyped = stubOrder("ada@example.com", "39.50");
+        UUID meant = stubOrder("ada@example.com", "39.50");
+        Map<String, Object> incident = Map.of("orderId", mistyped.toString(), "number", "INC0010013",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-13", "shortDescription", "Arrived broken",
+                "status", "WITH_TEAM", "assignmentGroup", "Customer Care");
+        Map<String, Object> corrected = new HashMap<>(incident);
+        corrected.put("orderId", meant.toString());
+
+        assertThat(recordServiceDeskIncident(incident)).isEqualTo(200);
+        assertThat(recordServiceDeskIncident(corrected)).isEqualTo(200);
+
+        assertThat((List<?>) JsonPath.read(cases(mistyped), "$")).isEmpty();
+        assertThat((List<String>) JsonPath.read(cases(meant), "$[*].incidentNumber")).containsExactly("INC0010013");
+        McpSchema.CallToolResult byTheAssistant = call(assistant, "issue_refund", Map.of("orderId", meant.toString(),
+                "amount", 39.50, "reason", "arrived broken", "idempotencyKey", "refund-" + meant + "-broken",
+                "customerEmail", "ada@example.com"));
+        assertThat(byTheAssistant.isError()).isTrue();
+    }
+
+    @Test
+    void aServiceDeskIncidentReopenedAfterItsCaseWasResolvedOpensTheCaseAgain() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        Map<String, Object> incident = Map.of("orderId", orderId.toString(), "number", "INC0010014",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-14", "shortDescription", "Arrived broken",
+                "status", "WITH_AGENT", "assignmentGroup", "Online Shop Agent");
+        assertThat(recordServiceDeskIncident(incident)).isEqualTo(200);
+        String caseId = JsonPath.read(cases(orderId), "$[0].id");
+        assertThat(followIncident(caseId, "INC0010014", "RESOLVED", "Online Shop Agent")).isEqualTo(200);
+        Map<String, Object> reopened = new HashMap<>(incident);
+        reopened.put("status", "WITH_TEAM");
+        reopened.put("assignmentGroup", "Payments");
+
+        assertThat(recordServiceDeskIncident(reopened)).isEqualTo(200);
+
+        assertThat((String) JsonPath.read(cases(orderId), "$[0].status")).isEqualTo("WITH_TEAM");
+        assertThat((String) JsonPath.read(cases(orderId), "$[0].assignmentGroup")).isEqualTo("Payments");
+        assertThat((List<?>) JsonPath.read(cases(orderId), "$")).hasSize(1);
     }
 
     @Test

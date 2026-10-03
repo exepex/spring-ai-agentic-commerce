@@ -316,6 +316,26 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void everyOpenServiceDeskIncidentIsRecordedHoweverManyComeBeforeIt() {
+        List<String> namingNoOrder = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            namingNoOrder.add(incidentRow("INC00200%02d".formatted(i), "sys-x" + i, "2", "Payments", "", "", Instant.now())
+                    .replace(LINKED_ORDER, "not an order"));
+        }
+        stubServiceDeskIncidents("0", "[" + String.join(", ", namingNoOrder) + "]");
+        stubServiceDeskIncidents("100",
+                "[" + incidentRow("INC0010023", "sys-23", "2", "Payments", "", "", Instant.now()) + "]");
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+
+        poller.poll();
+
+        SERVICES.verify(1, postRequestedFor(urlEqualTo("/api/agent/cases/service-desk")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/service-desk"))
+                .withRequestBody(matchingJsonPath("$.number", equalTo("INC0010023"))));
+    }
+
+    @Test
     void whileTheAgentIsSwitchedOffANewIncidentGoesStraightToTheDefaultTeam() {
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
         stubNewIncidents("""
@@ -680,9 +700,14 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     private void stubServiceDeskIncidents(String rows) {
+        stubServiceDeskIncidents("0", rows);
+    }
+
+    private void stubServiceDeskIncidents(String offset, String rows) {
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
                 .withQueryParam("sysparm_query", equalTo("correlation_idISNOTEMPTY^correlation_displayISEMPTY"
-                        + "^stateNOT IN6,7,8^ORDERBYDESCsys_created_on"))
+                        + "^stateNOT IN6,7,8^ORDERBYsys_created_on"))
+                .withQueryParam("sysparm_offset", equalTo(offset))
                 .willReturn(okJson("{\"result\": " + rows + "}")));
     }
 

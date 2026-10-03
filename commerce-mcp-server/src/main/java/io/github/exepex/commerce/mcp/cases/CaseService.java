@@ -32,6 +32,8 @@ public class CaseService {
 
     /** The actor recorded for what ServiceNow did, as reported by its poller. */
     static final String SERVICENOW = "servicenow";
+    private static final String RAISE_CASE = "raise_case";
+    private static final String FOLLOW_INCIDENT = "follow_incident";
 
     private static final int MAX_TEXT_LENGTH = 4000;
     private static final List<SupportCase.Status> UNRESOLVED = List.of(SupportCase.Status.PENDING,
@@ -107,13 +109,13 @@ public class CaseService {
                     SupportCase.Status.RESOLVED);
             if (open.isPresent()) {
                 notes.save(new CaseNote(open.get().getId(), text, now));
-                audit.record(orderId, raisedByType, raisedBy, "raise_case", AuditEvent.Outcome.SUCCEEDED,
+                audit.record(orderId, raisedByType, raisedBy, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
                         "Added to the open " + type + " case" + incidentOf(open.get()), text);
                 return open.get();
             }
         }
         SupportCase opened = cases.save(new SupportCase(orderId, type, text, raisedBy, now));
-        audit.record(orderId, raisedByType, raisedBy, "raise_case", AuditEvent.Outcome.SUCCEEDED,
+        audit.record(orderId, raisedByType, raisedBy, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
                 "Opened a " + type + " case; it goes to ServiceNow as an incident for the incident agent", text);
         return opened;
     }
@@ -183,7 +185,11 @@ public class CaseService {
      * Records an incident the service desk raised about an order as a case of its own, so agents leave the order's
      * money to whoever works it, as for the shop's own cases; the read-back then keeps it in step until it is resolved.
      * The incident is known by its link, which names the instance and the incident's sys_id: its number alone repeats
-     * across instances, such as the simulator and a real one. Recording it again changes nothing.
+     * across instances, such as the simulator and a real one.
+     *
+     * <p>Recording an incident again changes nothing while it stays about the same order and its case is open. When
+     * the service desk corrected the order in the incident, the case moves to that order, and when the incident was
+     * reopened after its case was resolved, the case is open again.
      */
     @Transactional
     public SupportCase recordServiceDeskIncident(UUID orderId, String number, String url, String shortDescription,
@@ -194,11 +200,23 @@ public class CaseService {
         }
         Optional<SupportCase> recorded = cases.findByTypeAndIncidentUrl(CaseType.SERVICE_DESK, url);
         if (recorded.isPresent()) {
-            return recorded.get();
+            SupportCase supportCase = recorded.get();
+            UUID before = supportCase.getOrderId();
+            boolean wasResolved = supportCase.getStatus() == SupportCase.Status.RESOLVED;
+            if (supportCase.followServiceDeskIncident(orderId, status, assignmentGroup, Instant.now(clock))) {
+                if (!orderId.equals(before)) {
+                    audit.record(before, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
+                            AuditEvent.Outcome.SUCCEEDED, number + " is now about order " + orderId, null);
+                }
+                audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
+                        AuditEvent.Outcome.SUCCEEDED, number + (wasResolved ? " was reopened" : " is now about this order")
+                                + "; agents leave its money to whoever works it", null);
+            }
+            return supportCase;
         }
         SupportCase supportCase = cases.save(SupportCase.forServiceDeskIncident(orderId, number, url, shortDescription,
                 status, assignmentGroup, Instant.now(clock)));
-        audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, "raise_case", AuditEvent.Outcome.SUCCEEDED,
+        audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
                 "The service desk raised incident " + number + " about this order; agents leave its money to whoever "
                         + "works it", shortDescription);
         return supportCase;
@@ -248,7 +266,7 @@ public class CaseService {
                 case RESOLVED -> incident + " is resolved";
                 case PENDING -> throw new IllegalStateException();
             };
-            audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, "follow_incident",
+            audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
                     AuditEvent.Outcome.SUCCEEDED, summary, null);
             if (status == SupportCase.Status.RESOLVED) {
                 carryOverUnsentNotes(supportCase);

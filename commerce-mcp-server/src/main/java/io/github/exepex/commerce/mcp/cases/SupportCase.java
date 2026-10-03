@@ -99,6 +99,25 @@ public class SupportCase {
         return supportCase;
     }
 
+    /**
+     * Follows a service-desk incident seen open again: about the order its Correlation ID names now, and with whoever
+     * has it, also when it was resolved before and has been reopened.
+     *
+     * @return whether anything changed
+     */
+    boolean followServiceDeskIncident(UUID incidentOrderId, Status incidentStatus, String group, Instant now) {
+        boolean moved = !incidentOrderId.equals(orderId);
+        boolean reopened = status == Status.RESOLVED;
+        if (!moved && !reopened) {
+            return false;
+        }
+        orderId = incidentOrderId;
+        status = incidentStatus;
+        assignmentGroup = group;
+        updatedAt = now;
+        return true;
+    }
+
     /** Links the case to the incident created for it. Only the first incident counts. */
     boolean linkIncident(String number, String url, Instant now) {
         if (incidentNumber != null) {

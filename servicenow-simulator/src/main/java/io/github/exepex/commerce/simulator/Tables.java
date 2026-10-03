@@ -66,8 +66,11 @@ class Tables {
         return REFERENCES.get(field);
     }
 
-    /** The rows that match an encoded query such as {@code assigned_toISEMPTY^state=1^ORDERBYDESCsys_created_on}. */
-    synchronized List<Map<String, String>> find(String table, String encodedQuery, int limit) {
+    /**
+     * One page of the rows that match an encoded query such as
+     * {@code assigned_toISEMPTY^state=1^ORDERBYDESCsys_created_on}.
+     */
+    synchronized List<Map<String, String>> find(String table, String encodedQuery, int offset, int limit) {
         List<Map<String, String>> found = new ArrayList<>();
         Predicate<Map<String, String>> matches = row -> true;
         String orderBy = null;
@@ -95,7 +98,8 @@ class Tables {
                 Collections.reverse(found);
             }
         }
-        return found.subList(0, Math.min(limit, found.size()));
+        int from = Math.min(offset, found.size());
+        return found.subList(from, Math.min(from + limit, found.size()));
     }
 
     synchronized Optional<Map<String, String>> get(String table, String sysId) {
