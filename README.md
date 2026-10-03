@@ -14,7 +14,7 @@ A customer orders a headlamp through the shopping assistant; operations writes o
 agent works the stock-out as a ServiceNow incident (cancels the order, refunds it, tells the customer) and resolves it.
 Shown at double speed, recorded with the real model and the ServiceNow simulator.
 
-[Watch the demo] (https://github.com/user-attachments/assets/5c9297f2-6274-4166-9504-9167dcaa4c00)
+[Watch the demo](https://github.com/user-attachments/assets/5c9297f2-6274-4166-9504-9167dcaa4c00)
 
 
 
