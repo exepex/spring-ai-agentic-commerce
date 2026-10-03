@@ -125,6 +125,17 @@ class ServiceNowClient {
      * contain a line that looks like another entry's heading.
      */
     Journal journalOf(String incidentSysId) {
+        JsonNode incident = journalFieldsOf(incidentSysId);
+        return new Journal(newest(incident.path("work_notes").asString("")),
+                newest(incident.path("comments").asString("")));
+    }
+
+    /** All of the incident's work notes as shown, not cut like {@link #journalOf}: for finding what was sent before. */
+    String allWorkNotesOf(String incidentSysId) {
+        return journalFieldsOf(incidentSysId).path("work_notes").asString("");
+    }
+
+    private JsonNode journalFieldsOf(String incidentSysId) {
         JsonNode body = restClient.get()
                 .uri(uri -> uri.path("/api/now/table/incident")
                         .queryParam("sysparm_query", "sys_id=" + incidentSysId)
@@ -133,9 +144,7 @@ class ServiceNowClient {
                         .queryParam("sysparm_limit", 1)
                         .build())
                 .retrieve().body(JsonNode.class);
-        JsonNode incident = body.path("result").path(0);
-        return new Journal(newest(incident.path("work_notes").asString("")),
-                newest(incident.path("comments").asString("")));
+        return body.path("result").path(0);
     }
 
     /** The newest part of a journal field: it is shown newest first, so older entries are cut from the end. */

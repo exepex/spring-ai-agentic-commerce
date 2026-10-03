@@ -398,6 +398,50 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void aNoteFarBackInALongJournalIsStillFoundAndNotAddedAgain() {
+        String caseId = UUID.randomUUID().toString();
+        String noteId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "type": "STOCK_OUT", "status": "WITH_AGENT", "incidentNumber": "INC0010009"},
+                  "unsentNotes": [{"id": "%s", "text": "Raised again by the catalog."}]}]"""
+                .formatted(caseId, noteId))));
+        stubIncident("INC0010009", "sys-9", "2", "Online Shop Agent", AGENT_USER, caseId, Instant.now());
+        // Much was written after the note, so its marker lies beyond what get_incident shows the agent.
+        String newer = "2026-10-02 03:00:00 - Ana Desk (Work notes)\\n" + "x".repeat(25_000) + "\\n\\n";
+        stubJournal("sys-9", """
+                {"result": [{"work_notes": "%s2026-10-02 02:05:00 - Trailhead Agent (Work notes)\\nRaised again by the catalog.\\n\\n[shop note %s]\\n\\n",
+                             "comments": ""}]}""".formatted(newer, noteId));
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-9")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + noteId + "/sent")));
+    }
+
+    @Test
+    void aNoteAtTheLongestLengthIsShortenedSoItsMarkerFits() {
+        String caseId = UUID.randomUUID().toString();
+        String noteId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "type": "STOCK_OUT", "status": "WITH_AGENT", "incidentNumber": "INC0010009"},
+                  "unsentNotes": [{"id": "%s", "text": "%s"}]}]"""
+                .formatted(caseId, noteId, "y".repeat(4_000)))));
+        stubIncident("INC0010009", "sys-9", "2", "Online Shop Agent", AGENT_USER, caseId, Instant.now());
+        stubJournal("sys-9", "{\"result\": [{\"work_notes\": \"\", \"comments\": \"\"}]}");
+        SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-9")).willReturn(okJson("{\"result\": {}}")));
+
+        poller.poll();
+
+        String workNote = JsonPath.read(SERVICES.findAll(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-9")))
+                .getFirst().getBodyAsString(), "$.work_notes");
+        assertThat(workNote).hasSize(4_000).endsWith("\n\n[shop note " + noteId + "]").startsWith("yyy");
+    }
+
+    @Test
     void aCaseWhoseIncidentWasOpenedBeforeIsLinkedAndNotOpenedAgain() {
         String caseId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
