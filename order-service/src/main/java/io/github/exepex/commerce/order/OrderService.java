@@ -9,13 +9,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.ErrorResponseException;
 
 /**
  * Checkout and cancellation. This is the deterministic path: no AI agent is involved in placing an order.
@@ -30,12 +29,12 @@ import org.springframework.web.ErrorResponseException;
  * so it is released even if the catalog is down at that moment. No database transaction is held open across remote
  * calls.
  */
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class OrderService {
 
     public record RequestedLine(UUID productId, int quantity) {}
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(OrderService.class);
 
     private final CustomerOrderRepository orders;
     private final CatalogGateway catalog;
@@ -44,17 +43,6 @@ public class OrderService {
     private final ApplicationEventPublisher events;
     private final TransactionTemplate transaction;
     private final Clock clock;
-
-    OrderService(CustomerOrderRepository orders, CatalogGateway catalog, PaymentGateway payments,
-            StockReleases releases, ApplicationEventPublisher events, TransactionTemplate transaction, Clock clock) {
-        this.orders = orders;
-        this.catalog = catalog;
-        this.payments = payments;
-        this.releases = releases;
-        this.events = events;
-        this.transaction = transaction;
-        this.clock = clock;
-    }
 
     /**
      * Places an order and takes its payment. With {@code requestedOrderId}, placing is idempotent: asking again with
@@ -72,7 +60,7 @@ public class OrderService {
                 return outcomeOf(placedBefore.get(), customerEmail);
             }
         }
-        rejectDuplicateProducts(requestedLines);
+        CheckoutLines.rejectDuplicateProducts(requestedLines);
         UUID orderId = requestedOrderId != null ? requestedOrderId : UUID.randomUUID();
         CustomerOrder order;
         try {
@@ -105,13 +93,13 @@ public class OrderService {
                 releases.request(order.getId());
             }, () -> releases.attempt(order.getId()));
         } catch (PaymentGateway.PaymentUnavailableException unknown) {
-            LOGGER.warn("The payment for order {} could not be confirmed; it will be asked for again", order.getId(),
+            log.warn("The payment for order {} could not be confirmed; it will be asked for again", order.getId(),
                     unknown);
             return order.getStatus() == OrderStatus.PAYMENT_PENDING ? order : change(order, order::markPaymentPending, null);
         }
         return change(order, () -> {
             order.confirm();
-            events.publishEvent(OrderEvent.of(OrderEvent.Type.ORDER_CONFIRMED, order, Instant.now(clock)));
+            announce(OrderEvent.Type.ORDER_CONFIRMED, order);
         }, null);
     }
 
@@ -142,7 +130,7 @@ public class OrderService {
         }
         CustomerOrder cancelled = change(order, () -> {
             order.cancel(reason, Instant.now(clock));
-            events.publishEvent(OrderEvent.of(OrderEvent.Type.ORDER_CANCELLED, order, Instant.now(clock)));
+            announce(OrderEvent.Type.ORDER_CANCELLED, order);
             releases.request(orderId);
         }, () -> releases.attempt(orderId));
         if (cancelled.getStatus() != OrderStatus.CANCELLED) {
@@ -169,7 +157,7 @@ public class OrderService {
         catalog.dispatchOrder(orderId);
         CustomerOrder shipped = change(order, () -> {
             order.ship();
-            events.publishEvent(OrderEvent.of(OrderEvent.Type.ORDER_SHIPPED, order, Instant.now(clock)));
+            announce(OrderEvent.Type.ORDER_SHIPPED, order);
         }, null);
         if (!shipped.hasShipped()) {
             throw OrderRejectedException.notShippable(orderId, shipped.getStatus());
@@ -187,7 +175,7 @@ public class OrderService {
             return;
         }
         if (order.getStatus() != OrderStatus.SHIPPED) {
-            LOGGER.warn("Ignoring carrier outcome {} for order {}, which is {}", outcome, orderId, order.getStatus());
+            log.warn("Ignoring carrier outcome {} for order {}, which is {}", outcome, orderId, order.getStatus());
             return;
         }
         transaction.executeWithoutResult(status -> {
@@ -198,11 +186,11 @@ public class OrderService {
 
     /** Checkout's answer for an order it placed now or before. */
     private static CustomerOrder outcomeOf(CustomerOrder order, String customerEmail) {
-        if (!order.getCustomerEmail().equalsIgnoreCase(customerEmail)) {
+        if (!order.isPlacedBy(customerEmail)) {
             throw OrderRejectedException.idTaken(order.getId());
         }
         if (order.getStatus() == OrderStatus.PAYMENT_FAILED) {
-            throw naming(order, OrderRejectedException.paymentDeclined(order.getPaymentFailure()));
+            throw OrderRejectedException.paymentDeclined(order.getId(), order.getPaymentFailure());
         }
         return order;
     }
@@ -235,7 +223,7 @@ public class OrderService {
         for (RequestedLine requested : requestedLines) {
             CatalogProduct product = catalog.getProduct(requested.productId());
             catalog.reserveStock(product.id(), orderId, requested.quantity());
-            lines.add(new OrderLine(product.id(), product.sku(), product.name(), requested.quantity(), product.price()));
+            lines.add(CheckoutLines.orderLineOf(product, requested.quantity()));
             currencies.add(product.currency());
         }
         if (currencies.size() > 1) {
@@ -245,18 +233,8 @@ public class OrderService {
                 paymentMethod, Instant.now(clock)));
     }
 
-    /** The order whose payment failed is kept, so the error names it: callers can link what they record to it. */
-    private static <E extends ErrorResponseException> E naming(CustomerOrder order, E failure) {
-        failure.getBody().setProperty("orderId", order.getId());
-        return failure;
-    }
-
-    private static void rejectDuplicateProducts(List<RequestedLine> requestedLines) {
-        Set<UUID> seenProductIds = new HashSet<>();
-        for (RequestedLine requested : requestedLines) {
-            if (!seenProductIds.add(requested.productId())) {
-                throw OrderRejectedException.duplicateProduct(requested.productId());
-            }
-        }
+    /** Announces the change once the transaction it is part of has committed. */
+    private void announce(OrderEvent.Type type, CustomerOrder order) {
+        events.publishEvent(OrderEvent.of(type, order, Instant.now(clock)));
     }
 }

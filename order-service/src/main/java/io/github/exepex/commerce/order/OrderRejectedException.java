@@ -25,8 +25,11 @@ class OrderRejectedException extends ErrorResponseException {
                 "Product " + productId + " appears on more than one line; combine them into one");
     }
 
-    static OrderRejectedException paymentDeclined(String reason) {
-        return new OrderRejectedException(HttpStatus.PAYMENT_REQUIRED, reason);
+    /** The order whose payment failed is kept, so the error names it: callers can link what they record to it. */
+    static OrderRejectedException paymentDeclined(UUID orderId, String reason) {
+        OrderRejectedException declined = new OrderRejectedException(HttpStatus.PAYMENT_REQUIRED, reason);
+        declined.getBody().setProperty("orderId", orderId);
+        return declined;
     }
 
     static OrderRejectedException notCancellable(UUID orderId, OrderStatus status) {

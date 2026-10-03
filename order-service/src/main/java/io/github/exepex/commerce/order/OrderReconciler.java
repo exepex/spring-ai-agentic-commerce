@@ -4,8 +4,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -16,25 +16,19 @@ import org.springframework.stereotype.Component;
  * confirmed. An order only counts as stalled once it is older than {@code commerce.reconciliation.settle-after}, so
  * a checkout that is still running is left alone.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 class OrderReconciler {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(OrderReconciler.class);
 
     private final CustomerOrderRepository orders;
     private final OrderService orderService;
     private final StockReleases releases;
-    private final Duration settleAfter;
-    private final Clock clock;
 
-    OrderReconciler(CustomerOrderRepository orders, OrderService orderService, StockReleases releases,
-            @Value("${commerce.reconciliation.settle-after}") Duration settleAfter, Clock clock) {
-        this.orders = orders;
-        this.orderService = orderService;
-        this.releases = releases;
-        this.settleAfter = settleAfter;
-        this.clock = clock;
-    }
+    @Value("${commerce.reconciliation.settle-after}")
+    private final Duration settleAfter;
+
+    private final Clock clock;
 
     @Scheduled(fixedDelayString = "${commerce.reconciliation.interval}", initialDelayString = "${commerce.reconciliation.interval}")
     void reconcile() {
@@ -44,7 +38,7 @@ class OrderReconciler {
             try {
                 orderService.settlePayment(order);
             } catch (RuntimeException failure) {
-                LOGGER.warn("Could not settle the payment of order {}; it will be retried", order.getId(), failure);
+                log.warn("Could not settle the payment of order {}; it will be retried", order.getId(), failure);
             }
         }
         releases.retryAll();

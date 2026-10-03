@@ -1,16 +1,16 @@
 package io.github.exepex.commerce.order;
 
+import io.github.exepex.commerce.order.OrderViews.OrderView;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
-import java.math.BigDecimal;
 import java.net.URI;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/orders")
+@RequiredArgsConstructor
 class OrderController {
 
     record LineRequest(@NotNull UUID productId, @Positive int quantity) {}
@@ -37,35 +38,15 @@ class OrderController {
         String paymentMethodOrDefault() {
             return paymentMethod == null || paymentMethod.isBlank() ? "pm_card_visa" : paymentMethod;
         }
+
+        List<OrderService.RequestedLine> requestedLines() {
+            return lines.stream().map(line -> new OrderService.RequestedLine(line.productId(), line.quantity())).toList();
+        }
     }
 
     record CancelOrderRequest(@NotBlank String reason) {}
 
-    record LineView(UUID productId, String sku, String productName, int quantity, BigDecimal unitPrice,
-            BigDecimal lineTotal) {
-
-        static LineView of(OrderLine line) {
-            return new LineView(line.getProductId(), line.getSku(), line.getProductName(), line.getQuantity(),
-                    line.getUnitPrice(), line.lineTotal());
-        }
-    }
-
-    record OrderView(UUID id, String customerEmail, OrderStatus status, BigDecimal total, String currency,
-            Instant createdAt, Instant cancelledAt, String cancellationReason, String paymentFailure,
-            List<LineView> lines) {
-
-        static OrderView of(CustomerOrder order) {
-            return new OrderView(order.getId(), order.getCustomerEmail(), order.getStatus(), order.getTotalAmount(),
-                    order.getCurrency(), order.getCreatedAt(), order.getCancelledAt(), order.getCancellationReason(),
-                    order.getPaymentFailure(), order.getLines().stream().map(LineView::of).toList());
-        }
-    }
-
     private final OrderService orderService;
-
-    OrderController(OrderService orderService) {
-        this.orderService = orderService;
-    }
 
     /**
      * Answers 201 when the order is paid, 202 when it is not settled yet (its payment is pending, or the same order is
@@ -73,16 +54,16 @@ class OrderController {
      */
     @PostMapping
     ResponseEntity<OrderView> placeOrder(@Valid @RequestBody PlaceOrderRequest request) {
-        CustomerOrder order = orderService.placeOrder(request.orderId(), request.customerEmail(), request.lines().stream()
-                .map(line -> new OrderService.RequestedLine(line.productId(), line.quantity()))
-                .toList(), request.paymentMethodOrDefault());
+        CustomerOrder order = orderService.placeOrder(request.orderId(), request.customerEmail(),
+                request.requestedLines(), request.paymentMethodOrDefault());
         HttpStatus status = order.getStatus() == OrderStatus.CONFIRMED ? HttpStatus.CREATED : HttpStatus.ACCEPTED;
-        return ResponseEntity.status(status).location(URI.create("/api/orders/" + order.getId())).body(OrderView.of(order));
+        return ResponseEntity.status(status).location(URI.create("/api/orders/" + order.getId()))
+                .body(OrderViews.toView(order));
     }
 
     @GetMapping("/{orderId}")
     OrderView getOrder(@PathVariable UUID orderId) {
-        return OrderView.of(orderService.getOrder(orderId));
+        return OrderViews.toView(orderService.getOrder(orderId));
     }
 
     /** A customer's orders when {@code customerEmail} is given, otherwise the 100 most recent orders. */
@@ -91,17 +72,17 @@ class OrderController {
         List<CustomerOrder> found = customerEmail == null
                 ? orderService.findRecentOrders()
                 : orderService.findOrdersOf(customerEmail);
-        return found.stream().map(OrderView::of).toList();
+        return found.stream().map(OrderViews::toView).toList();
     }
 
     /** Ships the order from the warehouse. Shipping twice changes nothing; a cancelled order is refused. */
     @PostMapping("/{orderId}/dispatch")
     OrderView shipOrder(@PathVariable UUID orderId) {
-        return OrderView.of(orderService.shipOrder(orderId));
+        return OrderViews.toView(orderService.shipOrder(orderId));
     }
 
     @PostMapping("/{orderId}/cancellation")
     OrderView cancelOrder(@PathVariable UUID orderId, @Valid @RequestBody CancelOrderRequest request) {
-        return OrderView.of(orderService.cancelOrder(orderId, request.reason()));
+        return OrderViews.toView(orderService.cancelOrder(orderId, request.reason()));
     }
 }

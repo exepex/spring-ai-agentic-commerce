@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.order;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 
@@ -8,13 +9,10 @@ import org.springframework.stereotype.Component;
  * to the order fails and is delivered again by Kafka.
  */
 @Component
+@RequiredArgsConstructor
 class ShipmentEventListener {
 
     private final OrderService orderService;
-
-    ShipmentEventListener(OrderService orderService) {
-        this.orderService = orderService;
-    }
 
     @KafkaListener(topics = "${commerce.topics.shipment-events}")
     void onShipmentEvent(ShipmentEvent event) {
