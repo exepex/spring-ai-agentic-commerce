@@ -3,6 +3,7 @@ package io.github.exepex.commerce.servicenow.incidents;
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
 import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -118,10 +119,10 @@ class CaseSync {
      * such as another system's label, does not make it the shop's. An incident whose Correlation ID is not an order id
      * names no order and is left out too. An incident that cannot be recorded is tried next poll.
      *
-     * @return the numbers of the incidents the shop has now
+     * @return the incidents the shop has now, by number, each with the order it has it under
      */
-    Set<String> recordServiceDeskIncidents() {
-        Set<String> recorded = new HashSet<>();
+    Map<String, UUID> recordServiceDeskIncidents() {
+        Map<String, UUID> recorded = new HashMap<>();
         for (ServiceNowClient.Incident incident : serviceNow.findOpenWithCorrelationId()) {
             if (!isServiceDeskIncidentAboutAnOrder(incident)) {
                 continue;
@@ -133,7 +134,7 @@ class CaseSync {
                         : incident.shortDescription();
                 governance.recordServiceDeskIncident(authorization(), new GovernanceApi.ServiceDeskIncident(orderId,
                         incident.number(), serviceNow.linkTo(incident), title, state.status(), state.assignmentGroup()));
-                recorded.add(incident.number());
+                recorded.put(incident.number(), orderId);
             } catch (RuntimeException failure) {
                 LOGGER.warn("Could not record incident {} with the shop; trying again next time", incident.number(), failure);
             }
@@ -144,6 +145,12 @@ class CaseSync {
     /** Whether the service desk raised the incident about an order: it names an order, and no case of the shop's. */
     boolean isServiceDeskIncidentAboutAnOrder(ServiceNowClient.Incident incident) {
         return uuidOrNull(incident.orderId()) != null && caseIdOf(incident) == null;
+    }
+
+    /** Whether the shop has the incident, as recorded this poll, under the order the incident names now. */
+    static boolean isRecordedForItsOrder(ServiceNowClient.Incident incident, Map<String, UUID> recorded) {
+        UUID orderId = uuidOrNull(incident.orderId());
+        return orderId != null && orderId.equals(recorded.get(incident.number()));
     }
 
     /**

@@ -5,6 +5,7 @@ import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -82,9 +83,9 @@ public class IncidentPoller {
         Set<UUID> unsent = new HashSet<>();
         boolean listed = step("send the shop's cases to ServiceNow", () -> unsent.addAll(cases.sendCases()));
         step("hand over stale claims", this::handOverStaleClaims);
-        Set<String> recorded = new HashSet<>();
+        Map<String, UUID> recorded = new HashMap<>();
         step("record the service desk's incidents with the shop",
-                () -> recorded.addAll(cases.recordServiceDeskIncidents()));
+                () -> recorded.putAll(cases.recordServiceDeskIncidents()));
         step("claim new incidents", () -> claimNewIncidents(recorded));
         step("read back the cases' incidents",
                 () -> cases.readBackIncidents(caseId -> listed && !unsent.contains(caseId)));
@@ -112,9 +113,12 @@ public class IncidentPoller {
      * Handing it to the default team while the agent is switched off does not wait: it stays open with a person, and
      * the shop records it once it can be told.
      *
-     * @param recorded the numbers of the service desk's incidents the shop has now
+     * <p>The shop must have it under the order the incident names when it is claimed: one the service desk moved to
+     * another order since it was recorded waits for the next poll, which moves the case first.
+     *
+     * @param recorded the service desk's incidents the shop has now, by number, each with its order
      */
-    private void claimNewIncidents(Set<String> recorded) {
+    private void claimNewIncidents(Map<String, UUID> recorded) {
         boolean switchedOn = Boolean.TRUE.equals(governance.switches().get(properties.agent()));
         for (ServiceNowClient.Incident found : serviceNow.findNewForAgent()) {
             ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
@@ -126,7 +130,8 @@ public class IncidentPoller {
                 handOverWhileSwitchedOff(incident);
                 continue;
             }
-            if (cases.isServiceDeskIncidentAboutAnOrder(incident) && !recorded.contains(incident.number())) {
+            if (cases.isServiceDeskIncidentAboutAnOrder(incident)
+                    && !CaseSync.isRecordedForItsOrder(incident, recorded)) {
                 LOGGER.info("{} waits until the shop has it as a case", incident.number());
                 continue;
             }

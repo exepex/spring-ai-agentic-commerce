@@ -362,6 +362,23 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void aServiceDeskIncidentMovedToAnotherOrderSinceItWasRecordedIsNotClaimedUntilItsCaseMoves() {
+        String recordedRow = incidentRow("INC0010027", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        stubServiceDeskIncidents("[" + recordedRow + "]");
+        stubNewIncidents("[" + recordedRow + "]");
+        stubClaimed("[]");
+        // Re-read right before the claim, the service desk has corrected the order meanwhile.
+        String otherOrder = UUID.randomUUID().toString();
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("number=INC0010027"))
+                .willReturn(okJson("{\"result\": [" + recordedRow.replace(LINKED_ORDER, otherOrder) + "]}")));
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
+    }
+
+    @Test
     void whileTheAgentIsSwitchedOffAServiceDeskIncidentTheShopCouldNotBeToldAboutStillGoesToTheDefaultTeam() {
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
         String row = incidentRow("INC0010026", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
