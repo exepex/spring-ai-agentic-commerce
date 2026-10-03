@@ -22,7 +22,8 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
  * Rows are returned as ServiceNow returns them: with {@code sysparm_display_value=all} each field is a {@code value}
  * and {@code display_value} pair, with {@code true} its display value, otherwise its stored value; a reference field
  * is always an object that also carries a {@code link} to the referenced row. With {@code sysparm_input_display_value=true},
- * reference fields are given by name, such as an assignment group.
+ * reference fields are given by name, such as an assignment group. Work notes and comments are shown on the incident,
+ * as a real instance shows them; their journal rows are not readable, as for an integration user on a real instance.
  */
 @RestController
 class TableApiController {
@@ -43,6 +44,11 @@ class TableApiController {
             @RequestParam(name = "sysparm_limit", defaultValue = "10000") int limit) {
         if (!tables.exists(table)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid table " + table);
+        }
+        if (Tables.JOURNAL.equals(table)) {
+            // A user with only the itil role, like the integration user, may not read journal rows on a real instance,
+            // which then answers with none; the notes are read through the incident's own journal fields.
+            return Map.of("result", List.of());
         }
         return Map.of("result", tables.find(table, query, limit).stream()
                 .map(row -> render(table, row, fields, displayValue))
@@ -93,7 +99,8 @@ class TableApiController {
         Map<String, Object> rendered = new LinkedHashMap<>();
         for (String field : shown) {
             String value = row.getOrDefault(field, "");
-            String display = tables.displayValue(table, field, value);
+            String display = tables.isJournal(table, field) ? tables.journalShown(row.get("sys_id"), field)
+                    : tables.displayValue(table, field, value);
             boolean reference = tables.isReference(table, field) && !value.isEmpty();
             rendered.put(field, switch (displayValue) {
                 case "all" -> reference ? Map.of("value", value, "display_value", display, "link", link(field, value))

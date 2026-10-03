@@ -2,9 +2,10 @@ package io.github.exepex.commerce.evals;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.StreamSupport;
+import java.util.regex.Pattern;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
@@ -16,6 +17,8 @@ import tools.jackson.databind.JsonNode;
  * default from the {@code AGENTIC_COMMERCE_SERVICENOW_*} environment variables the demo reads.
  */
 final class ServiceNow {
+
+    private static final Pattern JOURNAL_HEADER = Pattern.compile("^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} - .+ \\([^()]+\\)$");
 
     private final RestClient api;
     private final String agentGroup;
@@ -56,13 +59,31 @@ final class ServiceNow {
         return incident(number).path("assignment_group").path("display_value").asString("");
     }
 
-    /** The text of the incident's work notes, oldest first. */
+    /**
+     * The text of the incident's work notes, newest first, read from the incident's own work_notes field as ServiceNow
+     * shows it: each entry starts with a line {@code <time> - <who> (Work notes)}. The journal table is not readable
+     * by the integration user.
+     */
     List<String> workNotesOf(String number) {
-        JsonNode notes = api.get().uri("/api/now/table/sys_journal_field?sysparm_query=element_id={sysId}^element=work_notes"
-                        + "^ORDERBYsys_created_on&sysparm_fields=value",
-                        incident(number).path("sys_id").path("value").asString())
-                .retrieve().body(JsonNode.class).path("result");
-        return StreamSupport.stream(notes.spliterator(), false).map(note -> note.path("value").asString()).toList();
+        String shown = api.get().uri("/api/now/table/incident?sysparm_query=number={number}"
+                        + "&sysparm_fields=work_notes&sysparm_display_value=true", number)
+                .retrieve().body(JsonNode.class).path("result").path(0).path("work_notes").asString("");
+        List<String> notes = new ArrayList<>();
+        StringBuilder note = null;
+        for (String line : shown.split("\n", -1)) {
+            if (JOURNAL_HEADER.matcher(line).matches()) {
+                if (note != null) {
+                    notes.add(note.toString().strip());
+                }
+                note = new StringBuilder();
+            } else if (note != null) {
+                note.append(line).append('\n');
+            }
+        }
+        if (note != null) {
+            notes.add(note.toString().strip());
+        }
+        return notes;
     }
 
     /** The incident's fields, each with its stored and its display value. */

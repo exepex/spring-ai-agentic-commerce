@@ -61,6 +61,18 @@ import org.testcontainers.kafka.KafkaContainer;
 @Import(TestcontainersConfiguration.class)
 class ServiceNowMcpServerIntegrationTest {
 
+    /** Work notes as a real instance shows them: newest first, in the integration user's time zone. */
+    private static final String WORK_NOTES_SHOWN = """
+            2026-10-02 02:10:00 - Trailhead Agent (Work notes)
+            Refunded EUR 39.50.
+
+            2026-10-02 02:05:00 - Ana Desk (Work notes)
+            Asked the warehouse.
+
+            They will call back.
+
+            """;
+
     private static final String AGENT_TOKEN = "dev-incident-agent-token";
     private static final String AGENT_USER = "a1b2c3d4agentuser";
     private static final String LINKED_ORDER = "6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c";
@@ -92,13 +104,11 @@ class ServiceNowMcpServerIntegrationTest {
         SERVICES.resetAll();
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/sys_user"))
                 .willReturn(okJson("{\"result\": [{\"sys_id\": \"" + AGENT_USER + "\"}]}")));
-        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/sys_journal_field"))
-                .withQueryParam("sysparm_query", equalTo("element_id=sys-1^ORDERBYDESCsys_created_on"))
-                .willReturn(okJson("""
-                        {"result": [{"sys_created_on": "2026-10-02 09:05:00", "sys_created_by": "desk.ana",
-                                     "element": "work_notes", "value": "Asked the warehouse."},
-                                    {"sys_created_on": "2026-10-02 09:00:00", "sys_created_by": "desk.ana",
-                                     "element": "comments", "value": "The customer says order 6f0c is late."}]}""")));
+        stubJournal("""
+                {"result": [{
+                  "work_notes": "%s",
+                  "comments": "2026-10-02 02:00:00 - Ana Desk (Additional comments)\\nThe customer says order 6f0c is late.\\n\\n"}]}"""
+                .formatted(WORK_NOTES_SHOWN.replace("\n", "\\n")));
         SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-1")).willReturn(okJson("{\"result\": {}}")));
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": true}")));
         SERVICES.stubFor(post("/api/agent/tool-calls").willReturn(aResponse().withStatus(200)));
@@ -135,9 +145,24 @@ class ServiceNowMcpServerIntegrationTest {
         assertThat((String) JsonPath.read(incident, "$.shortDescription")).isEqualTo("Order arrived broken");
         assertThat((String) JsonPath.read(incident, "$.linkedOrderId")).isEqualTo(LINKED_ORDER);
         assertThat((String) JsonPath.read(incident, "$.openedAt")).isEqualTo("2026-10-02T08:55:00Z");
-        assertThat(JsonPath.<List<String>>read(incident, "$.notes[*].text"))
-                .containsExactly("The customer says order 6f0c is late.", "Asked the warehouse.");
+        assertThat((String) JsonPath.read(incident, "$.workNotes")).isEqualTo(WORK_NOTES_SHOWN.strip());
+        assertThat((String) JsonPath.read(incident, "$.comments"))
+                .isEqualTo("2026-10-02 02:00:00 - Ana Desk (Additional comments)\nThe customer says order 6f0c is late.");
         assertThat(call("get_incident", Map.of("number", "INC1^ORactive=true")).isError()).isTrue();
+    }
+
+    @Test
+    void aLongJournalIsCutToItsNewestPart() {
+        stubIncident(AGENT_USER, "2");
+        String newest = "2026-10-02 02:05:00 - Ana Desk (Work notes)\\nThe newest note.\\n\\n";
+        String older = "2026-10-01 02:05:00 - Ana Desk (Work notes)\\n" + "x".repeat(30_000) + "\\n\\n";
+        stubJournal("{\"result\": [{\"work_notes\": \"" + newest + older + "\", \"comments\": \"\"}]}");
+
+        String workNotes = JsonPath.read(text(call("get_incident", Map.of("number", "INC0010001"))), "$.workNotes");
+
+        assertThat(workNotes).startsWith("2026-10-02 02:05:00 - Ana Desk (Work notes)\nThe newest note.")
+                .endsWith("\n[Older entries left out.]")
+                .hasSizeLessThan(20_100);
     }
 
     @Test
@@ -151,7 +176,8 @@ class ServiceNowMcpServerIntegrationTest {
         assertThat(text(read)).contains("not yours to change");
         assertThat(refused.isError()).isTrue();
         assertThat(text(refused)).contains("not yours to change");
-        SERVICES.verify(0, getRequestedFor(urlPathEqualTo("/api/now/table/sys_journal_field")));
+        SERVICES.verify(0, getRequestedFor(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-1")));
         SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/tool-calls"))
                 .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))
@@ -457,6 +483,14 @@ class ServiceNowMcpServerIntegrationTest {
                 .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))
                 .withRequestBody(equalToJson("""
                         {"number": "INC0010001", "status": "WITH_TEAM", "assignmentGroup": "Fulfilment"}""")));
+    }
+
+    /** The incident's journal fields as a real instance shows them with sysparm_display_value=true. */
+    private void stubJournal(String body) {
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-1"))
+                .withQueryParam("sysparm_display_value", equalTo("true"))
+                .willReturn(okJson(body)));
     }
 
     private void stubIncident(String assignedTo, String state) {

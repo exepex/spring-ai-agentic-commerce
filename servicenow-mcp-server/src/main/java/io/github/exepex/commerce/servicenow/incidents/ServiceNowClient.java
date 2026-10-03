@@ -32,8 +32,11 @@ class ServiceNowClient {
     private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String INCIDENT_FIELDS = "sys_id,number,short_description,description,state,assignment_group,"
             + "assigned_to,caller_id,correlation_id,correlation_display,sys_created_on,sys_updated_on";
-    /** How many of an incident's latest work notes and comments are read. */
-    private static final int JOURNAL_LIMIT = 50;
+    /**
+     * How much of each journal field is kept, newest first: enough for every note of a working incident, while a
+     * long-lived incident's history cannot flood the agent.
+     */
+    private static final int MAX_JOURNAL_LENGTH = 20_000;
 
     private final ServiceNowProperties properties;
     private final RestClient restClient;
@@ -66,8 +69,11 @@ class ServiceNowClient {
         }
     }
 
-    /** A work note or comment on an incident. */
-    record JournalEntry(Instant at, String by, String kind, String text) {}
+    /**
+     * An incident's work notes and comments as ServiceNow shows them: newest entry first, each starting with a line
+     * {@code <time> - <who> (<kind>)}, the time in the integration user's time zone.
+     */
+    record Journal(String workNotes, String comments) {}
 
     Optional<Incident> findByNumber(String number) {
         return query("number=" + number, 1).stream().findFirst();
@@ -112,22 +118,31 @@ class ServiceNowClient {
                 + "^state=" + STATE_IN_PROGRESS, 50);
     }
 
-    /** The incident's latest work notes and comments, oldest first. */
-    List<JournalEntry> journalOf(String incidentSysId) {
+    /**
+     * The incident's work notes and comments, read from the incident's own journal fields and passed on as shown. The
+     * journal table, {@code sys_journal_field}, is not used: a user with only the {@code itil} role cannot read its
+     * rows, and ServiceNow then returns none rather than an error. The text is not split into entries: a note can
+     * contain a line that looks like another entry's heading.
+     */
+    Journal journalOf(String incidentSysId) {
         JsonNode body = restClient.get()
-                .uri(uri -> uri.path("/api/now/table/sys_journal_field")
-                        .queryParam("sysparm_query", "element_id=" + incidentSysId + "^ORDERBYDESCsys_created_on")
-                        .queryParam("sysparm_fields", "sys_created_on,sys_created_by,element,value")
-                        .queryParam("sysparm_limit", JOURNAL_LIMIT)
+                .uri(uri -> uri.path("/api/now/table/incident")
+                        .queryParam("sysparm_query", "sys_id=" + incidentSysId)
+                        .queryParam("sysparm_fields", "work_notes,comments")
+                        .queryParam("sysparm_display_value", true)
+                        .queryParam("sysparm_limit", 1)
                         .build())
                 .retrieve().body(JsonNode.class);
-        List<JournalEntry> entries = new ArrayList<>();
-        for (JsonNode entry : body.path("result")) {
-            entries.add(new JournalEntry(utc(entry.path("sys_created_on").asString("")),
-                    entry.path("sys_created_by").asString(""), entry.path("element").asString(""),
-                    entry.path("value").asString("")));
-        }
-        return entries.reversed();
+        JsonNode incident = body.path("result").path(0);
+        return new Journal(newest(incident.path("work_notes").asString("")),
+                newest(incident.path("comments").asString("")));
+    }
+
+    /** The newest part of a journal field: it is shown newest first, so older entries are cut from the end. */
+    private static String newest(String shown) {
+        String journal = shown.strip();
+        return journal.length() <= MAX_JOURNAL_LENGTH ? journal
+                : journal.substring(0, MAX_JOURNAL_LENGTH) + "\n[Older entries left out.]";
     }
 
     /** Updates fields of an incident with their stored values: state codes and sys_ids. */
