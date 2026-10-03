@@ -240,6 +240,19 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void anIncidentReopenedIntoTheGroupItWasResolvedInOpensItsCaseAgain() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        handOff(orderId, "first");
+        String caseId = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", caseId, Map.of("number", "INC0010035"));
+        followIncident(caseId, "INC0010035", "RESOLVED", "Payments");
+
+        assertThat(followIncident(caseId, "INC0010035", "WITH_TEAM", "Payments")).isEqualTo(200);
+
+        assertThat((String) JsonPath.read(cases(orderId), "$[0].status")).isEqualTo("WITH_TEAM");
+    }
+
+    @Test
     void aCaseWhoseIncidentIsClosedIsNoLongerReadBack() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         handOff(orderId, "first");
@@ -252,23 +265,29 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
-    void anIncidentReopenedWhileANewerCaseOfItsProblemIsOpenLeavesThatCaseTheOnlyOpenOneAndTellsIt() {
+    void anIncidentReopenedWhileANewerCaseOfItsProblemIsOpenOpensItsCaseBesideItAndKeepsAgentsFromTheMoney() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
+        stubRefundSucceeds(orderId);
         handOff(orderId, "first");
         String earlier = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
         sync("/api/agent/cases/{id}/incident", earlier, Map.of("number", "INC0010033"));
         followIncident(earlier, "INC0010033", "RESOLVED", "Online Shop Agent");
         handOff(orderId, "the customer called again");
         String newer = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", newer, Map.of("number", "INC0010034"));
 
         assertThat(followIncident(earlier, "INC0010033", "WITH_TEAM", "Payments")).isEqualTo(200);
-        assertThat(followIncident(earlier, "INC0010033", "WITH_TEAM", "Payments")).isEqualTo(200);
+        handOff(orderId, "and once more");
+        McpSchema.CallToolResult forTheNewerIncident = call(incidentAgent, "issue_refund", Map.of("orderId",
+                orderId.toString(), "amount", 39.50, "reason", "lost", "idempotencyKey", "refund-" + orderId + "-INC0010034",
+                "incidentNumber", "INC0010034"));
 
         assertThat((List<String>) JsonPath.read(cases(orderId), "$[?(@.status != 'RESOLVED')].id"))
-                .containsExactly(newer);
-        List<String> notesOfNewer = JsonPath.read(outgoingFor(orderId), "$[0].unsentNotes[*].text");
-        assertThat(notesOfNewer).filteredOn(text -> text.contains("INC0010033")).singleElement()
-                .asString().contains("was reopened and is with Payments");
+                .containsExactlyInAnyOrder(earlier, newer);
+        assertThat((List<String>) JsonPath.read(outgoingFor(orderId), "$[?(@.supportCase.id == '" + newer
+                + "')].unsentNotes[*].text")).anySatisfy(text -> assertThat(text).contains("once more"));
+        assertThat(forTheNewerIncident.isError()).isTrue();
+        assertThat(text(forTheNewerIncident)).contains("Payments");
     }
 
     @Test

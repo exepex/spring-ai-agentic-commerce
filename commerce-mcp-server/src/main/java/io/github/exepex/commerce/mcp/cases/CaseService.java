@@ -4,7 +4,6 @@ import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.AuditTrail;
 import io.github.exepex.commerce.mcp.governance.GovernanceException;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -41,11 +40,6 @@ public class CaseService {
             SupportCase.Status.WITH_AGENT, SupportCase.Status.WITH_TEAM);
     private static final List<SupportCase.Status> IN_SERVICENOW = List.of(SupportCase.Status.WITH_AGENT,
             SupportCase.Status.WITH_TEAM);
-    /**
-     * How long a resolved incident is read back in case it is reopened. ServiceNow closes a resolved incident after
-     * seven days by default (glide.ui.autoclose.time), and a closed incident is final.
-     */
-    private static final Duration REOPENABLE_FOR = Duration.ofDays(7);
 
     /** A case with what is still to be sent to ServiceNow: its incident, when it has none, and its unsent notes. */
     public record Outgoing(SupportCase supportCase, List<CaseNote> unsentNotes) {}
@@ -111,8 +105,8 @@ public class CaseService {
         if (orderId != null) {
             // Two raises of the same problem at once must not each miss the other's case.
             lockProblem(orderId, type);
-            Optional<SupportCase> open = cases.findByOrderIdAndTypeAndStatusNot(orderId, type,
-                    SupportCase.Status.RESOLVED);
+            Optional<SupportCase> open = cases.findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(orderId,
+                    type, SupportCase.Status.RESOLVED);
             if (open.isPresent()) {
                 notes.save(new CaseNote(open.get().getId(), text, now));
                 audit.record(orderId, raisedByType, raisedBy, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
@@ -239,12 +233,11 @@ public class CaseService {
 
     /**
      * Cases whose incident the poller reads back: those whose incident is open in ServiceNow, and those whose incident
-     * was resolved lately and may still be reopened.
+     * is resolved but may still be reopened, until ServiceNow closes or cancels it.
      */
     public List<SupportCase> inServiceNow() {
         List<SupportCase> inServiceNow = new ArrayList<>(cases.findByStatusInOrderByCreatedAt(IN_SERVICENOW));
-        inServiceNow.addAll(cases.findByStatusAndIncidentFinalFalseAndUpdatedAtAfterOrderByCreatedAt(
-                SupportCase.Status.RESOLVED, Instant.now(clock).minus(REOPENABLE_FOR)));
+        inServiceNow.addAll(cases.findByStatusAndIncidentFinalFalseOrderByCreatedAt(SupportCase.Status.RESOLVED));
         return inServiceNow;
     }
 
@@ -258,9 +251,8 @@ public class CaseService {
      * resolution, and is carried over, or after it, and opens the new case.
      *
      * <p>An incident reopened after it was resolved opens its case again, so agents leave the order's money to whoever
-     * has it. An order has one open case of each problem, though: when a newer case of the same problem is open by
-     * then, the reopened case stays resolved, and the open case gets a note that the earlier incident is being worked
-     * again, so whoever works it leaves the money to the people on that incident.
+     * has it. When the order has a newer open case of the same problem by then, both are open, and the newer one stays
+     * the case a problem raised again goes to.
      *
      * <p>A service-desk incident that names no order any more, because the service desk cleared or changed its
      * Correlation ID, is not about the case's order: the case is resolved, so the order's money is free again. It stays
@@ -286,7 +278,8 @@ public class CaseService {
         Instant now = Instant.now(clock);
         if (supportCase.getType() == CaseType.SERVICE_DESK && incidentOrderId == null) {
             if (supportCase.getStatus() != SupportCase.Status.RESOLVED
-                    && supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, now)) {
+                    && supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, false,
+                            now)) {
                 audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
                         AuditEvent.Outcome.SUCCEEDED, number + " no longer names this order, so its case is closed and "
                                 + "agents may handle the order's money again", null);
@@ -295,25 +288,20 @@ public class CaseService {
         }
         boolean reopened = supportCase.getStatus() == SupportCase.Status.RESOLVED
                 && status != SupportCase.Status.RESOLVED;
-        if (reopened) {
-            Optional<SupportCase> open = openCaseOfTheSameProblem(supportCase);
-            if (open.isPresent()) {
-                if (supportCase.followIncidentWhileResolved(assignmentGroup, now)) {
-                    noteReopenedOnOpenCase(supportCase, open.get(), assignmentGroup, now);
-                }
-                return supportCase;
-            }
-        }
-        if (supportCase.followIncident(status, assignmentGroup, incidentFinal, now)) {
-            String incident = supportCase.getIncidentNumber();
+        // Looked up before the case changes, so that it does not find itself.
+        Optional<SupportCase> open = reopened ? openCaseOfTheSameProblem(supportCase) : Optional.empty();
+        if (supportCase.followIncident(status, assignmentGroup, incidentFinal, open.isPresent(), Instant.now(clock))) {
+            String incident = supportCase.getIncidentNumber() + (reopened ? " was reopened and" : "");
             String summary = switch (status) {
-                case WITH_AGENT -> incident + (reopened ? " was reopened and" : "") + " is with the incident agent";
-                case WITH_TEAM -> incident + (reopened ? " was reopened and" : "") + " is assigned to " + assignmentGroup;
+                case WITH_AGENT -> incident + " is with the incident agent";
+                case WITH_TEAM -> incident + " is assigned to " + assignmentGroup;
                 case RESOLVED -> incident + " is resolved";
                 case PENDING -> throw new IllegalStateException();
             };
+            String details = open.map(other -> "The order's open " + other.getType() + " case" + incidentOf(other)
+                    + " still takes what is raised again.").orElse(null);
             audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                    AuditEvent.Outcome.SUCCEEDED, summary, null);
+                    AuditEvent.Outcome.SUCCEEDED, summary, details);
             if (status == SupportCase.Status.RESOLVED) {
                 carryOverUnsentNotes(supportCase);
             }
@@ -321,24 +309,16 @@ public class CaseService {
         return supportCase;
     }
 
-    /** The order's open case of the same problem, if it has one; a service-desk case shares its problem with none. */
+    /**
+     * The order's open case of the same problem, the one a problem raised again goes to, if it has one; a service-desk
+     * case shares its problem with none.
+     */
     private Optional<SupportCase> openCaseOfTheSameProblem(SupportCase supportCase) {
         if (supportCase.getOrderId() == null || supportCase.getType() == CaseType.SERVICE_DESK) {
             return Optional.empty();
         }
-        return cases.findByOrderIdAndTypeAndStatusNot(supportCase.getOrderId(), supportCase.getType(),
-                SupportCase.Status.RESOLVED);
-    }
-
-    private void noteReopenedOnOpenCase(SupportCase reopened, SupportCase open, String assignmentGroup, Instant now) {
-        String incident = reopened.getIncidentNumber();
-        notes.save(new CaseNote(open.getId(), fit(incident + ", the incident of an earlier " + reopened.getType()
-                + " case of this order, was reopened and is with " + assignmentGroup + ". Leave the order's money to "
-                + "the people working it there."), now));
-        audit.record(reopened.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                AuditEvent.Outcome.SUCCEEDED, incident + " was reopened and is with " + assignmentGroup + "; its case "
-                        + "stays resolved, and the order's open " + reopened.getType() + " case" + incidentOf(open)
-                        + " was told", null);
+        return cases.findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(supportCase.getOrderId(),
+                supportCase.getType(), SupportCase.Status.RESOLVED);
     }
 
     /**
