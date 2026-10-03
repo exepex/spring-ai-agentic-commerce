@@ -191,7 +191,8 @@ The workflows are checked end to end by `agent-evals`: ten scenarios run against
 model, asserting on **what the agents did** (the audit trail, orders, payments and cases), not on the wording of their
 replies. They cover stock-outs within and above the refund limit, a stock-out delivered twice, payments down, the kill
 switch, the shopping assistant, a failed delivery, a lost parcel, and an incident the service desk raises. They play
-the carrier through the shop, and the service desk and the teams through ServiceNow's Table API.
+the carrier through the shop, and the service desk and the teams through ServiceNow's Table API. Each scenario puts
+back the stock it uses, so the suite can run again and again on the same database.
 
 ```bash
 ./run-scenarios.sh          # starts the demo with the ServiceNow simulator, then runs the suite

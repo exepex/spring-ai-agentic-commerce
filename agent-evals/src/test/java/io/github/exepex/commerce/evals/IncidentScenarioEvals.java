@@ -23,13 +23,15 @@ class IncidentScenarioEvals {
 
     private static final Duration AGENT_TIMEOUT = Duration.ofMinutes(6);
 
+    /** An incident in either state is finished; an instance may close a resolved incident at once. */
+    private static final Set<String> FINISHED_STATES = Set.of("Resolved", "Closed");
+
     private final Demo demo = new Demo();
     private final ServiceNow serviceNow = new ServiceNow();
 
     @Test
     void aFailedDeliveryGoesToFulfilmentWhoCloseItInServiceNow() {
-        String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
-        demo.ship(orderId);
+        String orderId = shippedHeadlampOrder();
         demo.reportFromCarrier(orderId, "DELIVERY_FAILED", "Nobody home, parcel returned to the depot");
 
         JsonNode supportCase = demo.awaitCaseFinished(orderId);
@@ -44,9 +46,8 @@ class IncidentScenarioEvals {
     }
 
     @Test
-    void aLostParcelIsRefundedOnceExplainedAndResolved() {
-        String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
-        demo.ship(orderId);
+    void aLostParcelIsRefundedOnceExplainedDocumentedAndResolved() {
+        String orderId = shippedHeadlampOrder();
         demo.reportFromCarrier(orderId, "LOST", "The carrier lost the parcel in transit");
 
         JsonNode supportCase = demo.awaitCaseFinished(orderId);
@@ -57,26 +58,48 @@ class IncidentScenarioEvals {
         JsonNode payment = demo.payment(orderId);
         assertThat(payment.path("refundedAmount").decimalValue()).isEqualByComparingTo(payment.path("amount").decimalValue());
         assertThat(demo.notifications(orderId)).hasSize(1);
+        assertThat(serviceNow.workNotesOf(supportCase.path("incidentNumber").asString()))
+                .as("the agent's own work notes, besides the poller's claim note")
+                .anyMatch(note -> !note.startsWith("Picked up by the "));
     }
 
     @Test
     void anIncidentTheServiceDeskRaisesAboutADeliveredOrderEndsResolvedOrWithATeam() {
-        String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
-        demo.ship(orderId);
+        String orderId = shippedHeadlampOrder();
         demo.reportFromCarrier(orderId, "DELIVERED", "");
 
         String number = serviceNow.raiseIncident("Order arrived broken, the customer wants their money back",
                 "The customer sent photos of the cracked lens and asks for a refund.", orderId);
 
-        await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(5)).until(() ->
-                Set.of("Resolved", "Closed").contains(serviceNow.stateOf(number))
-                        || !serviceNow.agentGroup().equals(serviceNow.assignmentGroupOf(number)));
+        // A group that cannot be read is blank, not a hand-off: only a named group other than the agent's counts.
+        await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(5)).until(() -> {
+            String group = serviceNow.assignmentGroupOf(number);
+            return FINISHED_STATES.contains(serviceNow.stateOf(number))
+                    || !group.isBlank() && !serviceNow.agentGroup().equals(group);
+        });
         List<JsonNode> refunds = demo.refundRequests(orderId);
         assertThat(refunds).hasSizeLessThanOrEqualTo(1);
-        if ("Resolved".equals(serviceNow.stateOf(number))) {
+        if (FINISHED_STATES.contains(serviceNow.stateOf(number))) {
+            // The headlamp is below the refund approval limit, so the refund is paid at once.
             assertThat(refunds).singleElement().satisfies(refund ->
-                    assertThat(refund.path("status").asString()).isIn("EXECUTED", "PENDING_APPROVAL"));
+                    assertThat(refund.path("status").asString()).isEqualTo("EXECUTED"));
+            assertThat(demo.notifications(orderId)).hasSize(1);
         }
         assertThat(demo.order(orderId).path("status").asString()).isEqualTo("DELIVERED");
+    }
+
+    /**
+     * A new customer's headlamp order, handed to the carrier. One unit is put back whether shipping works or not, so
+     * the available stock stays the same and the suite can run again and again on the same database: a shipped unit
+     * leaves the stock, and an order that did not ship keeps its unit reserved.
+     */
+    private String shippedHeadlampOrder() {
+        String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
+        try {
+            demo.ship(orderId);
+        } finally {
+            demo.restock(Demo.HEADLAMP, 1);
+        }
+        return orderId;
     }
 }

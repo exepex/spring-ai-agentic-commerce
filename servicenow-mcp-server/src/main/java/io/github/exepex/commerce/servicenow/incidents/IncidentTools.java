@@ -137,8 +137,10 @@ class IncidentTools {
     /** The incident, if the agent is the one working it; otherwise the call is refused. */
     private ServiceNowClient.Incident owned(String number) {
         ServiceNowClient.Incident incident = find(number);
+        // A person who moved the incident to another group has it, even if they left it assigned to the agent.
         if (!serviceNow.integrationUserSysId().equals(incident.assignedToSysId())
-                || !ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())) {
+                || !ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())
+                || !properties.agentGroup().equals(incident.assignmentGroup())) {
             throw new ToolRefusedException("Incident " + number + " is not yours to change: it is " + incident.stateName()
                     + (incident.isAssigned() ? " and assigned to " + incident.assignedTo() : " and unassigned")
                     + " in " + incident.assignmentGroup() + ".");

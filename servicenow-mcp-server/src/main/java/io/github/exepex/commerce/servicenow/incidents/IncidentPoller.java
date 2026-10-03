@@ -162,10 +162,14 @@ public class IncidentPoller {
         }
     }
 
-    /** Still the agent's, still in progress, and untouched since before {@code staleBefore}. */
+    /**
+     * Still the agent's, still in progress, still in the agent's group, and untouched since before {@code staleBefore}.
+     * An incident a person moved to another group without changing its assignee stays where they put it.
+     */
     private boolean isStaleClaim(ServiceNowClient.Incident incident, Instant staleBefore) {
         return serviceNow.integrationUserSysId().equals(incident.assignedToSysId())
                 && ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())
+                && properties.agentGroup().equals(incident.assignmentGroup())
                 && incident.updatedAt() != null && incident.updatedAt().isBefore(staleBefore);
     }
 
