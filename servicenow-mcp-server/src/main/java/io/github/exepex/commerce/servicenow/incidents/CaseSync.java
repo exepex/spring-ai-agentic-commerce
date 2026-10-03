@@ -1,19 +1,19 @@
 package io.github.exepex.commerce.servicenow.incidents;
 
+import io.github.exepex.commerce.governance.api.client.AgentGovernanceClient;
+import io.github.exepex.commerce.governance.api.dto.CaseStatus;
+import io.github.exepex.commerce.governance.api.dto.CaseView;
+import io.github.exepex.commerce.governance.api.dto.IncidentLink;
+import io.github.exepex.commerce.governance.api.dto.IncidentState;
+import io.github.exepex.commerce.governance.api.dto.NoteView;
+import io.github.exepex.commerce.governance.api.dto.ServiceDeskIncident;
+import io.github.exepex.commerce.mcpserver.security.AgentRegistry;
+import io.github.exepex.commerce.platform.security.BearerTokens;
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
-import io.github.exepex.commerce.servicenow.constants.AuthValues;
-import io.github.exepex.commerce.servicenow.constants.CaseStatuses;
 import io.github.exepex.commerce.servicenow.constants.IncidentStates;
 import io.github.exepex.commerce.servicenow.constants.IncidentTexts;
 import io.github.exepex.commerce.servicenow.constants.ServiceNowFields;
-import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
-import io.github.exepex.commerce.servicenow.governance.dto.Case;
-import io.github.exepex.commerce.servicenow.governance.dto.IncidentLink;
-import io.github.exepex.commerce.servicenow.governance.dto.IncidentState;
-import io.github.exepex.commerce.servicenow.governance.dto.Note;
-import io.github.exepex.commerce.servicenow.governance.dto.ServiceDeskIncident;
 import io.github.exepex.commerce.servicenow.incidents.dto.Incident;
-import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -43,9 +43,9 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 class CaseSync {
 
-    private final ServiceNowClient serviceNow;
+    private final IncidentSystem serviceNow;
     private final ServiceNowProperties properties;
-    private final GovernanceApi governance;
+    private final AgentGovernanceClient governance;
     private final AgentRegistry agents;
 
     /**
@@ -82,7 +82,7 @@ class CaseSync {
      * <p>A case whose incident is not on this instance, such as one opened on an earlier simulator run, gets none:
      * there is nowhere to send them.
      */
-    private void sendNotes(Case supportCase, String link, List<Note> notes) {
+    private void sendNotes(CaseView supportCase, String link, List<NoteView> notes) {
         var incident = serviceNow.findLinked(link).orElse(null);
         if (incident == null) {
             log.warn("The incident of case {} is not on this instance; its notes are not sent", supportCase.id());
@@ -160,7 +160,7 @@ class CaseSync {
                 serviceNow.findLinked(supportCase.incidentUrl()).ifPresentOrElse(
                         incident -> {
                             var state = stateOf(incident);
-                            if (CaseStatuses.RESOLVED.equals(state.status()) && !notesSettled.test(supportCase.id())) {
+                            if (state.status() == CaseStatus.RESOLVED && !notesSettled.test(supportCase.id())) {
                                 log.info("{} is resolved; telling the shop once its notes are settled", incident.number());
                                 return;
                             }
@@ -184,7 +184,7 @@ class CaseSync {
             return;
         }
         try {
-            report(caseId, new IncidentState(incident.number(), CaseStatuses.WITH_TEAM, group, false,
+            report(caseId, new IncidentState(incident.number(), CaseStatus.WITH_TEAM, group, false,
                     incident.linkedOrder()));
         } catch (RuntimeException failure) {
             log.warn("Could not tell the shop that {} went to {}; the next poll will", incident.number(), group, failure);
@@ -192,11 +192,11 @@ class CaseSync {
     }
 
     /** Opens the case's incident, or finds the one opened before, links the case to it, and returns the link. */
-    private String openIncident(Case supportCase) {
+    private String openIncident(CaseView supportCase) {
         var incident = serviceNow.findByCaseId(supportCase.id()).orElse(null);
         if (incident == null) {
             var fields = new LinkedHashMap<String, String>();
-            fields.put(ServiceNowFields.ASSIGNMENT_GROUP, supportCase.isForPeople()
+            fields.put(ServiceNowFields.ASSIGNMENT_GROUP, Boolean.TRUE.equals(supportCase.forPeople())
                     ? properties.teams().get(properties.defaultTeam()).group()
                     : properties.agentGroup());
             fields.put(ServiceNowFields.SHORT_DESCRIPTION, supportCase.title());
@@ -214,7 +214,7 @@ class CaseSync {
     private IncidentState stateOf(Incident incident) {
         var orderId = incident.linkedOrder();
         if (incident.isFinished()) {
-            return new IncidentState(incident.number(), CaseStatuses.RESOLVED, incident.assignmentGroup(),
+            return new IncidentState(incident.number(), CaseStatus.RESOLVED, incident.assignmentGroup(),
                     incident.isFinal(), orderId);
         }
         var takenByAPerson = incident.isAssigned()
@@ -224,13 +224,13 @@ class CaseSync {
         var workableByTheAgent = IncidentStates.NEW.equals(incident.state())
                 || IncidentStates.IN_PROGRESS.equals(incident.state());
         if (properties.agentGroup().equals(incident.assignmentGroup()) && !takenByAPerson && workableByTheAgent) {
-            return new IncidentState(incident.number(), CaseStatuses.WITH_AGENT, incident.assignmentGroup(), false,
+            return new IncidentState(incident.number(), CaseStatus.WITH_AGENT, incident.assignmentGroup(), false,
                     orderId);
         }
         // A person who took the incident has it, even while it is still in the agent's group.
         var group = incident.assignmentGroup().isBlank() ? IncidentTexts.NO_GROUP : incident.assignmentGroup();
         var owner = ownerOf(incident, group, takenByAPerson, workableByTheAgent);
-        return new IncidentState(incident.number(), CaseStatuses.WITH_TEAM, owner, false, orderId);
+        return new IncidentState(incident.number(), CaseStatus.WITH_TEAM, owner, false, orderId);
     }
 
     /** Who has the incident: the person who took it, the group, or the group and the state keeping the agent out. */
@@ -249,6 +249,6 @@ class CaseSync {
     }
 
     private String authorization() {
-        return AuthValues.BEARER_PREFIX + agents.tokenOf(properties.agent());
+        return BearerTokens.authorization(agents.tokenOf(properties.agent()));
     }
 }

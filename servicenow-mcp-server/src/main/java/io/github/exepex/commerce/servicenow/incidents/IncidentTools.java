@@ -43,7 +43,7 @@ class IncidentTools {
     private static final int MAX_NOTE_LENGTH = 4000;
 
     private final ToolGuard guard;
-    private final ServiceNowClient serviceNow;
+    private final IncidentSystem serviceNow;
     private final CaseSync cases;
     private final ServiceNowProperties properties;
 

@@ -299,14 +299,20 @@ with `AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8087`.
 | Folder | What is in it |
 |---|---|
 | `agent-definitions` | The two agents' definition files (model, effort, tools, budget, prompt) and the code that reads them. |
+| `commerce-platform` | What every service shares, configured automatically: one base exception and one handler that answers it as a problem detail, publishing events to Kafka after commit, log safety, bearer tokens, reading another service's error answer, the clock, and the tracing defaults. |
+| `mcp-server-support` | What both MCP servers share: agent authentication (tokens, the filter, the agent in each tool call) and the governed tool call (allowlist, kill switch, run, audit). Each server plugs in its own kill switch, refusals and audit trail. |
+| `governance-api` | The contract of the commerce MCP server's agent API, and the client agent-service and the ServiceNow MCP server call it with. |
 | `agent-service` | Runs the agents with Spring AI: the chat endpoint, the incident listener, MCP connections and per-call guards. |
 | `commerce-mcp-server` | The commerce MCP tools and the governance API: permissions, limits, approvals, cases, audit trail, kill switches. |
-| `servicenow-mcp-server` | The ServiceNow MCP tools and the poller that keeps cases and incidents in step. |
+| `servicenow-mcp-server` | The ServiceNow MCP tools and the poller that keeps cases and incidents in step; ServiceNow's Table API sits behind one `IncidentSystem` interface. |
 | `servicenow-simulator` | The in-memory ServiceNow stand-in used by `--simulator` and the scenario suite. |
 | `catalog-service`, `order-service`, `payment-service`, `shipping-service` | The shop's ordinary microservices. |
 | `agent-evals` | The scenario suite that runs the workflows against the whole demo with the real model. |
 | `shop-ui` | The Angular shop, orders and operations console. |
 | `docker`, `docker-compose.yml`, `start-demo.sh`, `run-scenarios.sh` | How the demo is built and started. |
+
+The shared modules hold only what every service needs in the same way; a service's own rules stay in the service.
+They are plain libraries with Spring Boot auto-configuration: adding one as a dependency is all it takes.
 
 Inside a service, the code is organised the same way: the domain, its services, controllers and repositories in the
 service's package, and next to them
@@ -317,10 +323,11 @@ service's package, and next to them
   services it calls); commerce-mcp-server keeps one `dto` package per feature (`cases`, `governance`, `tools`,
   `downstream`);
 - `exception`: one exception per thing that can go wrong (for example `PaymentNotFoundException`,
-  `RefundExceedsPaymentException`, `CustomerScopeViolationException`). Every service with a REST API has one
-  `GlobalExceptionHandler` that answers them, as RFC 9457 problem details in the shop's services and the commerce MCP
-  server, and in ServiceNow's own error format in the simulator. An exception thrown inside an MCP tool is not an HTTP
-  response: its message goes back to the model as the tool's error.
+  `RefundExceedsPaymentException`, `CustomerScopeViolationException`). Each extends the platform's
+  `CommerceException`, so the platform's one handler answers it as an RFC 9457 problem detail with its status,
+  message and any extra facts. An exception thrown inside an MCP tool is not an HTTP response: its message goes back
+  to the model as the tool's error. The simulator stands in for ServiceNow and answers in ServiceNow's own error
+  format, so it keeps its own handler and none of the shared modules.
 
 ## Tests
 

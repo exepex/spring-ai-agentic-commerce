@@ -1,7 +1,7 @@
 package io.github.exepex.commerce.servicenow.incidents;
 
 import io.github.exepex.commerce.servicenow.constants.IncidentTexts;
-import io.github.exepex.commerce.servicenow.governance.dto.Note;
+import io.github.exepex.commerce.governance.api.dto.NoteView;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -13,7 +13,7 @@ final class CaseNotes {
     private static final int MAX_WORK_NOTE_LENGTH = 4000;
 
     /** The note as a work note: its text, shortened if need be so that its marker always fits within the limit. */
-    static String workNoteOf(Note note) {
+    static String workNoteOf(NoteView note) {
         var ending = IncidentTexts.CASE_NOTE_ENDING.formatted(markerOf(note));
         var text = note.text();
         var room = MAX_WORK_NOTE_LENGTH - ending.length();
@@ -21,7 +21,7 @@ final class CaseNotes {
     }
 
     /** The line that ends a case note's work note, so the incident shows which notes it already holds. */
-    static String markerOf(Note note) {
+    static String markerOf(NoteView note) {
         return IncidentTexts.CASE_NOTE_MARKER.formatted(note.id());
     }
 }
