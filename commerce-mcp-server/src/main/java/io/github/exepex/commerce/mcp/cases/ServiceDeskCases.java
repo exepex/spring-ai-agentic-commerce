@@ -1,10 +1,12 @@
 package io.github.exepex.commerce.mcp.cases;
 
+import io.github.exepex.commerce.mcp.constants.Actors;
+import io.github.exepex.commerce.mcp.constants.AuditActions;
+import io.github.exepex.commerce.mcp.constants.CaseWording;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.AuditTrail;
 import java.time.Clock;
 import java.time.Instant;
-import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -25,16 +27,15 @@ class ServiceDeskCases {
     /** Records the incident as a case, or follows the case recorded for it before; see {@link CaseService}. */
     SupportCase record(UUID orderId, String number, String url, String shortDescription, SupportCase.Status status,
             String assignmentGroup) {
-        Optional<SupportCase> recorded = cases.findByTypeAndIncidentUrl(CaseType.SERVICE_DESK, url);
+        var recorded = cases.findByTypeAndIncidentUrl(CaseType.SERVICE_DESK, url);
         if (recorded.isPresent()) {
             follow(recorded.get(), number, orderId, status, assignmentGroup);
             return recorded.get();
         }
-        SupportCase supportCase = cases.save(SupportCase.forServiceDeskIncident(orderId, number, url, shortDescription,
+        var supportCase = cases.save(SupportCase.forServiceDeskIncident(orderId, number, url, shortDescription,
                 status, assignmentGroup, Instant.now(clock)));
-        audit.record(orderId, AuditEvent.ActorType.SYSTEM, CaseService.SERVICENOW, CaseService.RAISE_CASE,
-                AuditEvent.Outcome.SUCCEEDED, "The service desk raised incident " + number + " about this order; "
-                        + "agents leave its money to whoever works it", shortDescription);
+        audit.record(orderId, AuditEvent.ActorType.SYSTEM, Actors.SERVICENOW, AuditActions.RAISE_CASE,
+                AuditEvent.Outcome.SUCCEEDED, CaseWording.SERVICE_DESK_RAISED.formatted(number), shortDescription);
         return supportCase;
     }
 
@@ -48,12 +49,12 @@ class ServiceDeskCases {
             boolean incidentFinal, UUID incidentOrderId, Instant now) {
         if (incidentOrderId == null) {
             // Followed even while resolved, so that the case learns when its incident becomes final.
-            boolean wasOpen = supportCase.getStatus() != SupportCase.Status.RESOLVED;
+            var wasOpen = supportCase.getStatus() != SupportCase.Status.RESOLVED;
             if (supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, false, now)
                     && wasOpen) {
-                audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, CaseService.SERVICENOW,
-                        CaseService.FOLLOW_INCIDENT, AuditEvent.Outcome.SUCCEEDED, number + " no longer names this "
-                                + "order, so its case is closed and agents may handle the order's money again", null);
+                audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, Actors.SERVICENOW,
+                        AuditActions.FOLLOW_INCIDENT, AuditEvent.Outcome.SUCCEEDED,
+                        CaseWording.NO_LONGER_NAMES_ORDER.formatted(number), null);
             }
             return true;
         }
@@ -67,14 +68,14 @@ class ServiceDeskCases {
     /** Moves a service-desk case to the order its incident names now, or opens it again, with entries on the timeline. */
     private void follow(SupportCase supportCase, String number, UUID orderId, SupportCase.Status status,
             String assignmentGroup) {
-        UUID before = supportCase.getOrderId();
-        boolean wasResolved = supportCase.getStatus() == SupportCase.Status.RESOLVED;
+        var before = supportCase.getOrderId();
+        var wasResolved = supportCase.getStatus() == SupportCase.Status.RESOLVED;
         if (supportCase.followServiceDeskIncident(orderId, status, assignmentGroup, Instant.now(clock))) {
             if (!orderId.equals(before)) {
-                audit.record(before, AuditEvent.ActorType.SYSTEM, CaseService.SERVICENOW, CaseService.FOLLOW_INCIDENT,
-                        AuditEvent.Outcome.SUCCEEDED, number + " is now about order " + orderId, null);
+                audit.record(before, AuditEvent.ActorType.SYSTEM, Actors.SERVICENOW, AuditActions.FOLLOW_INCIDENT,
+                        AuditEvent.Outcome.SUCCEEDED, CaseWording.NOW_ABOUT_ORDER.formatted(number, orderId), null);
             }
-            audit.record(orderId, AuditEvent.ActorType.SYSTEM, CaseService.SERVICENOW, CaseService.FOLLOW_INCIDENT,
+            audit.record(orderId, AuditEvent.ActorType.SYSTEM, Actors.SERVICENOW, AuditActions.FOLLOW_INCIDENT,
                     AuditEvent.Outcome.SUCCEEDED, CaseTexts.describeServiceDeskIncident(number, status, wasResolved),
                     null);
         }

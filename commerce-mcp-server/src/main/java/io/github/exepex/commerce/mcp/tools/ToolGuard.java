@@ -1,10 +1,16 @@
 package io.github.exepex.commerce.mcp.tools;
 
-import io.github.exepex.commerce.mcp.downstream.OrderApi;
+import io.github.exepex.commerce.mcp.constants.ToolMessages;
+import io.github.exepex.commerce.mcp.constants.ToolNames;
+import io.github.exepex.commerce.mcp.downstream.dto.Order;
+import io.github.exepex.commerce.mcp.exception.AgentSwitchedOffException;
+import io.github.exepex.commerce.mcp.exception.CustomerScopeViolationException;
+import io.github.exepex.commerce.mcp.exception.DownstreamException;
+import io.github.exepex.commerce.mcp.exception.GovernanceException;
+import io.github.exepex.commerce.mcp.exception.ToolNotPermittedException;
 import io.github.exepex.commerce.mcp.governance.AgentSwitches;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.AuditTrail;
-import io.github.exepex.commerce.mcp.governance.GovernanceException;
 import io.github.exepex.commerce.mcp.security.AgentRegistry;
 import io.github.exepex.commerce.mcp.security.CallingAgent;
 import io.modelcontextprotocol.common.McpTransportContext;
@@ -23,8 +29,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 class ToolGuard {
 
-    static final String HAND_TO_HUMAN = "escalate_to_human";
-
     private final AgentRegistry agents;
     private final AgentSwitches switches;
     private final AuditTrail audit;
@@ -35,33 +39,30 @@ class ToolGuard {
      */
     <T> T run(McpTransportContext context, String tool, UUID orderId, String summary, boolean auditsItself,
             Function<String, T> action) {
-        String agentId = CallingAgent.of(context);
+        var agentId = CallingAgent.of(context);
         if (!agents.mayCall(agentId, tool)) {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, tool, AuditEvent.Outcome.DENIED,
-                    "Tool not permitted for this agent", summary);
-            throw new GovernanceException(HttpStatus.FORBIDDEN, "Agent " + agentId + " is not permitted to call " + tool);
+                    ToolMessages.NOT_PERMITTED, summary);
+            throw new ToolNotPermittedException(agentId, tool);
         }
-        if (!HAND_TO_HUMAN.equals(tool) && !switches.isEnabled(agentId)) {
+        if (!ToolNames.ESCALATE_TO_HUMAN.equals(tool) && !switches.isEnabled(agentId)) {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, tool, AuditEvent.Outcome.DENIED,
-                    "Agent is switched off", summary);
-            throw new GovernanceException(HttpStatus.FORBIDDEN, "Agent " + agentId + " is switched off. Stop, and hand "
-                    + "any work that needs doing to a human with " + HAND_TO_HUMAN + ".");
+                    ToolMessages.SWITCHED_OFF, summary);
+            throw new AgentSwitchedOffException(agentId);
         }
         try {
-            T result = action.apply(agentId);
+            var result = action.apply(agentId);
             if (!auditsItself) {
                 audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, tool, AuditEvent.Outcome.SUCCEEDED, summary, null);
             }
             return result;
         } catch (GovernanceException refused) {
-            AuditEvent.Outcome outcome = refused.getStatusCode().value() == HttpStatus.FORBIDDEN.value()
-                    ? AuditEvent.Outcome.DENIED
-                    : AuditEvent.Outcome.FAILED;
-            audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, tool, outcome, summary + ": " + refused.getMessage(), null);
+            audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, tool, outcomeOf(refused),
+                    ToolMessages.STOPPED_CALL.formatted(summary, refused.getMessage()), null);
             throw refused;
         } catch (RuntimeException failure) {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, tool, AuditEvent.Outcome.FAILED,
-                    summary + ": " + failure.getMessage(), null);
+                    ToolMessages.STOPPED_CALL.formatted(summary, failure.getMessage()), null);
             throw failure;
         }
     }
@@ -71,11 +72,20 @@ class ToolGuard {
         return agents.isCustomerScoped(agentId);
     }
 
-    void ensureCustomerOwns(String agentId, OrderApi.Order order, String customerEmail) {
+    void ensureCustomerOwns(String agentId, Order order, String customerEmail) {
         if (agents.isCustomerScoped(agentId)
                 && (customerEmail == null || !customerEmail.equalsIgnoreCase(order.customerEmail()))) {
-            throw new GovernanceException(HttpStatus.FORBIDDEN,
-                    "Order " + order.id() + " does not belong to the customer in this conversation");
+            throw new CustomerScopeViolationException(order.id());
         }
+    }
+
+    /**
+     * A rule that forbids the call denies it; anything else that stops it is a failure, a commerce service's refusal
+     * too, whatever status that service answered with.
+     */
+    private static AuditEvent.Outcome outcomeOf(GovernanceException refused) {
+        return !(refused instanceof DownstreamException) && refused.getStatus().value() == HttpStatus.FORBIDDEN.value()
+                ? AuditEvent.Outcome.DENIED
+                : AuditEvent.Outcome.FAILED;
     }
 }

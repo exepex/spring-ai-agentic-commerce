@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.mcp.governance;
 
+import io.github.exepex.commerce.mcp.constants.ConfigKeys;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,12 +25,13 @@ public class ProposalReconciler {
     private final ProposalService proposalService;
     private final Clock clock;
 
-    @Value("${commerce.reconciliation.settle-after}")
+    @Value(ConfigKeys.RECONCILIATION_SETTLE_AFTER)
     private final Duration settleAfter;
 
-    @Scheduled(fixedDelayString = "${commerce.reconciliation.interval}", initialDelayString = "${commerce.reconciliation.interval}")
+    @Scheduled(fixedDelayString = ConfigKeys.RECONCILIATION_INTERVAL,
+            initialDelayString = ConfigKeys.RECONCILIATION_INTERVAL)
     public void reconcile() {
-        for (OrderProposal proposal : proposals.findByStatusAndConfirmingSinceBefore(OrderProposal.Status.CONFIRMING,
+        for (var proposal : proposals.findByStatusAndConfirmingSinceBefore(OrderProposal.Status.CONFIRMING,
                 Instant.now(clock).minus(settleAfter))) {
             try {
                 proposalService.settle(proposal);

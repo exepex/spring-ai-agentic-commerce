@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.mcp;
 
+import io.github.exepex.commerce.mcp.constants.ConfigKeys;
+import io.github.exepex.commerce.mcp.dto.Agent;
 import java.math.BigDecimal;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -11,9 +13,5 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param refundApprovalThreshold refunds above this amount wait for a human to approve them
  * @param agents each agent's credentials, by agent id
  */
-@ConfigurationProperties("commerce.governance")
-public record GovernanceProperties(BigDecimal refundApprovalThreshold, Map<String, Agent> agents) {
-
-    /** @param token the bearer token the agent authenticates with */
-    public record Agent(String token) {}
-}
+@ConfigurationProperties(ConfigKeys.GOVERNANCE_PREFIX)
+public record GovernanceProperties(BigDecimal refundApprovalThreshold, Map<String, Agent> agents) {}

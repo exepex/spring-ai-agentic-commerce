@@ -1,7 +1,9 @@
 package io.github.exepex.commerce.mcp.downstream;
 
-import java.math.BigDecimal;
-import java.time.Instant;
+import io.github.exepex.commerce.mcp.constants.DownstreamApis;
+import io.github.exepex.commerce.mcp.downstream.dto.CancelOrderRequest;
+import io.github.exepex.commerce.mcp.downstream.dto.Order;
+import io.github.exepex.commerce.mcp.downstream.dto.PlaceOrderRequest;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -11,23 +13,10 @@ import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
 import org.springframework.web.service.annotation.PostExchange;
 
-@HttpExchange("/api/orders")
+@HttpExchange(DownstreamApis.ORDERS)
 public interface OrderApi {
 
-    record OrderLine(UUID productId, String sku, String productName, int quantity, BigDecimal unitPrice,
-            BigDecimal lineTotal) {}
-
-    record Order(UUID id, String customerEmail, String status, BigDecimal total, String currency, Instant createdAt,
-            Instant cancelledAt, String cancellationReason, String paymentFailure, List<OrderLine> lines) {}
-
-    record RequestedLine(UUID productId, int quantity) {}
-
-    /** Placing is idempotent by {@code orderId}: asking again returns the order placed the first time. */
-    record PlaceOrderRequest(UUID orderId, String customerEmail, List<RequestedLine> lines, String paymentMethod) {}
-
-    record CancelOrderRequest(String reason) {}
-
-    @GetExchange("/{orderId}")
+    @GetExchange(DownstreamApis.BY_ORDER_ID)
     Order getOrder(@PathVariable UUID orderId);
 
     @GetExchange
@@ -37,6 +26,6 @@ public interface OrderApi {
     @PostExchange
     Order placeOrder(@RequestBody PlaceOrderRequest request);
 
-    @PostExchange("/{orderId}/cancellation")
+    @PostExchange(DownstreamApis.ORDER_CANCELLATION)
     Order cancelOrder(@PathVariable UUID orderId, @RequestBody CancelOrderRequest request);
 }

@@ -1,8 +1,9 @@
 package io.github.exepex.commerce.mcp.security;
 
-import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.github.exepex.commerce.mcp.GovernanceProperties;
+import io.github.exepex.commerce.mcp.dto.Agent;
+import io.github.exepex.commerce.mcp.exception.MissingAgentTokenException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Map;
@@ -16,22 +17,22 @@ import org.springframework.stereotype.Component;
 @Component
 public class AgentRegistry {
 
-    private final Map<String, GovernanceProperties.Agent> agents;
+    private final Map<String, Agent> agents;
     private final AgentDefinitions definitions;
 
     AgentRegistry(GovernanceProperties properties, AgentDefinitions definitions) {
         this.agents = Map.copyOf(properties.agents());
         this.definitions = definitions;
-        for (AgentDefinition definition : definitions.all()) {
+        for (var definition : definitions.all()) {
             if (!agents.containsKey(definition.id())) {
-                throw new IllegalStateException("No token is configured for agent " + definition.id());
+                throw new MissingAgentTokenException(definition.id());
             }
         }
         agents.keySet().forEach(definitions::get);
     }
 
     Optional<String> agentWithToken(String token) {
-        byte[] presented = token.getBytes(StandardCharsets.UTF_8);
+        var presented = token.getBytes(StandardCharsets.UTF_8);
         return agents.entrySet().stream()
                 .filter(agent -> MessageDigest.isEqual(agent.getValue().token().getBytes(StandardCharsets.UTF_8), presented))
                 .map(Map.Entry::getKey)

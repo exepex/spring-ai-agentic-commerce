@@ -1,14 +1,15 @@
 package io.github.exepex.commerce.mcp.governance;
 
-import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.agents.AgentDefinitions;
+import io.github.exepex.commerce.mcp.constants.AuditActions;
+import io.github.exepex.commerce.mcp.constants.AuditSummaries;
+import io.github.exepex.commerce.mcp.exception.AgentNotFoundException;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,8 +35,8 @@ public class AgentSwitches {
 
     /** Every agent and whether it is on. */
     public Map<String, Boolean> all() {
-        Map<String, Boolean> states = new LinkedHashMap<>();
-        for (AgentDefinition agent : definitions.all()) {
+        var states = new LinkedHashMap<String, Boolean>();
+        for (var agent : definitions.all()) {
             states.put(agent.id(), isEnabled(agent.id()));
         }
         return states;
@@ -44,7 +45,7 @@ public class AgentSwitches {
     @Transactional
     public Map<String, Boolean> set(String agentId, boolean enabled, String by) {
         if (definitions.all().stream().noneMatch(agent -> agent.id().equals(agentId))) {
-            throw new GovernanceException(HttpStatus.NOT_FOUND, "There is no agent " + agentId);
+            throw new AgentNotFoundException(agentId);
         }
         // One statement, so two first changes at once both succeed instead of both inserting the row; the last wins.
         jdbc.sql("""
@@ -57,8 +58,9 @@ public class AgentSwitches {
                 .param("by", by)
                 .param("now", Timestamp.from(Instant.now(clock)))
                 .update();
-        audit.record(null, AuditEvent.ActorType.HUMAN, by, enabled ? "switch_on_agent" : "switch_off_agent",
-                AuditEvent.Outcome.SUCCEEDED, (enabled ? "Switched on " : "Switched off ") + agentId, null);
+        audit.record(null, AuditEvent.ActorType.HUMAN, by,
+                enabled ? AuditActions.SWITCH_ON_AGENT : AuditActions.SWITCH_OFF_AGENT, AuditEvent.Outcome.SUCCEEDED,
+                (enabled ? AuditSummaries.SWITCHED_ON : AuditSummaries.SWITCHED_OFF).formatted(agentId), null);
         return all();
     }
 }

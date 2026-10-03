@@ -3,17 +3,30 @@ package io.github.exepex.commerce.mcp.governance;
 import io.github.exepex.commerce.mcp.GovernanceProperties;
 import io.github.exepex.commerce.mcp.cases.CaseService;
 import io.github.exepex.commerce.mcp.cases.CaseType;
+import io.github.exepex.commerce.mcp.constants.Actors;
+import io.github.exepex.commerce.mcp.constants.AuditActions;
+import io.github.exepex.commerce.mcp.constants.AuditSummaries;
+import io.github.exepex.commerce.mcp.constants.DownstreamApis;
 import io.github.exepex.commerce.mcp.downstream.Downstream;
-import io.github.exepex.commerce.mcp.downstream.DownstreamException;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
+import io.github.exepex.commerce.mcp.downstream.dto.Payment;
+import io.github.exepex.commerce.mcp.exception.DecisionNoteTooLongException;
+import io.github.exepex.commerce.mcp.exception.DownstreamException;
+import io.github.exepex.commerce.mcp.exception.IdempotencyKeyOfAnotherAgentException;
+import io.github.exepex.commerce.mcp.exception.IdempotencyKeyReusedException;
+import io.github.exepex.commerce.mcp.exception.IdempotencyKeyTooLongException;
+import io.github.exepex.commerce.mcp.exception.RefundExceedsRefundableException;
+import io.github.exepex.commerce.mcp.exception.RefundReasonTooLongException;
+import io.github.exepex.commerce.mcp.exception.RefundRequestNotFailedException;
+import io.github.exepex.commerce.mcp.exception.RefundRequestNotFoundException;
+import io.github.exepex.commerce.mcp.exception.RefundRequestNotPendingException;
+import io.github.exepex.commerce.mcp.governance.dto.NewRequest;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
@@ -32,10 +45,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class RefundService {
 
-    private record NewRequest(RefundRequest request, BigDecimal refundedOrAsked, boolean isNew) {}
-
     /** The longest reason the payment service stores; longer ones are refused before any money moves. */
-    static final int MAX_REASON_LENGTH = 500;
+    private static final int MAX_REASON_LENGTH = 500;
 
     /** The longest idempotency key and decision note the database stores. */
     private static final int MAX_KEY_LENGTH = 200;
@@ -70,9 +81,9 @@ public class RefundService {
      * recorded, as failed, so it can be retried with the same key once the service is back; the payment service
      * checks the amount again itself.
      */
-    private PaymentApi.Payment paymentIfReachable(UUID orderId) {
+    private Payment paymentIfReachable(UUID orderId) {
         try {
-            return Downstream.call("payment service", () -> payments.getPayment(orderId));
+            return Downstream.call(DownstreamApis.PAYMENT_SERVICE, () -> payments.getPayment(orderId));
         } catch (DownstreamException failure) {
             if (failure.isRetryable()) {
                 return null;
@@ -88,53 +99,49 @@ public class RefundService {
     public RefundRequest requestRefund(String agentId, UUID orderId, BigDecimal amount, String reason,
             String idempotencyKey, String incidentNumber) {
         if (reason != null && reason.length() > MAX_REASON_LENGTH) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
-                    "A refund reason can be at most " + MAX_REASON_LENGTH + " characters; say it in one sentence.");
+            throw new RefundReasonTooLongException(MAX_REASON_LENGTH);
         }
         if (idempotencyKey != null && idempotencyKey.length() > MAX_KEY_LENGTH) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
-                    "An idempotency key can be at most " + MAX_KEY_LENGTH + " characters.");
+            throw new IdempotencyKeyTooLongException(MAX_KEY_LENGTH);
         }
-        Optional<RefundRequest> earlier = requests.findByIdempotencyKey(idempotencyKey);
+        var earlier = requests.findByIdempotencyKey(idempotencyKey);
         if (earlier.isPresent()) {
             return repeat(earlier.get(), orderId, amount, idempotencyKey, agentId, incidentNumber);
         }
         // An order people are working is theirs: a new refund from an agent could pay out what they are paying back.
         cases.ensureAgentMayPay(orderId, agentId, incidentNumber);
-        PaymentApi.Payment payment = paymentIfReachable(orderId);
+        var payment = paymentIfReachable(orderId);
         if (payment != null && amount.compareTo(payment.refundable()) > 0) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "A refund of " + amount + " "
-                    + payment.currency() + " exceeds the " + payment.refundable() + " still refundable on this order.");
+            throw new RefundExceedsRefundableException(amount, payment.currency(), payment.refundable());
         }
-        String currency = payment != null
+        var currency = payment != null
                 ? payment.currency()
-                : Downstream.call("order service", () -> orders.getOrder(orderId)).currency();
+                : Downstream.call(DownstreamApis.ORDER_SERVICE, () -> orders.getOrder(orderId)).currency();
         // Saved before the payment service is called. Until it confirms, the request counts as FAILED: if this
         // process stops in between, a retry with the same key is safe and the processor pays out at most once.
-        NewRequest decided = transaction.execute(status -> {
+        var decided = transaction.execute(status -> {
             // One new refund per order at a time, so two at once cannot each miss the other's amount and stay under
             // the approval limit together.
             AdvisoryLocks.lock(jdbc, orderId.toString(), 0);
             // The same refund may have arrived at the same moment and got the lock first.
-            Optional<RefundRequest> sameKey = requests.findByIdempotencyKey(idempotencyKey);
+            var sameKey = requests.findByIdempotencyKey(idempotencyKey);
             if (sameKey.isPresent()) {
                 return new NewRequest(sameKey.get(), null, false);
             }
-            BigDecimal refundedOrAsked = amount.add(requestedBefore(orderId));
-            boolean needsApproval = refundedOrAsked.compareTo(approvalThreshold) > 0;
+            var refundedOrAsked = amount.add(requestedBefore(orderId));
+            var needsApproval = refundedOrAsked.compareTo(approvalThreshold) > 0;
             return new NewRequest(requests.save(new RefundRequest(orderId, amount, currency, reason, idempotencyKey,
                     agentId, needsApproval ? RefundRequest.Status.PENDING_APPROVAL : RefundRequest.Status.FAILED,
                     Instant.now(clock))), refundedOrAsked, true);
         });
-        RefundRequest request = decided.request();
+        var request = decided.request();
         if (!decided.isNew()) {
             return repeat(request, orderId, amount, idempotencyKey, agentId, incidentNumber);
         }
         if (request.getStatus() == RefundRequest.Status.PENDING_APPROVAL) {
-            audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, "issue_refund", AuditEvent.Outcome.PENDING_APPROVAL,
-                    "Refund of " + amount + " " + currency + " takes this order's refunds to " + decided.refundedOrAsked()
-                            + ", above the " + approvalThreshold + " limit, and waits for a human to approve it",
-                    reason);
+            audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, AuditActions.ISSUE_REFUND,
+                    AuditEvent.Outcome.PENDING_APPROVAL, AuditSummaries.REFUND_AWAITS_APPROVAL.formatted(amount,
+                            currency, decided.refundedOrAsked(), approvalThreshold), reason);
             return request;
         }
         return execute(request, agentId);
@@ -142,18 +149,20 @@ public class RefundService {
 
     public RefundRequest approve(UUID requestId, String decidedBy, String note) {
         // Approved requests count as FAILED until the payment service confirms, as when an agent's request runs.
-        RefundRequest request = claimPending(requestId, RefundRequest.Status.FAILED, note);
+        var request = claimPending(requestId, RefundRequest.Status.FAILED, note);
         request.recordDecision(decidedBy, note, Instant.now(clock));
-        audit.record(request.getOrderId(), AuditEvent.ActorType.HUMAN, decidedBy, "approve_refund",
-                AuditEvent.Outcome.SUCCEEDED, "Approved a refund of " + request.getAmount() + " " + request.getCurrency(), note);
+        audit.record(request.getOrderId(), AuditEvent.ActorType.HUMAN, decidedBy, AuditActions.APPROVE_REFUND,
+                AuditEvent.Outcome.SUCCEEDED,
+                AuditSummaries.REFUND_APPROVED.formatted(request.getAmount(), request.getCurrency()), note);
         return execute(request, decidedBy);
     }
 
     public RefundRequest reject(UUID requestId, String decidedBy, String note) {
-        RefundRequest request = claimPending(requestId, RefundRequest.Status.REJECTED, note);
+        var request = claimPending(requestId, RefundRequest.Status.REJECTED, note);
         request.reject(decidedBy, note, Instant.now(clock));
-        audit.record(request.getOrderId(), AuditEvent.ActorType.HUMAN, decidedBy, "reject_refund",
-                AuditEvent.Outcome.REJECTED, "Rejected a refund of " + request.getAmount() + " " + request.getCurrency(), note);
+        audit.record(request.getOrderId(), AuditEvent.ActorType.HUMAN, decidedBy, AuditActions.REJECT_REFUND,
+                AuditEvent.Outcome.REJECTED,
+                AuditSummaries.REFUND_REJECTED.formatted(request.getAmount(), request.getCurrency()), note);
         return requests.save(request);
     }
 
@@ -162,9 +171,9 @@ public class RefundService {
      * retried.
      */
     public RefundRequest retry(UUID requestId, String retriedBy) {
-        RefundRequest request = find(requestId);
+        var request = find(requestId);
         if (request.getStatus() != RefundRequest.Status.FAILED) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + request.getStatus() + ", not failed");
+            throw new RefundRequestNotFailedException(request.getStatus());
         }
         return execute(request, retriedBy);
     }
@@ -176,17 +185,17 @@ public class RefundService {
      * after the payment service took the refund but before it recorded that, and then the failure is just as real.
      */
     void recordFailedAtProcessor(UUID eventId, UUID orderId, String idempotencyKey, BigDecimal amount, String currency) {
-        String failure = "The card processor reported the refund of " + amount + " " + currency
-                + " failed after accepting it; no money was returned.";
+        var failure = AuditSummaries.REFUND_FAILED_AT_PROCESSOR.formatted(amount, currency);
         transaction.executeWithoutResult(status -> {
             if (requests.failAtProcessor(idempotencyKey, failure, Instant.now(clock)) == 0
                     || !cases.isFirstDelivery(eventId, orderId)) {
                 return;
             }
-            audit.record(orderId, AuditEvent.ActorType.SYSTEM, "payment-service", "refund_failed",
-                    AuditEvent.Outcome.FAILED, failure, "Idempotency key " + idempotencyKey);
-            cases.raise(CaseType.REFUND_FAILED, orderId, failure + " Idempotency key " + idempotencyKey
-                    + ". The customer must be refunded another way.", AuditEvent.ActorType.SYSTEM, "payment-service");
+            audit.record(orderId, AuditEvent.ActorType.SYSTEM, Actors.PAYMENT_SERVICE, AuditActions.REFUND_FAILED,
+                    AuditEvent.Outcome.FAILED, failure, AuditSummaries.IDEMPOTENCY_KEY.formatted(idempotencyKey));
+            cases.raise(CaseType.REFUND_FAILED, orderId,
+                    AuditSummaries.REFUND_FAILED_CASE.formatted(failure, idempotencyKey), AuditEvent.ActorType.SYSTEM,
+                    Actors.PAYMENT_SERVICE);
         });
     }
 
@@ -206,13 +215,11 @@ public class RefundService {
     private RefundRequest repeat(RefundRequest earlier, UUID orderId, BigDecimal amount, String idempotencyKey,
             String agentId, String incidentNumber) {
         if (!earlier.matches(orderId, amount)) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
-                    + " was already used for a different refund. Use a new key for a new refund.");
+            throw new IdempotencyKeyReusedException(idempotencyKey);
         }
         // A key is its requester's: another agent repeating it would act, and be audited, as someone it is not.
         if (!earlier.getRequestedBy().equals(agentId)) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
-                    + " belongs to a refund another agent asked for. Do not reuse it.");
+            throw new IdempotencyKeyOfAnotherAgentException(idempotencyKey);
         }
         if (earlier.getStatus() != RefundRequest.Status.FAILED) {
             return earlier;
@@ -237,40 +244,40 @@ public class RefundService {
     private RefundRequest claimPending(UUID requestId, RefundRequest.Status decided, String note) {
         // Checked before the claim: a note too long to save must not stop the decision after money has moved.
         if (note != null && note.length() > MAX_NOTE_LENGTH) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
-                    "A decision note can be at most " + MAX_NOTE_LENGTH + " characters");
+            throw new DecisionNoteTooLongException(MAX_NOTE_LENGTH);
         }
-        RefundRequest request = find(requestId);
+        var request = find(requestId);
         if (requests.moveStatus(requestId, RefundRequest.Status.PENDING_APPROVAL, decided) == 0) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "Refund request is " + find(requestId).getStatus()
-                    + ", not pending approval");
+            throw new RefundRequestNotPendingException(find(requestId).getStatus());
         }
         return request;
     }
 
     private RefundRequest execute(RefundRequest request, String actor) {
-        AuditEvent.ActorType actorType = actor.equals(request.getRequestedBy()) ? AuditEvent.ActorType.AGENT : AuditEvent.ActorType.HUMAN;
+        var actorType = actor.equals(request.getRequestedBy()) ? AuditEvent.ActorType.AGENT : AuditEvent.ActorType.HUMAN;
         String providerReference = null;
         String failure = null;
         try {
-            PaymentApi.Refund refund = Downstream.call("payment service", () -> payments.refund(request.getOrderId(),
-                    new PaymentApi.RefundRequest(request.getAmount(), request.getReason(), request.getIdempotencyKey())));
+            var refund = Downstream.call(DownstreamApis.PAYMENT_SERVICE, () -> payments.refund(request.getOrderId(),
+                    new io.github.exepex.commerce.mcp.downstream.dto.RefundRequest(request.getAmount(),
+                            request.getReason(), request.getIdempotencyKey())));
             providerReference = refund.providerReference();
         } catch (DownstreamException unavailable) {
             failure = unavailable.getMessage();
         }
-        RefundRequest outcome = saveOutcome(request, providerReference, failure);
-        String amount = outcome.getAmount() + " " + outcome.getCurrency();
+        var outcome = saveOutcome(request, providerReference, failure);
+        var amount = AuditSummaries.AMOUNT.formatted(outcome.getAmount(), outcome.getCurrency());
+        var keyDetails = AuditSummaries.IDEMPOTENCY_KEY.formatted(outcome.getIdempotencyKey());
         if (providerReference == null) {
-            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
-                    "Refund of " + amount + " failed: " + failure, "Idempotency key " + outcome.getIdempotencyKey());
+            audit.record(outcome.getOrderId(), actorType, actor, AuditActions.ISSUE_REFUND, AuditEvent.Outcome.FAILED,
+                    AuditSummaries.REFUND_FAILED.formatted(amount, failure), keyDetails);
         } else if (outcome.getStatus() == RefundRequest.Status.EXECUTED) {
-            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.SUCCEEDED,
-                    "Refunded " + amount + " (" + providerReference + ")", outcome.getReason());
+            audit.record(outcome.getOrderId(), actorType, actor, AuditActions.ISSUE_REFUND,
+                    AuditEvent.Outcome.SUCCEEDED, AuditSummaries.REFUNDED.formatted(amount, providerReference),
+                    outcome.getReason());
         } else {
-            audit.record(outcome.getOrderId(), actorType, actor, "issue_refund", AuditEvent.Outcome.FAILED,
-                    "The payment service took the refund of " + amount + ", but the card processor had already "
-                            + "reported it failed", "Idempotency key " + outcome.getIdempotencyKey());
+            audit.record(outcome.getOrderId(), actorType, actor, AuditActions.ISSUE_REFUND, AuditEvent.Outcome.FAILED,
+                    AuditSummaries.REFUND_TAKEN_AFTER_FAILURE.formatted(amount), keyDetails);
         }
         return outcome;
     }
@@ -281,7 +288,7 @@ public class RefundService {
      * returned, but nothing undoes a failure the card processor reported. Whatever is stored in the end is returned.
      */
     private RefundRequest saveOutcome(RefundRequest request, String providerReference, String failure) {
-        RefundRequest current = request;
+        var current = request;
         while (true) {
             if (providerReference != null) {
                 current.markExecuted(providerReference, Instant.now(clock));
@@ -302,6 +309,6 @@ public class RefundService {
 
     private RefundRequest find(UUID requestId) {
         return requests.findById(requestId)
-                .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Refund request " + requestId + " does not exist"));
+                .orElseThrow(() -> new RefundRequestNotFoundException(requestId));
     }
 }

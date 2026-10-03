@@ -1,6 +1,5 @@
 package io.github.exepex.commerce.mcp.governance;
 
-import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import java.time.Clock;
 import java.time.Instant;
@@ -58,8 +57,8 @@ public class AuditTrail {
     }
 
     private String currentTraceId() {
-        Tracer currentTracer = tracer.getIfAvailable();
-        Span span = currentTracer == null ? null : currentTracer.currentSpan();
+        var currentTracer = tracer.getIfAvailable();
+        var span = currentTracer == null ? null : currentTracer.currentSpan();
         return span == null ? null : span.context().traceId();
     }
 }

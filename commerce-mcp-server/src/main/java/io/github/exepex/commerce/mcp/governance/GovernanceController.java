@@ -1,10 +1,17 @@
 package io.github.exepex.commerce.mcp.governance;
 
-import io.github.exepex.commerce.mcp.security.AgentAuthenticationFilter;
+import io.github.exepex.commerce.mcp.constants.ApiPaths;
+import io.github.exepex.commerce.mcp.constants.AuditActions;
+import io.github.exepex.commerce.mcp.constants.AuditSummaries;
+import io.github.exepex.commerce.mcp.constants.DownstreamApis;
+import io.github.exepex.commerce.mcp.constants.SecurityValues;
+import io.github.exepex.commerce.mcp.governance.dto.AgentDecision;
+import io.github.exepex.commerce.mcp.governance.dto.Confirmation;
+import io.github.exepex.commerce.mcp.governance.dto.Decision;
+import io.github.exepex.commerce.mcp.governance.dto.Proposal;
+import io.github.exepex.commerce.mcp.governance.dto.SwitchChange;
+import io.github.exepex.commerce.mcp.governance.dto.ToolCallReport;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,40 +34,23 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 class GovernanceController {
 
-    record Decision(@NotBlank String by, String note) {}
-
-    record Confirmation(String paymentMethod) {}
-
-    /** {@code by} is recorded as the audit entry's actor, which holds 100 characters. */
-    record SwitchChange(@NotNull Boolean enabled, @NotBlank @Size(max = 100) String by) {}
-
-    record AgentDecision(UUID orderId, @NotBlank String summary, String reasoning, String model, Long inputTokens,
-            Long outputTokens, Long durationMillis) {}
-
-    /**
-     * A tool call an agent made on another MCP server, such as ServiceNow's, reported by that server with the
-     * agent's own token. {@code action} is the tool, prefixed with the server's name.
-     */
-    record ToolCallReport(UUID orderId, @NotBlank @Size(max = 100) String action, @NotNull AuditEvent.Outcome outcome,
-            @NotBlank String summary, String details) {}
-
     private final AuditTrail audit;
     private final RefundService refunds;
     private final ProposalService proposals;
     private final NotificationService notifications;
     private final AgentSwitches switches;
 
-    @GetMapping("/api/orders/{orderId}/timeline")
+    @GetMapping(ApiPaths.ORDER_TIMELINE)
     List<AuditEvent> timeline(@PathVariable UUID orderId) {
         return audit.timelineOf(orderId);
     }
 
-    @GetMapping("/api/audit-events")
+    @GetMapping(ApiPaths.AUDIT_EVENTS)
     List<AuditEvent> recentAuditEvents() {
         return audit.recent();
     }
 
-    @GetMapping("/api/refund-requests")
+    @GetMapping(ApiPaths.REFUND_REQUESTS)
     List<RefundRequest> refundRequests(@RequestParam(required = false) RefundRequest.Status status,
             @RequestParam(required = false) UUID orderId) {
         if (orderId != null) {
@@ -69,64 +59,66 @@ class GovernanceController {
         return status == null ? refunds.recent() : refunds.withStatus(status);
     }
 
-    @PostMapping("/api/refund-requests/{requestId}/approve")
+    @PostMapping(ApiPaths.APPROVE_REFUND)
     RefundRequest approveRefund(@PathVariable UUID requestId, @Valid @RequestBody Decision decision) {
         return refunds.approve(requestId, decision.by(), decision.note());
     }
 
-    @PostMapping("/api/refund-requests/{requestId}/reject")
+    @PostMapping(ApiPaths.REJECT_REFUND)
     RefundRequest rejectRefund(@PathVariable UUID requestId, @Valid @RequestBody Decision decision) {
         return refunds.reject(requestId, decision.by(), decision.note());
     }
 
-    @PostMapping("/api/refund-requests/{requestId}/retry")
+    @PostMapping(ApiPaths.RETRY_REFUND)
     RefundRequest retryRefund(@PathVariable UUID requestId, @Valid @RequestBody Decision decision) {
         return refunds.retry(requestId, decision.by());
     }
 
-    @GetMapping("/api/order-proposals/{proposalId}")
-    ProposalService.Proposal proposal(@PathVariable UUID proposalId) {
+    @GetMapping(ApiPaths.ORDER_PROPOSAL)
+    Proposal proposal(@PathVariable UUID proposalId) {
         return proposals.get(proposalId);
     }
 
     /** The customer's own confirmation of an order an agent proposed. */
-    @PostMapping("/api/order-proposals/{proposalId}/confirm")
-    ProposalService.Proposal confirmProposal(@PathVariable UUID proposalId, @RequestBody(required = false) Confirmation confirmation) {
-        String paymentMethod = confirmation == null || confirmation.paymentMethod() == null
-                ? "pm_card_visa"
+    @PostMapping(ApiPaths.CONFIRM_PROPOSAL)
+    Proposal confirmProposal(@PathVariable UUID proposalId, @RequestBody(required = false) Confirmation confirmation) {
+        var paymentMethod = confirmation == null || confirmation.paymentMethod() == null
+                ? DownstreamApis.DEFAULT_PAYMENT_METHOD
                 : confirmation.paymentMethod();
         return proposals.confirm(proposalId, paymentMethod);
     }
 
-    @GetMapping("/api/notifications")
+    @GetMapping(ApiPaths.NOTIFICATIONS)
     List<CustomerNotification> notifications(@RequestParam(required = false) UUID orderId) {
         return orderId == null ? notifications.recent() : notifications.forOrder(orderId);
     }
 
-    @GetMapping("/api/agent-switches")
+    @GetMapping(ApiPaths.AGENT_SWITCHES)
     Map<String, Boolean> agentSwitches() {
         return switches.all();
     }
 
-    @PutMapping("/api/agent-switches/{agentId}")
+    @PutMapping(ApiPaths.AGENT_SWITCH)
     Map<String, Boolean> switchAgent(@PathVariable String agentId, @Valid @RequestBody SwitchChange change) {
         return switches.set(agentId, change.enabled(), change.by());
     }
 
-    @PostMapping("/api/agent/tool-calls")
-    void recordToolCall(@RequestAttribute(AgentAuthenticationFilter.AGENT_ID_ATTRIBUTE) String agentId,
+    @PostMapping(ApiPaths.TOOL_CALLS)
+    void recordToolCall(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId,
             @Valid @RequestBody ToolCallReport call) {
         audit.record(call.orderId(), AuditEvent.ActorType.AGENT, agentId, call.action(), call.outcome(), call.summary(),
                 call.details());
     }
 
     /** An agent records why it did what it did, with the model and token usage behind it. */
-    @PostMapping("/api/agent/decisions")
-    void recordDecision(@RequestAttribute(AgentAuthenticationFilter.AGENT_ID_ATTRIBUTE) String agentId,
+    @PostMapping(ApiPaths.DECISIONS)
+    void recordDecision(@RequestAttribute(SecurityValues.AGENT_ID_ATTRIBUTE) String agentId,
             @Valid @RequestBody AgentDecision decision) {
-        String usage = decision.model() == null ? null : "Model " + decision.model() + ", " + decision.inputTokens()
-                + " input and " + decision.outputTokens() + " output tokens, " + decision.durationMillis() + " ms";
-        audit.record(decision.orderId(), AuditEvent.ActorType.AGENT, agentId, "decision", AuditEvent.Outcome.SUCCEEDED,
-                decision.summary(), usage == null ? decision.reasoning() : usage + "\n\n" + decision.reasoning());
+        var usage = decision.model() == null ? null : AuditSummaries.DECISION_USAGE.formatted(decision.model(),
+                decision.inputTokens(), decision.outputTokens(), decision.durationMillis());
+        audit.record(decision.orderId(), AuditEvent.ActorType.AGENT, agentId, AuditActions.DECISION,
+                AuditEvent.Outcome.SUCCEEDED, decision.summary(),
+                usage == null ? decision.reasoning() : AuditSummaries.DECISION_DETAILS.formatted(usage,
+                        decision.reasoning()));
     }
 }

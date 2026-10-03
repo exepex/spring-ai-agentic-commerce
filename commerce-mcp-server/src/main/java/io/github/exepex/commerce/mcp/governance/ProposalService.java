@@ -1,21 +1,32 @@
 package io.github.exepex.commerce.mcp.governance;
 
+import io.github.exepex.commerce.mcp.constants.AuditActions;
+import io.github.exepex.commerce.mcp.constants.AuditSummaries;
+import io.github.exepex.commerce.mcp.constants.DownstreamApis;
 import io.github.exepex.commerce.mcp.downstream.CatalogApi;
 import io.github.exepex.commerce.mcp.downstream.Downstream;
-import io.github.exepex.commerce.mcp.downstream.DownstreamException;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
-import java.math.BigDecimal;
+import io.github.exepex.commerce.mcp.downstream.dto.PlaceOrderRequest;
+import io.github.exepex.commerce.mcp.downstream.dto.Product;
+import io.github.exepex.commerce.mcp.exception.DownstreamException;
+import io.github.exepex.commerce.mcp.exception.DuplicateProposalLineException;
+import io.github.exepex.commerce.mcp.exception.InsufficientStockException;
+import io.github.exepex.commerce.mcp.exception.InvalidProductIdException;
+import io.github.exepex.commerce.mcp.exception.ProductNotFoundException;
+import io.github.exepex.commerce.mcp.exception.ProposalNotFoundException;
+import io.github.exepex.commerce.mcp.exception.ProposalWithoutLinesException;
+import io.github.exepex.commerce.mcp.governance.dto.Proposal;
+import io.github.exepex.commerce.mcp.governance.dto.ProposedLine;
+import io.github.exepex.commerce.mcp.governance.dto.RequestedLine;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.json.JsonMapper;
@@ -26,15 +37,9 @@ import tools.jackson.databind.json.JsonMapper;
 @RequiredArgsConstructor
 public class ProposalService {
 
-    public record RequestedLine(String productId, int quantity) {}
-
-    public record ProposedLine(UUID productId, String sku, String name, int quantity, BigDecimal unitPrice) {}
-
-    public record Proposal(UUID id, String customerEmail, List<ProposedLine> lines, BigDecimal total, String currency,
-            OrderProposal.Status status, UUID orderId, String failure, Instant createdAt) {}
-
     /** An order in these is still being placed or paid; in any other it was placed and paid first. */
-    private static final Set<String> UNSETTLED_ORDER_STATUSES = Set.of("PLACED", "PAYMENT_PENDING");
+    private static final Set<String> UNSETTLED_ORDER_STATUSES = Set.of(DownstreamApis.ORDER_PLACED,
+            DownstreamApis.ORDER_PAYMENT_PENDING);
 
     private final OrderProposalRepository proposals;
     private final CatalogApi catalog;
@@ -46,30 +51,27 @@ public class ProposalService {
     /** Prices the lines from the catalog and checks stock now; stock is only reserved once the customer confirms. */
     public Proposal propose(String customerEmail, List<RequestedLine> requestedLines) {
         if (requestedLines == null || requestedLines.isEmpty()) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "An order needs at least one line");
+            throw new ProposalWithoutLinesException();
         }
         if (requestedLines.stream().map(RequestedLine::productId).distinct().count() < requestedLines.size()) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
-                    "Each product can appear on only one line; put the whole quantity on that line.");
+            throw new DuplicateProposalLineException();
         }
-        Map<UUID, CatalogApi.Product> productsById = Downstream.call("catalog", catalog::listProducts).stream()
-                .collect(Collectors.toMap(CatalogApi.Product::id, Function.identity()));
-        List<ProposedLine> lines = requestedLines.stream().map(requested -> {
-            CatalogApi.Product product = productsById.get(parseProductId(requested.productId()));
+        var productsById = Downstream.call(DownstreamApis.CATALOG, catalog::listProducts).stream()
+                .collect(Collectors.toMap(Product::id, Function.identity()));
+        var lines = requestedLines.stream().map(requested -> {
+            var product = productsById.get(parseProductId(requested.productId()));
             if (product == null) {
-                throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
-                        "Product " + requested.productId() + " does not exist. Use search_products to find product ids.");
+                throw new ProductNotFoundException(requested.productId());
             }
             if (requested.quantity() < 1 || requested.quantity() > product.available()) {
-                throw new GovernanceException(HttpStatus.CONFLICT, "Cannot order " + requested.quantity() + " of "
-                        + product.name() + ": " + product.available() + " available.");
+                throw new InsufficientStockException(requested.quantity(), product.name(), product.available());
             }
-            return ProposalViews.toLine(product, requested.quantity());
+            return ProposalMapper.toLine(product, requested.quantity());
         }).toList();
-        BigDecimal total = ProposalViews.totalOf(lines);
-        String currency = productsById.get(lines.getFirst().productId()).currency();
-        OrderProposal proposal = proposals.save(new OrderProposal(customerEmail, jsonMapper.writeValueAsString(lines),
-                total, currency, Instant.now(clock)));
+        var total = ProposalMapper.totalOf(lines);
+        var currency = productsById.get(lines.getFirst().productId()).currency();
+        var proposal = proposals.save(new OrderProposal(customerEmail, jsonMapper.writeValueAsString(lines), total,
+                currency, Instant.now(clock)));
         return view(proposal);
     }
 
@@ -94,36 +96,36 @@ public class ProposalService {
      * confirmation records it in the audit trail.
      */
     void settle(OrderProposal proposal) {
-        List<OrderApi.RequestedLine> lines = ProposalViews.toOrderLines(linesOf(proposal));
+        var lines = ProposalMapper.toOrderLines(linesOf(proposal));
         try {
-            OrderApi.Order order = Downstream.call("order service", () -> orders.placeOrder(new OrderApi.PlaceOrderRequest(
+            var order = Downstream.call(DownstreamApis.ORDER_SERVICE, () -> orders.placeOrder(new PlaceOrderRequest(
                     proposal.getId(), proposal.getCustomerEmail(), lines, proposal.getPaymentMethod())));
             if (UNSETTLED_ORDER_STATUSES.contains(order.status())) {
                 proposals.linkPendingOrder(proposal.getId(), order.id());
             } else if (proposals.settle(proposal.getId(), OrderProposal.Status.CONFIRMED, order.id(), null) == 1) {
-                audit.record(order.id(), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(), "confirm_order",
-                        AuditEvent.Outcome.SUCCEEDED, "Customer confirmed the proposed order and paid " + order.total()
-                                + " " + order.currency(),
-                        "Proposal " + proposal.getId());
+                audit.record(order.id(), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(),
+                        AuditActions.CONFIRM_ORDER, AuditEvent.Outcome.SUCCEEDED,
+                        AuditSummaries.ORDER_CONFIRMED_BY_CUSTOMER.formatted(order.total(), order.currency()),
+                        AuditSummaries.PROPOSAL.formatted(proposal.getId()));
             }
         } catch (DownstreamException failure) {
             if (failure.isRetryable()) {
                 log.warn("The order for proposal {} is not settled yet; it will be asked for again", proposal.getId());
             } else if (proposals.settle(proposal.getId(), OrderProposal.Status.FAILED, null, failure.getMessage()) == 1) {
                 audit.record(failedOrderId(failure), AuditEvent.ActorType.HUMAN, proposal.getCustomerEmail(),
-                        "confirm_order", AuditEvent.Outcome.FAILED, "Order could not be placed: " + failure.getMessage(),
-                        "Proposal " + proposal.getId());
+                        AuditActions.CONFIRM_ORDER, AuditEvent.Outcome.FAILED,
+                        AuditSummaries.ORDER_NOT_PLACED.formatted(failure.getMessage()),
+                        AuditSummaries.PROPOSAL.formatted(proposal.getId()));
             }
         }
     }
 
     public Proposal get(UUID proposalId) {
-        return view(proposals.findById(proposalId)
-                .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Order proposal " + proposalId + " does not exist")));
+        return view(proposals.findById(proposalId).orElseThrow(() -> new ProposalNotFoundException(proposalId)));
     }
 
     private Proposal view(OrderProposal proposal) {
-        return ProposalViews.toView(proposal, linesOf(proposal));
+        return ProposalMapper.toView(proposal, linesOf(proposal));
     }
 
     private List<ProposedLine> linesOf(OrderProposal proposal) {
@@ -132,8 +134,7 @@ public class ProposalService {
 
     /** The order service keeps an order whose payment failed and names it, so the failure shows on its timeline. */
     private static UUID failedOrderId(DownstreamException failure) {
-        Map<String, Object> properties = failure.getBody().getProperties();
-        Object orderId = properties == null ? null : properties.get("orderId");
+        var orderId = failure.getProperties().get(DownstreamApis.ORDER_ID_PROPERTY);
         return orderId == null ? null : UUID.fromString(orderId.toString());
     }
 
@@ -141,8 +142,7 @@ public class ProposalService {
         try {
             return UUID.fromString(productId);
         } catch (IllegalArgumentException notAUuid) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
-                    "'" + productId + "' is not a product id. Use search_products to find product ids.");
+            throw new InvalidProductIdException(productId);
         }
     }
 }
