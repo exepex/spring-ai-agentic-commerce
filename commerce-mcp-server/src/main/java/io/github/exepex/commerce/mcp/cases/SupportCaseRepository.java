@@ -1,6 +1,5 @@
 package io.github.exepex.commerce.mcp.cases;
 
-import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -9,14 +8,14 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 interface SupportCaseRepository extends JpaRepository<SupportCase, UUID> {
 
-    Optional<SupportCase> findByOrderIdAndTypeAndStatusNot(UUID orderId, CaseType type, SupportCase.Status status);
+    Optional<SupportCase> findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(UUID orderId, CaseType type,
+            SupportCase.Status status);
 
     List<SupportCase> findByOrderIdAndStatusIn(UUID orderId, Collection<SupportCase.Status> statuses);
 
     List<SupportCase> findByStatusInOrderByCreatedAt(Collection<SupportCase.Status> statuses);
 
-    List<SupportCase> findByStatusAndIncidentFinalFalseAndUpdatedAtAfterOrderByCreatedAt(SupportCase.Status status,
-            Instant updatedAfter);
+    List<SupportCase> findByStatusAndIncidentFinalFalseOrderByCreatedAt(SupportCase.Status status);
 
     List<SupportCase> findByIdIn(Collection<UUID> ids);
 
