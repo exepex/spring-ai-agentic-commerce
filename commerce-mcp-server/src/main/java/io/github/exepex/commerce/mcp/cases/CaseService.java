@@ -217,6 +217,32 @@ public class CaseService {
         return supportCase;
     }
 
+    /**
+     * Follows a service-desk incident whose Correlation ID no longer names the case's order: one that names none frees
+     * the order, and one that names another order takes the case there.
+     *
+     * @return whether the incident names another order than the case's, or none, and was followed
+     */
+    private boolean followOrderOfServiceDeskIncident(SupportCase supportCase, String number, SupportCase.Status status,
+            String assignmentGroup, boolean incidentFinal, UUID incidentOrderId, Instant now) {
+        if (incidentOrderId == null) {
+            // Followed even while resolved, so that the case learns when its incident becomes final.
+            boolean wasOpen = supportCase.getStatus() != SupportCase.Status.RESOLVED;
+            if (supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, false, now)
+                    && wasOpen) {
+                audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
+                        AuditEvent.Outcome.SUCCEEDED, number + " no longer names this order, so its case is closed and "
+                                + "agents may handle the order's money again", null);
+            }
+            return true;
+        }
+        if (!incidentOrderId.equals(supportCase.getOrderId())) {
+            followServiceDeskIncident(supportCase, number, incidentOrderId, status, assignmentGroup);
+            return true;
+        }
+        return false;
+    }
+
     /** Moves a service-desk case to the order its incident names now, or opens it again, with entries on the timeline. */
     private void followServiceDeskIncident(SupportCase supportCase, String number, UUID orderId,
             SupportCase.Status status, String assignmentGroup) {
@@ -288,19 +314,9 @@ public class CaseService {
             lockProblem(supportCase.getOrderId(), supportCase.getType());
         }
         Instant now = Instant.now(clock);
-        if (supportCase.getType() == CaseType.SERVICE_DESK && incidentOrderId == null) {
-            // Followed even while resolved, so that the case learns when its incident becomes final.
-            boolean wasOpen = supportCase.getStatus() != SupportCase.Status.RESOLVED;
-            if (supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, false, now)
-                    && wasOpen) {
-                audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                        AuditEvent.Outcome.SUCCEEDED, number + " no longer names this order, so its case is closed and "
-                                + "agents may handle the order's money again", null);
-            }
-            return supportCase;
-        }
-        if (supportCase.getType() == CaseType.SERVICE_DESK && !incidentOrderId.equals(supportCase.getOrderId())) {
-            followServiceDeskIncident(supportCase, number, incidentOrderId, status, assignmentGroup);
+        if (supportCase.getType() == CaseType.SERVICE_DESK
+                && followOrderOfServiceDeskIncident(supportCase, number, status, assignmentGroup, incidentFinal,
+                        incidentOrderId, now)) {
             return supportCase;
         }
         boolean reopened = supportCase.getStatus() == SupportCase.Status.RESOLVED
