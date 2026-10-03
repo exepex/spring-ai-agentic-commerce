@@ -57,7 +57,7 @@ public class ToolGuard {
         try {
             return Boolean.TRUE.equals(governance.switches().get(agentId));
         } catch (RuntimeException unreadable) {
-            log.warn("Could not read the kill switch of {}; refusing its call", agentId, unreadable);
+            log.warn("Could not read the kill switch of {}; refusing its call", LogValues.safe(agentId), unreadable);
             return false;
         }
     }
@@ -71,7 +71,8 @@ public class ToolGuard {
             governance.recordToolCall("Bearer " + agents.tokenOf(agentId),
                     new GovernanceApi.ToolCall(null, "servicenow:" + tool, outcome, summary, null));
         } catch (RuntimeException unreachable) {
-            log.warn("Could not record {} by {} in the audit trail: {}", tool, agentId, summary, unreachable);
+            log.warn("Could not record {} by {} in the audit trail: {}", LogValues.safe(tool), LogValues.safe(agentId),
+                    LogValues.safe(summary), unreachable);
         }
     }
 }

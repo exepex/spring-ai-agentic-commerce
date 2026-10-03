@@ -147,7 +147,7 @@ public class IncidentAgent {
             if (message.startsWith(REFUSED)) {
                 // Usually a person took the incident meanwhile. Whatever the reason, an incident the agent still owns
                 // goes to the default team once its claim is stale, so it is never left without an owner.
-                log.warn("Incident {} was not handed to a team: {}", number, message);
+                log.warn("Incident {} was not handed to a team: {}", LogValues.safe(number), LogValues.safe(message));
                 return;
             }
             throw new HandOffFailedException("ServiceNow did not take the hand-off of incident " + number + ": " + message,

@@ -52,7 +52,9 @@ public class StockService {
                     lockProduct(reservation.getProductId()).restock(reservation.getQuantity());
                     reservation.markReleased();
                 }
-                case RELEASED -> { }
+                case RELEASED -> {
+                    // Released before: its stock is already back on the shelf.
+                }
             }
         }
     }

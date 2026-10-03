@@ -2,6 +2,7 @@ package io.github.exepex.commerce.servicenow.incidents;
 
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
 import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
+import io.github.exepex.commerce.servicenow.governance.LogValues;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.time.Clock;
 import java.time.Instant;
@@ -220,7 +221,7 @@ public class IncidentPoller {
             governance.recordToolCall("Bearer " + agents.tokenOf(properties.agent()),
                     new GovernanceApi.ToolCall(null, "servicenow:" + tool, "SUCCEEDED", summary, null));
         } catch (RuntimeException unreachable) {
-            log.warn("Could not record {} in the audit trail: {}", tool, summary, unreachable);
+            log.warn("Could not record {} in the audit trail: {}", tool, LogValues.safe(summary), unreachable);
         }
     }
 }

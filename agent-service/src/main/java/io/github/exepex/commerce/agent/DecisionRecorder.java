@@ -29,7 +29,8 @@ class DecisionRecorder {
         try {
             governance.recordDecision("Bearer " + properties.agents().tokenOf(agentId), decision);
         } catch (RuntimeException unavailable) {
-            log.warn("Could not record {}'s decision in the audit trail: {}", agentId, summary, unavailable);
+            log.warn("Could not record {}'s decision in the audit trail: {}", LogValues.safe(agentId), LogValues.safe(summary),
+                    unavailable);
         }
     }
 }

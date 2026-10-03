@@ -1,6 +1,8 @@
 package io.github.exepex.commerce.payment;
 
 import com.stripe.exception.CardException;
+import com.stripe.model.PaymentIntent;
+import com.stripe.model.StripeError;
 import com.stripe.net.RequestOptions;
 import java.math.BigDecimal;
 import lombok.AccessLevel;
@@ -22,7 +24,10 @@ final class StripeRequests {
 
     /** The payment a declined card left behind, when Stripe created one. */
     static String declinedPaymentIntent(CardException declined) {
-        return declined.getStripeError() instanceof com.stripe.model.StripeError error
-                && error.getPaymentIntent() != null ? error.getPaymentIntent().getId() : null;
+        if (declined.getStripeError() instanceof StripeError error
+                && error.getPaymentIntent() instanceof PaymentIntent paymentIntent) {
+            return paymentIntent.getId();
+        }
+        return null;
     }
 }

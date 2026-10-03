@@ -80,7 +80,7 @@ public class ShoppingAssistant {
                     "Customer asked: " + message, response, Duration.between(started, Instant.now()));
             return new Reply(text, run.proposals());
         } catch (RuntimeException failure) {
-            log.error("The shopping assistant failed to answer {}", customerEmail, failure);
+            log.error("The shopping assistant failed to answer {}", LogValues.safe(customerEmail), failure);
             return new Reply(TRY_AGAIN, run.proposals());
         }
     }

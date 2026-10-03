@@ -17,8 +17,9 @@ public final class AdvisoryLocks {
      * locked for different work does not wait on itself.
      */
     public static void lock(JdbcClient jdbc, String key, int namespace) {
-        jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:key, " + namespace + "))")
+        jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:key, :namespace))")
                 .param("key", key)
+                .param("namespace", (long) namespace)
                 .query((row, number) -> number)
                 .single();
     }
