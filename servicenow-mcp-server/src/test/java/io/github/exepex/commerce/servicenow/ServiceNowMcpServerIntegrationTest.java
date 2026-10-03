@@ -92,13 +92,16 @@ class ServiceNowMcpServerIntegrationTest {
         SERVICES.resetAll();
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/sys_user"))
                 .willReturn(okJson("{\"result\": [{\"sys_id\": \"" + AGENT_USER + "\"}]}")));
-        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/sys_journal_field"))
-                .withQueryParam("sysparm_query", equalTo("element_id=sys-1^ORDERBYDESCsys_created_on"))
+        // As a real instance shows them: newest first, in the integration user's time zone (here 7 hours behind UTC).
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-1"))
                 .willReturn(okJson("""
-                        {"result": [{"sys_created_on": "2026-10-02 09:05:00", "sys_created_by": "desk.ana",
-                                     "element": "work_notes", "value": "Asked the warehouse."},
-                                    {"sys_created_on": "2026-10-02 09:00:00", "sys_created_by": "desk.ana",
-                                     "element": "comments", "value": "The customer says order 6f0c is late."}]}""")));
+                        {"result": [{
+                          "work_notes": {"value": "", "display_value":
+                            "2026-10-02 02:05:00 - Ana Desk (Work notes)\\nAsked the warehouse.\\n\\nThey will call back.\\n\\n"},
+                          "comments": {"value": "", "display_value":
+                            "2026-10-02 02:00:00 - Ana Desk (Additional comments)\\nThe customer says order 6f0c is late.\\n\\n"},
+                          "sys_updated_on": {"value": "2026-10-02 09:05:00", "display_value": "2026-10-02 02:05:00"}}]}""")));
         SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-1")).willReturn(okJson("{\"result\": {}}")));
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": true}")));
         SERVICES.stubFor(post("/api/agent/tool-calls").willReturn(aResponse().withStatus(200)));
@@ -136,7 +139,11 @@ class ServiceNowMcpServerIntegrationTest {
         assertThat((String) JsonPath.read(incident, "$.linkedOrderId")).isEqualTo(LINKED_ORDER);
         assertThat((String) JsonPath.read(incident, "$.openedAt")).isEqualTo("2026-10-02T08:55:00Z");
         assertThat(JsonPath.<List<String>>read(incident, "$.notes[*].text"))
-                .containsExactly("The customer says order 6f0c is late.", "Asked the warehouse.");
+                .containsExactly("The customer says order 6f0c is late.", "Asked the warehouse.\n\nThey will call back.");
+        assertThat(JsonPath.<List<String>>read(incident, "$.notes[*].at"))
+                .containsExactly("2026-10-02T09:00:00Z", "2026-10-02T09:05:00Z");
+        assertThat(JsonPath.<List<String>>read(incident, "$.notes[*].kind")).containsExactly("comments", "work_notes");
+        assertThat(JsonPath.<List<String>>read(incident, "$.notes[*].by")).containsOnly("Ana Desk");
         assertThat(call("get_incident", Map.of("number", "INC1^ORactive=true")).isError()).isTrue();
     }
 
@@ -151,7 +158,8 @@ class ServiceNowMcpServerIntegrationTest {
         assertThat(text(read)).contains("not yours to change");
         assertThat(refused.isError()).isTrue();
         assertThat(text(refused)).contains("not yours to change");
-        SERVICES.verify(0, getRequestedFor(urlPathEqualTo("/api/now/table/sys_journal_field")));
+        SERVICES.verify(0, getRequestedFor(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-1")));
         SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/tool-calls"))
                 .withHeader("Authorization", equalTo("Bearer " + AGENT_TOKEN))

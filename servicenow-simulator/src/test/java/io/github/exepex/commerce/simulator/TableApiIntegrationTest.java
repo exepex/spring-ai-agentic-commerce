@@ -13,7 +13,7 @@ import org.springframework.web.client.RestClient;
 
 /**
  * The simulator answers the Table API calls servicenow-mcp-server makes, the way a real instance does: the same
- * queries, value and display-value pairs, display-value input, and work notes kept as journal entries.
+ * queries, value and display-value pairs, display-value input, and work notes shown on the incident, not as journal rows.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {"simulator.username=agent.user", "simulator.password=secret"})
@@ -67,10 +67,15 @@ class TableApiIntegrationTest {
         assertThat(JsonPath.<String>read(shown, "$.result[0].assignment_group.display_value")).isEqualTo("Payments");
         assertThat(JsonPath.<String>read(shown, "$.result[0].assignment_group.link")).contains("/sys_user_group/");
         assertThat(JsonPath.<String>read(shown, "$.result[0].state")).isEqualTo("In Progress");
-        String journal = get("/api/now/table/sys_journal_field?sysparm_query=element_id=" + sysId
-                + "^ORDERBYDESCsys_created_on&sysparm_fields=element,value,sys_created_by");
-        assertThat(JsonPath.<List<String>>read(journal, "$.result[*].value")).containsExactly("Refund it.", "Picked up.");
-        assertThat(JsonPath.<List<String>>read(journal, "$.result[*].sys_created_by")).containsOnly("agent.user");
+        String notes = get("/api/now/table/incident?sysparm_query=sys_id=" + sysId
+                + "&sysparm_fields=work_notes,comments,sys_updated_on&sysparm_display_value=all");
+        assertThat(JsonPath.<String>read(notes, "$.result[0].work_notes.value")).isEmpty();
+        assertThat(JsonPath.<String>read(notes, "$.result[0].work_notes.display_value")).matches(
+                "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} - Agent User \\(Work notes\\)\nRefund it\\.\n\n"
+                + "\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2} - Agent User \\(Work notes\\)\nPicked up\\.\n\n");
+        assertThat(JsonPath.<String>read(notes, "$.result[0].comments.display_value")).isEmpty();
+        String journal = get("/api/now/table/sys_journal_field?sysparm_query=element_id=" + sysId);
+        assertThat(JsonPath.<List<Object>>read(journal, "$.result")).as("journal rows, hidden as from an itil user").isEmpty();
     }
 
     @Test

@@ -112,22 +112,18 @@ class ServiceNowClient {
                 + "^state=" + STATE_IN_PROGRESS, 50);
     }
 
-    /** The incident's latest work notes and comments, oldest first. */
+    /** The incident's latest work notes and comments, oldest first; see {@link IncidentJournal}. */
     List<JournalEntry> journalOf(String incidentSysId) {
         JsonNode body = restClient.get()
-                .uri(uri -> uri.path("/api/now/table/sys_journal_field")
-                        .queryParam("sysparm_query", "element_id=" + incidentSysId + "^ORDERBYDESCsys_created_on")
-                        .queryParam("sysparm_fields", "sys_created_on,sys_created_by,element,value")
-                        .queryParam("sysparm_limit", JOURNAL_LIMIT)
+                .uri(uri -> uri.path("/api/now/table/incident")
+                        .queryParam("sysparm_query", "sys_id=" + incidentSysId)
+                        .queryParam("sysparm_fields", IncidentJournal.FIELDS)
+                        .queryParam("sysparm_display_value", "all")
+                        .queryParam("sysparm_limit", 1)
                         .build())
                 .retrieve().body(JsonNode.class);
-        List<JournalEntry> entries = new ArrayList<>();
-        for (JsonNode entry : body.path("result")) {
-            entries.add(new JournalEntry(utc(entry.path("sys_created_on").asString("")),
-                    entry.path("sys_created_by").asString(""), entry.path("element").asString(""),
-                    entry.path("value").asString("")));
-        }
-        return entries.reversed();
+        List<JournalEntry> entries = IncidentJournal.entriesOf(body.path("result").path(0));
+        return entries.subList(Math.max(0, entries.size() - JOURNAL_LIMIT), entries.size());
     }
 
     /** Updates fields of an incident with their stored values: state codes and sys_ids. */

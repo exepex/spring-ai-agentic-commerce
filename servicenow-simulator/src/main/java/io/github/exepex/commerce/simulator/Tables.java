@@ -132,6 +132,32 @@ class Tables {
         return found.map(Map::copyOf);
     }
 
+    /** Whether the field is a journal field, such as work notes, shown on the incident but kept as journal entries. */
+    boolean isJournal(String table, String field) {
+        return INCIDENT.equals(table) && JOURNAL_FIELDS.contains(field);
+    }
+
+    /**
+     * A journal field as a real instance shows it on the incident: newest entry first, each headed by its time, its
+     * author's name and its kind. The simulator shows times in UTC.
+     */
+    synchronized String journalShown(String incidentSysId, String field) {
+        String kind = "work_notes".equals(field) ? "Work notes" : "Additional comments";
+        StringBuilder shown = new StringBuilder();
+        for (Map<String, String> entry : rows.get(JOURNAL).reversed()) {
+            if (incidentSysId.equals(entry.get("element_id")) && field.equals(entry.get("element"))) {
+                shown.append(entry.get("sys_created_on")).append(" - ").append(nameOf(entry.get("sys_created_by")))
+                        .append(" (").append(kind).append(")\n").append(entry.get("value")).append("\n\n");
+            }
+        }
+        return shown.toString();
+    }
+
+    private String nameOf(String userName) {
+        return rows.get(USER).stream().filter(user -> userName.equals(user.get("user_name")))
+                .map(user -> user.get("name")).findFirst().orElse(userName);
+    }
+
     /** What a person sees for a stored value: a state's name, or a referenced row's name. */
     synchronized String displayValue(String table, String field, String value) {
         if (value == null || value.isBlank()) {
