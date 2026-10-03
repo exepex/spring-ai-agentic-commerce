@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.catalog;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -12,15 +13,11 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * out to keep this demo small.
  */
 @Component
+@RequiredArgsConstructor
 class StockOutPublisher {
 
     private final KafkaTemplate<String, StockOutEvent> kafkaTemplate;
     private final CatalogTopics topics;
-
-    StockOutPublisher(KafkaTemplate<String, StockOutEvent> kafkaTemplate, CatalogTopics topics) {
-        this.kafkaTemplate = kafkaTemplate;
-        this.topics = topics;
-    }
 
     @TransactionalEventListener
     void publish(StockOutEvent event) {

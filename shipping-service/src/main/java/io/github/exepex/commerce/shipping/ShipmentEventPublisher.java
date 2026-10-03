@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.shipping;
 
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -10,16 +11,13 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * the process dies between commit and send; a transactional outbox would close that gap.
  */
 @Component
+@RequiredArgsConstructor
 class ShipmentEventPublisher {
 
     private final KafkaTemplate<String, ShipmentEvent> kafkaTemplate;
-    private final String topic;
 
-    ShipmentEventPublisher(KafkaTemplate<String, ShipmentEvent> kafkaTemplate,
-            @Value("${commerce.topics.shipment-events}") String topic) {
-        this.kafkaTemplate = kafkaTemplate;
-        this.topic = topic;
-    }
+    @Value("${commerce.topics.shipment-events}")
+    private final String topic;
 
     @TransactionalEventListener
     void publish(ShipmentEvent event) {

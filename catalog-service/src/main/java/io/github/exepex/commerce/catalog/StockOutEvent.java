@@ -19,4 +19,10 @@ public record StockOutEvent(
         int reserved,
         int shortfall,
         String reason,
-        List<UUID> affectedOrderIds) {}
+        List<UUID> affectedOrderIds) {
+
+    static StockOutEvent of(Product product, String reason, List<UUID> affectedOrderIds, Instant now) {
+        return new StockOutEvent(UUID.randomUUID(), now, product.getId(), product.getSku(), product.getOnHand(),
+                product.getReserved(), product.shortfall(), reason, affectedOrderIds);
+    }
+}

@@ -5,26 +5,20 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Reserves, releases and adjusts stock. Every change locks the product row first. */
 @Service
+@RequiredArgsConstructor
 public class StockService {
 
     private final ProductRepository products;
     private final StockReservationRepository reservations;
     private final ApplicationEventPublisher events;
     private final Clock clock;
-
-    StockService(ProductRepository products, StockReservationRepository reservations,
-            ApplicationEventPublisher events, Clock clock) {
-        this.products = products;
-        this.reservations = reservations;
-        this.events = events;
-        this.clock = clock;
-    }
 
     /** Holds {@code quantity} units for the order. Repeating the same request returns the same reservation. */
     @Transactional
@@ -33,10 +27,10 @@ public class StockService {
         var existing = reservations.findByOrderIdAndProductId(orderId, productId);
         if (existing.isPresent()) {
             StockReservation reservation = existing.get();
-            if (reservation.getStatus() == StockReservation.Status.RESERVED && reservation.getQuantity() == quantity) {
-                return reservation;
+            if (!reservation.isSameReservationAs(quantity)) {
+                throw new ReservationConflictException(orderId, product.getSku(), reservation);
             }
-            throw new ReservationConflictException(orderId, product.getSku(), reservation);
+            return reservation;
         }
         product.reserve(quantity);
         return reservations.save(new StockReservation(orderId, productId, quantity, Instant.now(clock)));
@@ -49,16 +43,17 @@ public class StockService {
     @Transactional
     public void releaseOrder(UUID orderId) {
         for (StockReservation reservation : reservations.findByOrderIdOrderByProductId(orderId)) {
-            if (reservation.getStatus() == StockReservation.Status.RELEASED) {
-                continue;
+            switch (reservation.getStatus()) {
+                case RESERVED -> {
+                    lockProduct(reservation.getProductId()).release(reservation.getQuantity());
+                    reservation.markReleased();
+                }
+                case DISPATCHED -> {
+                    lockProduct(reservation.getProductId()).restock(reservation.getQuantity());
+                    reservation.markReleased();
+                }
+                case RELEASED -> { }
             }
-            Product product = lockProduct(reservation.getProductId());
-            if (reservation.getStatus() == StockReservation.Status.RESERVED) {
-                product.release(reservation.getQuantity());
-            } else {
-                product.restock(reservation.getQuantity());
-            }
-            reservation.markReleased();
         }
     }
 
@@ -100,9 +95,7 @@ public class StockService {
         Product product = lockProduct(productId);
         product.adjustOnHand(delta);
         if (delta < 0 && product.shortfall() > 0) {
-            events.publishEvent(new StockOutEvent(UUID.randomUUID(), Instant.now(clock), product.getId(),
-                    product.getSku(), product.getOnHand(), product.getReserved(), product.shortfall(), reason,
-                    newestOrdersCovering(product)));
+            events.publishEvent(StockOutEvent.of(product, reason, newestOrdersCovering(product), Instant.now(clock)));
         }
         return product;
     }

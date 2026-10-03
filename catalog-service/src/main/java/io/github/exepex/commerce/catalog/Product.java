@@ -5,9 +5,14 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import java.math.BigDecimal;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /** A sellable product and its stock: units physically on hand and units promised to open orders. */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Product {
 
     @Id
@@ -28,10 +33,6 @@ public class Product {
     private int onHand;
 
     private int reserved;
-
-    protected Product() {
-        // for JPA
-    }
 
     public int available() {
         return Math.max(0, onHand - reserved);
@@ -69,37 +70,5 @@ public class Product {
             throw new InvalidStockAdjustmentException(sku, onHand, delta);
         }
         onHand += delta;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public String getSku() {
-        return sku;
-    }
-
-    public String getName() {
-        return name;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public BigDecimal getPriceAmount() {
-        return priceAmount;
-    }
-
-    public String getCurrency() {
-        return currency;
-    }
-
-    public int getOnHand() {
-        return onHand;
-    }
-
-    public int getReserved() {
-        return reserved;
     }
 }

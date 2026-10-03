@@ -8,6 +8,9 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /**
  * Units of one product held for one order. They stay reserved until the order ships, when they leave the warehouse
@@ -15,6 +18,8 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "stock_reservation")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class StockReservation {
 
     enum Status {
@@ -40,10 +45,6 @@ public class StockReservation {
     @Column(name = "created_at")
     private Instant createdAt;
 
-    protected StockReservation() {
-        // for JPA
-    }
-
     StockReservation(UUID orderId, UUID productId, int quantity, Instant createdAt) {
         this.id = UUID.randomUUID();
         this.orderId = orderId;
@@ -53,35 +54,16 @@ public class StockReservation {
         this.createdAt = createdAt;
     }
 
+    /** A repeated reservation must still be held, and for the same quantity as the first one. */
+    boolean isSameReservationAs(int otherQuantity) {
+        return status == Status.RESERVED && quantity == otherQuantity;
+    }
+
     void markDispatched() {
         status = Status.DISPATCHED;
     }
 
     void markReleased() {
         status = Status.RELEASED;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getOrderId() {
-        return orderId;
-    }
-
-    public UUID getProductId() {
-        return productId;
-    }
-
-    public int getQuantity() {
-        return quantity;
-    }
-
-    public Status getStatus() {
-        return status;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
     }
 }
