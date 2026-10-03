@@ -408,9 +408,13 @@ running, use `mvn -pl agent-evals -Pevals test`. Point them at a UI run with `np
   places a second order. Refunds are checked with the card processor again; one that fails afterwards no longer
   counts as refunded, its refund request is marked failed, and a case is opened for the order. Each service runs its own reconciler for this; the intervals are under `commerce.reconciliation`
   and `commerce.payments.refund-check` in each service's `application.yml`.
-- **Events are published after commit,** so consumers never see a rolled-back change. The trade-off: an event can be
-  lost if a process dies between commit and send. A transactional outbox closes that gap; it is left out to keep the
-  demo small.
+- **Events go through a transactional outbox.** A service writes each event into an `outbox_event` table of its own
+  schema, in the same transaction as the change it announces, so an event exists exactly when its change committed,
+  even if the process dies right after. A relay in the shared `commerce-platform` module puts the events on Kafka,
+  oldest first, as soon as the transaction commits, and deletes each one Kafka took; one that Kafka does not take is
+  sent again, so consumers may see an event twice but never miss one. One instance of a service relays at a time (a
+  Postgres advisory lock), so an order's events leave in order however many instances run. The event carries the
+  trace it was raised in, so the consumer's work still joins the request's trace in Jaeger.
 - **Events can arrive twice, and that is harmless.** The audit trail records each event once per order, and opens its
   case once per order, by the id its service gave it. A case's incident carries the case id in its Correlation display
   field, so a poller that stopped after creating it finds it again instead of opening a second one. An incident
