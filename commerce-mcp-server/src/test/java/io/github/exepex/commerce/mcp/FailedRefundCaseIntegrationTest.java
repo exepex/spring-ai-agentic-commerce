@@ -96,7 +96,7 @@ class FailedRefundCaseIntegrationTest extends CaseTestSupport {
         assertThat(refundStatus(orderId)).isEqualTo("FAILED");
         assertThat((List<String>) JsonPath.read(cases(orderId), "$[*].type")).containsExactly("REFUND_FAILED");
         assertThat((List<String>) JsonPath.read(timeline(orderId), "$[?(@.action == 'issue_refund')].outcome"))
-                .doesNotContain("SUCCEEDED");
+                .filteredOn("SUCCEEDED"::equals).isEmpty();
     }
 
     @Test

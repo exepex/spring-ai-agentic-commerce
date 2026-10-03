@@ -174,7 +174,7 @@ class ServiceDeskCaseIntegrationTest extends CaseTestSupport {
 
         assertThat(followIncident(caseId, "INC0010037", "RESOLVED", "Payments", true)).isEqualTo(200);
 
-        assertThat(inServiceNow()).doesNotContain(caseId);
+        assertThat(inServiceNow()).filteredOn(caseId::equals).isEmpty();
     }
 
     @Test
