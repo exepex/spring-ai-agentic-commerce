@@ -520,6 +520,23 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void aServiceDeskIncidentReadBackUnderAnotherOrderTakesItsCaseThere() {
+        UUID mistyped = stubOrder("ada@example.com", "39.50");
+        UUID meant = stubOrder("ada@example.com", "39.50");
+        assertThat(recordServiceDeskIncident(Map.of("orderId", mistyped.toString(), "number", "INC0010038",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-38", "shortDescription", "Arrived broken",
+                "status", "WITH_TEAM", "assignmentGroup", "Payments"))).isEqualTo(200);
+        String caseId = JsonPath.read(cases(mistyped), "$[0].id");
+
+        assertThat(sync("/api/agent/cases/{id}/incident-state", caseId, Map.of("number", "INC0010038",
+                "status", "WITH_TEAM", "assignmentGroup", "Payments", "incidentFinal", false,
+                "orderId", meant.toString()))).isEqualTo(200);
+
+        assertThat((List<?>) JsonPath.read(cases(mistyped), "$")).isEmpty();
+        assertThat((List<String>) JsonPath.read(cases(meant), "$[*].id")).containsExactly(caseId);
+    }
+
+    @Test
     void aServiceDeskCaseFreedFromItsOrderIsNoLongerReadBackOnceItsIncidentIsClosed() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         assertThat(recordServiceDeskIncident(Map.of("orderId", orderId.toString(), "number", "INC0010037",

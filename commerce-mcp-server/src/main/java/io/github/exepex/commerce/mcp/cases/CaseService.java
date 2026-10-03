@@ -206,19 +206,8 @@ public class CaseService {
         }
         Optional<SupportCase> recorded = cases.findByTypeAndIncidentUrl(CaseType.SERVICE_DESK, url);
         if (recorded.isPresent()) {
-            SupportCase supportCase = recorded.get();
-            UUID before = supportCase.getOrderId();
-            boolean wasResolved = supportCase.getStatus() == SupportCase.Status.RESOLVED;
-            if (supportCase.followServiceDeskIncident(orderId, status, assignmentGroup, Instant.now(clock))) {
-                if (!orderId.equals(before)) {
-                    audit.record(before, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                            AuditEvent.Outcome.SUCCEEDED, number + " is now about order " + orderId, null);
-                }
-                audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                        AuditEvent.Outcome.SUCCEEDED, number + (wasResolved ? " was reopened" : " is now about this order")
-                                + "; agents leave its money to whoever works it", null);
-            }
-            return supportCase;
+            followServiceDeskIncident(recorded.get(), number, orderId, status, assignmentGroup);
+            return recorded.get();
         }
         SupportCase supportCase = cases.save(SupportCase.forServiceDeskIncident(orderId, number, url, shortDescription,
                 status, assignmentGroup, Instant.now(clock)));
@@ -226,6 +215,22 @@ public class CaseService {
                 "The service desk raised incident " + number + " about this order; agents leave its money to whoever "
                         + "works it", shortDescription);
         return supportCase;
+    }
+
+    /** Moves a service-desk case to the order its incident names now, or opens it again, with entries on the timeline. */
+    private void followServiceDeskIncident(SupportCase supportCase, String number, UUID orderId,
+            SupportCase.Status status, String assignmentGroup) {
+        UUID before = supportCase.getOrderId();
+        boolean wasResolved = supportCase.getStatus() == SupportCase.Status.RESOLVED;
+        if (supportCase.followServiceDeskIncident(orderId, status, assignmentGroup, Instant.now(clock))) {
+            if (!orderId.equals(before)) {
+                audit.record(before, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
+                        AuditEvent.Outcome.SUCCEEDED, number + " is now about order " + orderId, null);
+            }
+            audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
+                    AuditEvent.Outcome.SUCCEEDED, number + (wasResolved ? " was reopened" : " is now about this order")
+                            + "; agents leave its money to whoever works it", null);
+        }
     }
 
     @Transactional
@@ -262,7 +267,8 @@ public class CaseService {
      *
      * <p>A service-desk incident that names no order any more, because the service desk cleared or changed its
      * Correlation ID, is not about the case's order: the case is resolved, so the order's money is free again. It stays
-     * so until the incident names an order again, which the poller records like a new one.
+     * so until the incident names an order again, which the poller records like a new one. One that names another order
+     * moves its case there.
      *
      * @param incidentFinal whether a resolved incident is closed or cancelled, so it can no longer be reopened
      * @param incidentOrderId the order the incident names now, if any
@@ -291,6 +297,10 @@ public class CaseService {
                         AuditEvent.Outcome.SUCCEEDED, number + " no longer names this order, so its case is closed and "
                                 + "agents may handle the order's money again", null);
             }
+            return supportCase;
+        }
+        if (supportCase.getType() == CaseType.SERVICE_DESK && !incidentOrderId.equals(supportCase.getOrderId())) {
+            followServiceDeskIncident(supportCase, number, incidentOrderId, status, assignmentGroup);
             return supportCase;
         }
         boolean reopened = supportCase.getStatus() == SupportCase.Status.RESOLVED
