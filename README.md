@@ -313,9 +313,14 @@ service's package, and next to them
 
 - `constants`: every fixed text and name the service uses (API paths, configuration keys, error messages, the names
   and codes of the systems it talks to), so they can be reviewed in one place;
-- `dto`: the records that go over the wire (request and response bodies, MCP tool parameters);
+- `dto`: the records that go over the wire (request and response bodies, MCP tool parameters, payloads of the
+  services it calls); commerce-mcp-server keeps one `dto` package per feature (`cases`, `governance`, `tools`,
+  `downstream`);
 - `exception`: one exception per thing that can go wrong (for example `PaymentNotFoundException`,
-  `RefundExceedsPaymentException`) and the `GlobalExceptionHandler` that turns them into RFC 9457 problem details.
+  `RefundExceedsPaymentException`, `CustomerScopeViolationException`). Every service with a REST API has one
+  `GlobalExceptionHandler` that answers them, as RFC 9457 problem details in the shop's services and the commerce MCP
+  server, and in ServiceNow's own error format in the simulator. An exception thrown inside an MCP tool is not an HTTP
+  response: its message goes back to the model as the tool's error.
 
 ## Tests
 
