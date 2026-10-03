@@ -19,6 +19,9 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.http.Fault;
+import com.github.tomakehurst.wiremock.stubbing.Scenario;
+import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import com.jayway.jsonpath.JsonPath;
 import io.github.exepex.commerce.servicenow.incidents.IncidentPoller;
 import io.modelcontextprotocol.client.McpClient;
@@ -553,6 +556,70 @@ class ServiceNowMcpServerIntegrationTest {
 
         SERVICES.verify(postRequestedFor(urlPathEqualTo("/api/now/table/incident"))
                 .withRequestBody(matchingJsonPath("$.assignment_group", equalTo("Customer Care"))));
+    }
+
+    @Test
+    void aNoteWhoseAnswerWasLostWhileAPersonResolvedTheIncidentIsSettledBeforeTheResolutionIsReported() {
+        String caseId = UUID.randomUUID().toString();
+        String noteId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010016"},
+                  "unsentNotes": [{"id": "%s", "text": "The customer called again."}]}]"""
+                .formatted(caseId, noteId))));
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("""
+                [{"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010016"}]"""
+                .formatted(caseId))));
+        // ServiceNow applies the note, but its answer is lost; meanwhile a person resolves the incident.
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .withQueryParam("sysparm_query", equalTo("number=INC0010016"))
+                .willReturn(okJson("{\"result\": [" + incidentRow("INC0010016", "sys-16", "2", "Online Shop Agent",
+                        AGENT_USER, caseId, Instant.now()) + "]}")));
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-16"))
+                .willReturn(okJson("{\"result\": [{\"work_notes\": \"\", \"comments\": \"\"}]}")));
+        SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-16")).inScenario("lost answer")
+                .whenScenarioStateIs(Scenario.STARTED).willSetStateTo("resolved")
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
+                .whenScenarioStateIs("resolved")
+                .withQueryParam("sysparm_query", equalTo("number=INC0010016"))
+                .willReturn(okJson("{\"result\": [" + incidentRow("INC0010016", "sys-16", "6", "Online Shop Agent",
+                        AGENT_USER, caseId, Instant.now()) + "]}")));
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
+                .whenScenarioStateIs("resolved")
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-16"))
+                .willReturn(okJson("""
+                        {"result": [{"work_notes": "2026-10-02 02:05:00 - Trailhead Agent (Work notes)\\nThe customer called again.\\n\\n[shop note %s]\\n\\n",
+                                     "comments": ""}]}""".formatted(noteId))));
+        String resolutionReport = "/api/agent/cases/" + caseId + "/incident-state";
+
+        poller.poll();
+        SERVICES.verify(0, postRequestedFor(urlEqualTo(resolutionReport)));
+        poller.poll();
+
+        SERVICES.verify(1, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-16")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + noteId + "/sent")));
+        SERVICES.verify(postRequestedFor(urlEqualTo(resolutionReport))
+                .withRequestBody(matchingJsonPath("$.status", equalTo("RESOLVED"))));
+        List<LoggedRequest> settledThenReported = SERVICES.findAll(postRequestedFor(urlPathMatching(
+                "/api/agent/cases/" + caseId + "/(notes/.*/sent|incident-state)")));
+        assertThat(settledThenReported).extracting(LoggedRequest::getUrl)
+                .containsExactly("/api/agent/cases/" + caseId + "/notes/" + noteId + "/sent", resolutionReport);
+    }
+
+    @Test
+    void whileTheCasesToSendCannotBeListedNoIncidentIsReadBack() {
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(aResponse().withStatus(503)));
+
+        poller.poll();
+
+        SERVICES.verify(0, getRequestedFor(urlEqualTo("/api/agent/cases/in-servicenow")));
     }
 
     @Test

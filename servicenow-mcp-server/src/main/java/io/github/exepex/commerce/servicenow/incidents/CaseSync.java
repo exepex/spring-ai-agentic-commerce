@@ -3,9 +3,11 @@ package io.github.exepex.commerce.servicenow.incidents;
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
 import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,8 +45,14 @@ class CaseSync {
         this.agents = agents;
     }
 
-    /** Opens the incidents of new cases and sends the notes added to cases since. A case that fails waits for the next poll. */
-    void sendCases() {
+    /**
+     * Opens the incidents of new cases and sends the notes added to cases since. A case that fails waits for the next
+     * poll.
+     *
+     * @return the cases that failed
+     */
+    Set<UUID> sendCases() {
+        Set<UUID> failed = new HashSet<>();
         for (GovernanceApi.OutgoingCase outgoing : governance.outgoingCases(authorization())) {
             GovernanceApi.Case supportCase = outgoing.supportCase();
             try {
@@ -56,9 +64,11 @@ class CaseSync {
                     sendNotes(supportCase, number, outgoing.unsentNotes());
                 }
             } catch (RuntimeException failure) {
+                failed.add(supportCase.id());
                 LOGGER.warn("Could not send case {} to ServiceNow; trying again next time", supportCase.id(), failure);
             }
         }
+        return failed;
     }
 
     /**
@@ -98,12 +108,27 @@ class CaseSync {
         return "[shop note " + note.id() + "]";
     }
 
-    /** Reads who has each case's incident now and tells the shop. An incident that cannot be read is tried next poll. */
-    void readBackIncidents() {
+    /**
+     * Reads who has each case's incident now and tells the shop. An incident that cannot be read is tried next poll.
+     *
+     * <p>The resolution of a case whose sending just failed is reported only next poll: a note may have reached its
+     * incident though ServiceNow's answer was lost, and the shop carries a resolved case's unsent notes over to a new
+     * case. The next poll finds the note's marker on the incident and marks it sent first.
+     *
+     * @param unsent the cases whose sending failed in this poll
+     */
+    void readBackIncidents(Set<UUID> unsent) {
         for (GovernanceApi.Case supportCase : governance.casesInServiceNow(authorization())) {
             try {
                 serviceNow.findByNumber(supportCase.incidentNumber()).ifPresentOrElse(
-                        incident -> report(supportCase.id(), stateOf(incident)),
+                        incident -> {
+                            GovernanceApi.IncidentState state = stateOf(incident);
+                            if (unsent.contains(supportCase.id()) && RESOLVED.equals(state.status())) {
+                                LOGGER.info("{} is resolved; telling the shop once its notes are settled", incident.number());
+                                return;
+                            }
+                            report(supportCase.id(), state);
+                        },
                         () -> LOGGER.warn("Incident {} of case {} is not in ServiceNow", supportCase.incidentNumber(),
                                 supportCase.id()));
             } catch (RuntimeException failure) {
