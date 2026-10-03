@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.simulator;
 
+import io.github.exepex.commerce.simulator.constants.ConfigKeys;
+import io.github.exepex.commerce.simulator.dto.Group;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -10,19 +12,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param password its password
  * @param groups the assignment groups
  */
-@ConfigurationProperties("simulator")
+@ConfigurationProperties(ConfigKeys.SIMULATOR_PREFIX)
 public record SimulatorProperties(String username, String password, List<Group> groups) {
-
-    /**
-     * @param name the group's name
-     * @param people the user names of its members
-     */
-    public record Group(String name, List<String> people) {
-
-        public Group {
-            people = people == null ? List.of() : List.copyOf(people);
-        }
-    }
 
     public SimulatorProperties {
         groups = groups == null ? List.of() : List.copyOf(groups);

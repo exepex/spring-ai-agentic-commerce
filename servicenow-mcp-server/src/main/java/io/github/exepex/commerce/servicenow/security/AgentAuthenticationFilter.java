@@ -1,5 +1,8 @@
 package io.github.exepex.commerce.servicenow.security;
 
+import io.github.exepex.commerce.servicenow.constants.ApiPaths;
+import io.github.exepex.commerce.servicenow.constants.AuthValues;
+import io.github.exepex.commerce.servicenow.constants.ErrorMessages;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,30 +23,26 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @RequiredArgsConstructor
 class AgentAuthenticationFilter extends OncePerRequestFilter {
 
-    static final String AGENT_ID_ATTRIBUTE = "servicenow.agentId";
-
-    private static final String BEARER_PREFIX = "Bearer ";
-
     private final AgentRegistry agents;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getRequestURI();
-        return !path.startsWith("/mcp");
+        var path = request.getRequestURI();
+        return !path.startsWith(ApiPaths.MCP);
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
-        Optional<String> agentId = authorization != null && authorization.startsWith(BEARER_PREFIX)
-                ? agents.agentWithToken(authorization.substring(BEARER_PREFIX.length()))
-                : Optional.empty();
+        var authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
+        var agentId = authorization != null && authorization.startsWith(AuthValues.BEARER_PREFIX)
+                ? agents.agentWithToken(authorization.substring(AuthValues.BEARER_PREFIX.length()))
+                : Optional.<String>empty();
         if (agentId.isEmpty()) {
-            response.sendError(HttpStatus.UNAUTHORIZED.value(), "An agent bearer token is required");
+            response.sendError(HttpStatus.UNAUTHORIZED.value(), ErrorMessages.AGENT_TOKEN_REQUIRED);
             return;
         }
-        request.setAttribute(AGENT_ID_ATTRIBUTE, agentId.get());
+        request.setAttribute(AuthValues.AGENT_ID_ATTRIBUTE, agentId.get());
         chain.doFilter(request, response);
     }
 }

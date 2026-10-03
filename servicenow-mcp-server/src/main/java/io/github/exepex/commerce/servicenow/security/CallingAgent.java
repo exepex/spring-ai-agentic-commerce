@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.servicenow.security;
 
+import io.github.exepex.commerce.servicenow.constants.AuthValues;
+import io.github.exepex.commerce.servicenow.exception.UnauthenticatedToolCallException;
 import io.modelcontextprotocol.common.McpTransportContext;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -9,9 +11,9 @@ import lombok.NoArgsConstructor;
 public final class CallingAgent {
 
     public static String of(McpTransportContext context) {
-        Object agentId = context.get(McpTransportConfiguration.AGENT_ID);
+        var agentId = context.get(AuthValues.AGENT_ID);
         if (agentId == null) {
-            throw new IllegalStateException("Tool called without an authenticated agent");
+            throw new UnauthenticatedToolCallException();
         }
         return agentId.toString();
     }

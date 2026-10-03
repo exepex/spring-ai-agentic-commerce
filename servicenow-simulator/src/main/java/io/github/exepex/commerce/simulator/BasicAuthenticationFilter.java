@@ -1,5 +1,8 @@
 package io.github.exepex.commerce.simulator;
 
+import io.github.exepex.commerce.simulator.constants.ApiPaths;
+import io.github.exepex.commerce.simulator.constants.ErrorMessages;
+import io.github.exepex.commerce.simulator.constants.ServiceNowValues;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -20,24 +23,25 @@ class BasicAuthenticationFilter extends OncePerRequestFilter {
     private final byte[] expected;
 
     BasicAuthenticationFilter(SimulatorProperties properties) {
-        this.expected = ("Basic " + Base64.getEncoder().encodeToString(
-                (properties.username() + ":" + properties.password()).getBytes(StandardCharsets.UTF_8)))
+        this.expected = (ServiceNowValues.BASIC_AUTH_PREFIX + Base64.getEncoder().encodeToString(
+                ServiceNowValues.CREDENTIALS.formatted(properties.username(), properties.password())
+                        .getBytes(StandardCharsets.UTF_8)))
                 .getBytes(StandardCharsets.UTF_8);
     }
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/now/");
+        return !request.getRequestURI().startsWith(ApiPaths.TABLE_API);
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String presented = request.getHeader(HttpHeaders.AUTHORIZATION);
+        var presented = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (presented == null || !MessageDigest.isEqual(expected, presented.getBytes(StandardCharsets.UTF_8))) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.getWriter().write("{\"error\": {\"message\": \"User Not Authenticated\"}, \"status\": \"failure\"}");
+            response.getWriter().write(ErrorMessages.NOT_AUTHENTICATED);
             return;
         }
         chain.doFilter(request, response);

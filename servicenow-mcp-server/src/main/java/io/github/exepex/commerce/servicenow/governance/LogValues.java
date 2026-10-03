@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.servicenow.governance;
 
+import io.github.exepex.commerce.servicenow.constants.Patterns;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -11,6 +12,6 @@ import lombok.NoArgsConstructor;
 public final class LogValues {
 
     public static String safe(String value) {
-        return value == null ? null : value.replaceAll("[\\r\\n\\t]", "_");
+        return value == null ? null : value.replaceAll(Patterns.LINE_BREAKS, Patterns.LINE_BREAK_REPLACEMENT);
     }
 }

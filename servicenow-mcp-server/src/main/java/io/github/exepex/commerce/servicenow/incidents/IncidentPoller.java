@@ -1,8 +1,17 @@
 package io.github.exepex.commerce.servicenow.incidents;
 
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
+import io.github.exepex.commerce.servicenow.constants.AuditValues;
+import io.github.exepex.commerce.servicenow.constants.AuthValues;
+import io.github.exepex.commerce.servicenow.constants.ConfigKeys;
+import io.github.exepex.commerce.servicenow.constants.IncidentStates;
+import io.github.exepex.commerce.servicenow.constants.IncidentTexts;
+import io.github.exepex.commerce.servicenow.constants.ServiceNowFields;
+import io.github.exepex.commerce.servicenow.constants.ToolNames;
 import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.governance.LogValues;
+import io.github.exepex.commerce.servicenow.governance.dto.ToolCall;
+import io.github.exepex.commerce.servicenow.incidents.dto.Incident;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.time.Clock;
 import java.time.Instant;
@@ -10,7 +19,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -59,23 +67,22 @@ public class IncidentPoller {
     private final ServiceNowProperties properties;
     private final KafkaTemplate<String, IncidentEvent> kafka;
 
-    @Value("${commerce.topics.incidents}")
+    @Value(ConfigKeys.INCIDENTS_TOPIC)
     private final String topic;
 
     private final GovernanceApi governance;
     private final AgentRegistry agents;
     private final Clock clock;
 
-    @Scheduled(fixedDelayString = "${commerce.servicenow.poll-interval}",
-            initialDelayString = "${commerce.servicenow.poll-interval}")
+    @Scheduled(fixedDelayString = ConfigKeys.POLL_INTERVAL, initialDelayString = ConfigKeys.POLL_INTERVAL)
     public void poll() {
         if (!properties.isConfigured()) {
             return;
         }
-        Set<UUID> unsent = new HashSet<>();
-        boolean listed = step("send the shop's cases to ServiceNow", () -> unsent.addAll(cases.sendCases()));
+        var unsent = new HashSet<UUID>();
+        var listed = step("send the shop's cases to ServiceNow", () -> unsent.addAll(cases.sendCases()));
         step("hand over stale claims", this::handOverStaleClaims);
-        Map<String, UUID> recorded = new HashMap<>();
+        var recorded = new HashMap<String, UUID>();
         step("record the service desk's incidents with the shop",
                 () -> recorded.putAll(cases.recordServiceDeskIncidents()));
         step("claim new incidents", () -> claimNewIncidents(recorded));
@@ -111,10 +118,10 @@ public class IncidentPoller {
      * @param recorded the service desk's incidents the shop has now, by number, each with its order
      */
     private void claimNewIncidents(Map<String, UUID> recorded) {
-        boolean switchedOn = Boolean.TRUE.equals(governance.switches().get(properties.agent()));
-        for (ServiceNowClient.Incident found : serviceNow.findNewForAgent()) {
-            ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
-            if (incident == null || incident.isAssigned() || !ServiceNowClient.STATE_NEW.equals(incident.state())
+        var switchedOn = Boolean.TRUE.equals(governance.switches().get(properties.agent()));
+        for (var found : serviceNow.findNewForAgent()) {
+            var incident = serviceNow.findByNumber(found.number()).orElse(null);
+            if (incident == null || incident.isAssigned() || !IncidentStates.NEW.equals(incident.state())
                     || !properties.agentGroup().equals(incident.assignmentGroup())) {
                 continue;
             }
@@ -127,32 +134,34 @@ public class IncidentPoller {
                 log.info("{} waits until the shop has it as a case", incident.number());
                 continue;
             }
-            Map<String, String> claim = new LinkedHashMap<>();
-            claim.put("assigned_to", serviceNow.integrationUserSysId());
-            claim.put("state", ServiceNowClient.STATE_IN_PROGRESS);
-            claim.put("work_notes", "Picked up by the " + properties.agent() + ".");
+            var claim = new LinkedHashMap<String, String>();
+            claim.put(ServiceNowFields.ASSIGNED_TO, serviceNow.integrationUserSysId());
+            claim.put(ServiceNowFields.STATE, IncidentStates.IN_PROGRESS);
+            claim.put(ServiceNowFields.WORK_NOTES, IncidentTexts.CLAIMED.formatted(properties.agent()));
             serviceNow.update(incident.sysId(), claim);
             if (!announce(incident)) {
                 giveBack(incident.number());
                 continue;
             }
-            record("claim_incident", "Claimed " + incident.number() + ": " + incident.shortDescription());
+            record(ToolNames.CLAIM_INCIDENT,
+                    AuditValues.CLAIMED.formatted(incident.number(), incident.shortDescription()));
         }
     }
 
-    private void handOverWhileSwitchedOff(ServiceNowClient.Incident incident) {
-        ServiceNowProperties.Team team = properties.teams().get(properties.defaultTeam());
-        Map<String, String> handOver = new LinkedHashMap<>();
-        handOver.put("assignment_group", team.group());
-        handOver.put("work_notes", "The " + properties.agent() + " is switched off, so this incident goes straight to "
-                + team.group() + ". Nothing was checked or changed yet.");
+    private void handOverWhileSwitchedOff(Incident incident) {
+        var team = properties.teams().get(properties.defaultTeam());
+        var handOver = new LinkedHashMap<String, String>();
+        handOver.put(ServiceNowFields.ASSIGNMENT_GROUP, team.group());
+        handOver.put(ServiceNowFields.WORK_NOTES,
+                IncidentTexts.HANDED_OVER_SWITCHED_OFF.formatted(properties.agent(), team.group()));
         serviceNow.updateByDisplayValue(incident.sysId(), handOver);
         cases.reportHandedToTeam(incident, team.group());
-        record("assign_to_team", "Handed " + incident.number() + " to " + team.group() + " because the agent is switched off");
+        record(ToolNames.ASSIGN_TO_TEAM,
+                AuditValues.HANDED_OVER_SWITCHED_OFF.formatted(incident.number(), team.group()));
     }
 
     /** Whether Kafka took the announcement. */
-    private boolean announce(ServiceNowClient.Incident incident) {
+    private boolean announce(Incident incident) {
         try {
             kafka.send(topic, incident.number(), new IncidentEvent(UUID.randomUUID(), incident.number(),
                     incident.shortDescription(), incident.orderId(), Instant.now(clock))).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -172,37 +181,37 @@ public class IncidentPoller {
      * announcement keeps it.
      */
     private void giveBack(String number) {
-        ServiceNowClient.Incident incident = serviceNow.findByNumber(number).orElse(null);
+        var incident = serviceNow.findByNumber(number).orElse(null);
         if (incident == null || !incident.isClaimedBy(serviceNow.integrationUserSysId(), properties.agentGroup())) {
             log.info("Incident {} is no longer the agent's claim, so it is not given back", number);
             return;
         }
-        Map<String, String> release = new LinkedHashMap<>();
-        release.put("assigned_to", "");
-        release.put("state", ServiceNowClient.STATE_NEW);
+        var release = new LinkedHashMap<String, String>();
+        release.put(ServiceNowFields.ASSIGNED_TO, "");
+        release.put(ServiceNowFields.STATE, IncidentStates.NEW);
         serviceNow.update(incident.sysId(), release);
     }
 
     private void handOverStaleClaims() {
-        Instant staleBefore = Instant.now(clock).minus(properties.staleAfter());
-        ServiceNowProperties.Team team = properties.teams().get(properties.defaultTeam());
-        for (ServiceNowClient.Incident found : serviceNow.findClaimedByAgent()) {
+        var staleBefore = Instant.now(clock).minus(properties.staleAfter());
+        var team = properties.teams().get(properties.defaultTeam());
+        for (var found : serviceNow.findClaimedByAgent()) {
             if (!isStaleClaim(found, staleBefore)) {
                 continue;
             }
-            ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
+            var incident = serviceNow.findByNumber(found.number()).orElse(null);
             if (incident == null || !isStaleClaim(incident, staleBefore)) {
                 continue;
             }
-            Map<String, String> handOver = new LinkedHashMap<>();
-            handOver.put("assignment_group", team.group());
-            handOver.put("assigned_to", "");
-            handOver.put("work_notes", "The " + properties.agent() + " did not finish this incident within "
-                    + properties.staleAfter().toMinutes() + " minutes, so it goes to " + team.group()
-                    + ". Nothing in its notes is confirmed beyond what they say.");
+            var handOver = new LinkedHashMap<String, String>();
+            handOver.put(ServiceNowFields.ASSIGNMENT_GROUP, team.group());
+            handOver.put(ServiceNowFields.ASSIGNED_TO, "");
+            handOver.put(ServiceNowFields.WORK_NOTES, IncidentTexts.HANDED_OVER_UNFINISHED.formatted(properties.agent(),
+                    properties.staleAfter().toMinutes(), team.group()));
             serviceNow.updateByDisplayValue(incident.sysId(), handOver);
             cases.reportHandedToTeam(incident, team.group());
-            record("assign_to_team", "Handed " + incident.number() + " to " + team.group() + " because the agent did not finish it");
+            record(ToolNames.ASSIGN_TO_TEAM,
+                    AuditValues.HANDED_OVER_UNFINISHED.formatted(incident.number(), team.group()));
         }
     }
 
@@ -210,7 +219,7 @@ public class IncidentPoller {
      * Still the agent's, still in progress, still in the agent's group, and untouched since before {@code staleBefore}.
      * An incident a person moved to another group without changing its assignee stays where they put it.
      */
-    private boolean isStaleClaim(ServiceNowClient.Incident incident, Instant staleBefore) {
+    private boolean isStaleClaim(Incident incident, Instant staleBefore) {
         return incident.isClaimedBy(serviceNow.integrationUserSysId(), properties.agentGroup())
                 && incident.updatedAt() != null && incident.updatedAt().isBefore(staleBefore);
     }
@@ -218,8 +227,8 @@ public class IncidentPoller {
     /** Recorded in the shared audit trail as the agent the poller works for. */
     private void record(String tool, String summary) {
         try {
-            governance.recordToolCall("Bearer " + agents.tokenOf(properties.agent()),
-                    new GovernanceApi.ToolCall(null, "servicenow:" + tool, "SUCCEEDED", summary, null));
+            governance.recordToolCall(AuthValues.BEARER_PREFIX + agents.tokenOf(properties.agent()),
+                    new ToolCall(null, AuditValues.ACTION_PREFIX + tool, AuditValues.SUCCEEDED, summary, null));
         } catch (RuntimeException unreachable) {
             log.warn("Could not record {} in the audit trail: {}", tool, LogValues.safe(summary), unreachable);
         }

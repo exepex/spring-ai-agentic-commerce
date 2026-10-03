@@ -1,5 +1,10 @@
 package io.github.exepex.commerce.simulator;
 
+import io.github.exepex.commerce.simulator.constants.FieldNames;
+import io.github.exepex.commerce.simulator.constants.IncidentStates;
+import io.github.exepex.commerce.simulator.constants.ServiceNowValues;
+import io.github.exepex.commerce.simulator.constants.TableNames;
+import io.github.exepex.commerce.simulator.exception.NamedRecordNotFoundException;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -20,12 +25,7 @@ import org.springframework.stereotype.Component;
 @Component
 class Tables {
 
-    static final String INCIDENT = "incident";
-    static final String JOURNAL = "sys_journal_field";
-    static final String USER = "sys_user";
-    static final String GROUP = "sys_user_group";
-
-    private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+    private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern(ServiceNowValues.TIME_PATTERN)
             .withZone(ZoneOffset.UTC);
 
     private final Map<String, List<Map<String, String>>> rows = new LinkedHashMap<>();
@@ -34,10 +34,11 @@ class Tables {
 
     Tables(SimulatorProperties properties, Clock clock) {
         this.clock = clock;
-        List.of(INCIDENT, JOURNAL, USER, GROUP).forEach(table -> rows.put(table, new ArrayList<>()));
+        List.of(TableNames.INCIDENT, TableNames.JOURNAL, TableNames.USER, TableNames.GROUP)
+                .forEach(table -> rows.put(table, new ArrayList<>()));
         addUser(properties.username());
-        for (SimulatorProperties.Group group : properties.groups()) {
-            insert(GROUP, new LinkedHashMap<>(Map.of("name", group.name())));
+        for (var group : properties.groups()) {
+            insert(TableNames.GROUP, new LinkedHashMap<>(Map.of(FieldNames.NAME, group.name())));
             group.people().forEach(this::addUser);
         }
     }
@@ -51,50 +52,56 @@ class Tables {
      * {@code assigned_toISEMPTY^state=1^ORDERBYDESCsys_created_on}.
      */
     synchronized List<Map<String, String>> find(String table, String encodedQuery, int offset, int limit) {
-        EncodedQuery query = EncodedQuery.parse(encodedQuery);
-        List<Map<String, String>> found = new ArrayList<>();
-        for (Map<String, String> row : rows.get(table)) {
+        var query = EncodedQuery.parse(encodedQuery);
+        var found = new ArrayList<Map<String, String>>();
+        for (var row : rows.get(table)) {
             if (query.matches(row, this::valueOf)) {
                 found.add(Map.copyOf(row));
             }
         }
         query.order(found);
-        int from = Math.min(offset, found.size());
+        var from = Math.min(offset, found.size());
         return found.subList(from, Math.min(from + limit, found.size()));
     }
 
     synchronized Optional<Map<String, String>> get(String table, String sysId) {
-        return rows.get(table).stream().filter(row -> sysId.equals(row.get("sys_id"))).findFirst().map(Map::copyOf);
+        return rows.get(table).stream().filter(row -> sysId.equals(row.get(FieldNames.SYS_ID))).findFirst()
+                .map(Map::copyOf);
     }
 
     /** Opens an incident with the next number. */
     synchronized Map<String, String> createIncident(Map<String, String> fields, String createdBy) {
-        Map<String, String> incident = new LinkedHashMap<>();
-        incident.put("number", "INC" + String.format(Locale.ROOT, "%07d", ++lastIncidentNumber));
-        incident.put("state", "1");
-        incident.put("sys_created_by", createdBy);
-        insert(INCIDENT, incident);
-        return update(incident.get("sys_id"), fields, createdBy).orElseThrow();
+        var incident = new LinkedHashMap<String, String>();
+        incident.put(FieldNames.NUMBER, ServiceNowValues.INCIDENT_NUMBER_PREFIX
+                + String.format(Locale.ROOT, ServiceNowValues.INCIDENT_NUMBER_DIGITS, ++lastIncidentNumber));
+        incident.put(FieldNames.STATE, IncidentStates.NEW);
+        incident.put(FieldNames.SYS_CREATED_BY, createdBy);
+        insert(TableNames.INCIDENT, incident);
+        return apply(incident, fields, createdBy);
     }
 
     /** Sets the given stored values; work notes and comments become journal entries. Empty if there is no such incident. */
     synchronized Optional<Map<String, String>> update(String sysId, Map<String, String> fields, String changedBy) {
-        Optional<Map<String, String>> found = rows.get(INCIDENT).stream()
-                .filter(row -> sysId.equals(row.get("sys_id"))).findFirst();
-        found.ifPresent(incident -> {
-            fields.forEach((field, value) -> {
-                if (TableFields.isJournalField(field)) {
-                    if (value != null && !value.isBlank()) {
-                        insert(JOURNAL, new LinkedHashMap<>(Map.of("element_id", sysId, "element", field, "value", value,
-                                "sys_created_by", changedBy)));
-                    }
-                } else {
-                    incident.put(field, value == null ? "" : value);
+        return rows.get(TableNames.INCIDENT).stream()
+                .filter(row -> sysId.equals(row.get(FieldNames.SYS_ID))).findFirst()
+                .map(incident -> apply(incident, fields, changedBy));
+    }
+
+    /** Sets the stored values on the incident, adding work notes and comments as journal entries, and returns it. */
+    private Map<String, String> apply(Map<String, String> incident, Map<String, String> fields, String changedBy) {
+        fields.forEach((field, value) -> {
+            if (TableFields.isJournalField(field)) {
+                if (value != null && !value.isBlank()) {
+                    insert(TableNames.JOURNAL, new LinkedHashMap<>(Map.of(FieldNames.ELEMENT_ID,
+                            incident.get(FieldNames.SYS_ID), FieldNames.ELEMENT, field, FieldNames.VALUE, value,
+                            FieldNames.SYS_CREATED_BY, changedBy)));
                 }
-            });
-            incident.put("sys_updated_on", now());
+            } else {
+                incident.put(field, value == null ? "" : value);
+            }
         });
-        return found.map(Map::copyOf);
+        incident.put(FieldNames.SYS_UPDATED_ON, now());
+        return Map.copyOf(incident);
     }
 
     /**
@@ -102,20 +109,20 @@ class Tables {
      * author's name and its kind. The simulator shows times in UTC.
      */
     synchronized String journalShown(String incidentSysId, String field) {
-        String kind = TableFields.journalKind(field);
-        StringBuilder shown = new StringBuilder();
-        for (Map<String, String> entry : rows.get(JOURNAL).reversed()) {
-            if (incidentSysId.equals(entry.get("element_id")) && field.equals(entry.get("element"))) {
-                shown.append(entry.get("sys_created_on")).append(" - ").append(nameOf(entry.get("sys_created_by")))
-                        .append(" (").append(kind).append(")\n").append(entry.get("value")).append("\n\n");
+        var kind = TableFields.journalKind(field);
+        var shown = new StringBuilder();
+        for (var entry : rows.get(TableNames.JOURNAL).reversed()) {
+            if (incidentSysId.equals(entry.get(FieldNames.ELEMENT_ID)) && field.equals(entry.get(FieldNames.ELEMENT))) {
+                shown.append(ServiceNowValues.JOURNAL_ENTRY.formatted(entry.get(FieldNames.SYS_CREATED_ON),
+                        nameOf(entry.get(FieldNames.SYS_CREATED_BY)), kind, entry.get(FieldNames.VALUE)));
             }
         }
         return shown.toString();
     }
 
     private String nameOf(String userName) {
-        return rows.get(USER).stream().filter(user -> userName.equals(user.get("user_name")))
-                .map(user -> user.get("name")).findFirst().orElse(userName);
+        return rows.get(TableNames.USER).stream().filter(user -> userName.equals(user.get(FieldNames.USER_NAME)))
+                .map(user -> user.get(FieldNames.NAME)).findFirst().orElse(userName);
     }
 
     /** What a person sees for a stored value: a state's name, or a referenced row's name. */
@@ -123,11 +130,11 @@ class Tables {
         if (value == null || value.isBlank()) {
             return "";
         }
-        if (INCIDENT.equals(table) && "state".equals(field)) {
+        if (TableNames.INCIDENT.equals(table) && FieldNames.STATE.equals(field)) {
             return TableFields.stateName(value);
         }
         if (TableFields.isReference(table, field)) {
-            return get(TableFields.referencedTable(field), value).map(row -> row.get("name")).orElse(value);
+            return get(TableFields.referencedTable(field), value).map(row -> row.get(FieldNames.NAME)).orElse(value);
         }
         return value;
     }
@@ -137,27 +144,28 @@ class Tables {
         if (displayed == null || displayed.isBlank()) {
             return "";
         }
-        if ("state".equals(field)) {
+        if (FieldNames.STATE.equals(field)) {
             return TableFields.stateCode(displayed).orElse(displayed);
         }
-        String table = TableFields.referencedTable(field);
+        var table = TableFields.referencedTable(field);
         if (table == null) {
             return displayed;
         }
         return rows.get(table).stream()
-                .filter(row -> displayed.equals(row.get("name")) || displayed.equals(row.get("user_name")))
-                .map(row -> row.get("sys_id"))
+                .filter(row -> displayed.equals(row.get(FieldNames.NAME))
+                        || displayed.equals(row.get(FieldNames.USER_NAME)))
+                .map(row -> row.get(FieldNames.SYS_ID))
                 .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("No " + table + " named '" + displayed + "'"));
+                .orElseThrow(() -> new NamedRecordNotFoundException(table, displayed));
     }
 
     /** A field's stored value; {@code assignment_group.name} follows the reference to the group's name. */
     private String valueOf(Map<String, String> row, String field) {
-        int dot = field.indexOf('.');
+        var dot = field.indexOf('.');
         if (dot < 0) {
             return row.getOrDefault(field, "");
         }
-        String referencedTable = TableFields.referencedTable(field.substring(0, dot));
+        var referencedTable = TableFields.referencedTable(field.substring(0, dot));
         if (referencedTable == null) {
             return "";
         }
@@ -167,13 +175,14 @@ class Tables {
     }
 
     private void addUser(String userName) {
-        insert(USER, new LinkedHashMap<>(Map.of("user_name", userName, "name", TableFields.personName(userName))));
+        insert(TableNames.USER, new LinkedHashMap<>(Map.of(FieldNames.USER_NAME, userName, FieldNames.NAME,
+                TableFields.personName(userName))));
     }
 
     private void insert(String table, Map<String, String> row) {
-        row.put("sys_id", UUID.randomUUID().toString().replace("-", ""));
-        row.put("sys_created_on", now());
-        row.put("sys_updated_on", row.get("sys_created_on"));
+        row.put(FieldNames.SYS_ID, UUID.randomUUID().toString().replace(ServiceNowValues.UUID_DASH, ""));
+        row.put(FieldNames.SYS_CREATED_ON, now());
+        row.put(FieldNames.SYS_UPDATED_ON, row.get(FieldNames.SYS_CREATED_ON));
         rows.get(table).add(row);
     }
 

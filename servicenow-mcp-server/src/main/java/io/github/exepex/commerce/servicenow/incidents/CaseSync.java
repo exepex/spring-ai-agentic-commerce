@@ -1,7 +1,18 @@
 package io.github.exepex.commerce.servicenow.incidents;
 
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
+import io.github.exepex.commerce.servicenow.constants.AuthValues;
+import io.github.exepex.commerce.servicenow.constants.CaseStatuses;
+import io.github.exepex.commerce.servicenow.constants.IncidentStates;
+import io.github.exepex.commerce.servicenow.constants.IncidentTexts;
+import io.github.exepex.commerce.servicenow.constants.ServiceNowFields;
 import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
+import io.github.exepex.commerce.servicenow.governance.dto.Case;
+import io.github.exepex.commerce.servicenow.governance.dto.IncidentLink;
+import io.github.exepex.commerce.servicenow.governance.dto.IncidentState;
+import io.github.exepex.commerce.servicenow.governance.dto.Note;
+import io.github.exepex.commerce.servicenow.governance.dto.ServiceDeskIncident;
+import io.github.exepex.commerce.servicenow.incidents.dto.Incident;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -32,10 +43,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 class CaseSync {
 
-    static final String WITH_AGENT = "WITH_AGENT";
-    static final String WITH_TEAM = "WITH_TEAM";
-    static final String RESOLVED = "RESOLVED";
-
     private final ServiceNowClient serviceNow;
     private final ServiceNowProperties properties;
     private final GovernanceApi governance;
@@ -48,11 +55,11 @@ class CaseSync {
      * @return the cases that failed
      */
     Set<UUID> sendCases() {
-        Set<UUID> failed = new HashSet<>();
-        for (GovernanceApi.OutgoingCase outgoing : governance.outgoingCases(authorization())) {
-            GovernanceApi.Case supportCase = outgoing.supportCase();
+        var failed = new HashSet<UUID>();
+        for (var outgoing : governance.outgoingCases(authorization())) {
+            var supportCase = outgoing.supportCase();
             try {
-                String link = supportCase.incidentNumber() == null || supportCase.incidentNumber().isBlank()
+                var link = supportCase.incidentNumber() == null || supportCase.incidentNumber().isBlank()
                         ? openIncident(supportCase) : supportCase.incidentUrl();
                 if (!outgoing.unsentNotes().isEmpty()) {
                     sendNotes(supportCase, link, outgoing.unsentNotes());
@@ -75,21 +82,21 @@ class CaseSync {
      * <p>A case whose incident is not on this instance, such as one opened on an earlier simulator run, gets none:
      * there is nowhere to send them.
      */
-    private void sendNotes(GovernanceApi.Case supportCase, String link, List<GovernanceApi.Note> notes) {
-        ServiceNowClient.Incident incident = serviceNow.findLinked(link).orElse(null);
+    private void sendNotes(Case supportCase, String link, List<Note> notes) {
+        var incident = serviceNow.findLinked(link).orElse(null);
         if (incident == null) {
             log.warn("The incident of case {} is not on this instance; its notes are not sent", supportCase.id());
             return;
         }
-        boolean finished = incident.isFinished();
-        String workNotes = serviceNow.allWorkNotesOf(incident.sysId());
-        for (GovernanceApi.Note note : notes) {
-            boolean applied = workNotes.contains(CaseNotes.markerOf(note));
+        var finished = incident.isFinished();
+        var workNotes = serviceNow.allWorkNotesOf(incident.sysId());
+        for (var note : notes) {
+            var applied = workNotes.contains(CaseNotes.markerOf(note));
             if (!applied && finished) {
                 continue;
             }
             if (!applied) {
-                serviceNow.update(incident.sysId(), Map.of("work_notes", CaseNotes.workNoteOf(note)));
+                serviceNow.update(incident.sysId(), Map.of(ServiceNowFields.WORK_NOTES, CaseNotes.workNoteOf(note)));
             }
             governance.markNoteSent(authorization(), supportCase.id(), note.id());
         }
@@ -104,17 +111,17 @@ class CaseSync {
      * @return the incidents the shop has now, by number, each with the order it has it under
      */
     Map<String, UUID> recordServiceDeskIncidents() {
-        Map<String, UUID> recorded = new HashMap<>();
-        for (ServiceNowClient.Incident incident : serviceNow.findOpenWithCorrelationId()) {
+        var recorded = new HashMap<String, UUID>();
+        for (var incident : serviceNow.findOpenWithCorrelationId()) {
             if (!isServiceDeskIncidentAboutAnOrder(incident)) {
                 continue;
             }
-            UUID orderId = incident.linkedOrder();
+            var orderId = incident.linkedOrder();
             try {
-                GovernanceApi.IncidentState state = stateOf(incident);
-                String title = incident.shortDescription().isBlank() ? "Incident " + incident.number()
-                        : incident.shortDescription();
-                governance.recordServiceDeskIncident(authorization(), new GovernanceApi.ServiceDeskIncident(orderId,
+                var state = stateOf(incident);
+                var title = incident.shortDescription().isBlank()
+                        ? IncidentTexts.UNTITLED_INCIDENT.formatted(incident.number()) : incident.shortDescription();
+                governance.recordServiceDeskIncident(authorization(), new ServiceDeskIncident(orderId,
                         incident.number(), serviceNow.linkTo(incident), title, state.status(), state.assignmentGroup()));
                 recorded.put(incident.number(), orderId);
             } catch (RuntimeException failure) {
@@ -125,13 +132,13 @@ class CaseSync {
     }
 
     /** Whether the service desk raised the incident about an order: it names an order, and no case of the shop's. */
-    boolean isServiceDeskIncidentAboutAnOrder(ServiceNowClient.Incident incident) {
+    boolean isServiceDeskIncidentAboutAnOrder(Incident incident) {
         return incident.linkedOrder() != null && incident.openedForCase() == null;
     }
 
     /** Whether the shop has the incident, as recorded this poll, under the order the incident names now. */
-    static boolean isRecordedForItsOrder(ServiceNowClient.Incident incident, Map<String, UUID> recorded) {
-        UUID orderId = incident.linkedOrder();
+    static boolean isRecordedForItsOrder(Incident incident, Map<String, UUID> recorded) {
+        var orderId = incident.linkedOrder();
         return orderId != null && orderId.equals(recorded.get(incident.number()));
     }
 
@@ -148,12 +155,12 @@ class CaseSync {
      * @param notesSettled whether a case's notes are settled, so its resolution may be reported
      */
     void readBackIncidents(Predicate<UUID> notesSettled) {
-        for (GovernanceApi.Case supportCase : governance.casesInServiceNow(authorization())) {
+        for (var supportCase : governance.casesInServiceNow(authorization())) {
             try {
                 serviceNow.findLinked(supportCase.incidentUrl()).ifPresentOrElse(
                         incident -> {
-                            GovernanceApi.IncidentState state = stateOf(incident);
-                            if (RESOLVED.equals(state.status()) && !notesSettled.test(supportCase.id())) {
+                            var state = stateOf(incident);
+                            if (CaseStatuses.RESOLVED.equals(state.status()) && !notesSettled.test(supportCase.id())) {
                                 log.info("{} is resolved; telling the shop once its notes are settled", incident.number());
                                 return;
                             }
@@ -171,13 +178,13 @@ class CaseSync {
      * Tells the shop at once that a case's incident went to a team, so agents leave the order to that team without
      * waiting for the next poll. If the shop cannot be told now, the next read-back tells it.
      */
-    void reportHandedToTeam(ServiceNowClient.Incident incident, String group) {
-        UUID caseId = incident.openedForCase();
+    void reportHandedToTeam(Incident incident, String group) {
+        var caseId = incident.openedForCase();
         if (caseId == null) {
             return;
         }
         try {
-            report(caseId, new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, group, false,
+            report(caseId, new IncidentState(incident.number(), CaseStatuses.WITH_TEAM, group, false,
                     incident.linkedOrder()));
         } catch (RuntimeException failure) {
             log.warn("Could not tell the shop that {} went to {}; the next poll will", incident.number(), group, failure);
@@ -185,52 +192,53 @@ class CaseSync {
     }
 
     /** Opens the case's incident, or finds the one opened before, links the case to it, and returns the link. */
-    private String openIncident(GovernanceApi.Case supportCase) {
-        ServiceNowClient.Incident incident = serviceNow.findByCaseId(supportCase.id()).orElse(null);
+    private String openIncident(Case supportCase) {
+        var incident = serviceNow.findByCaseId(supportCase.id()).orElse(null);
         if (incident == null) {
-            Map<String, String> fields = new LinkedHashMap<>();
-            fields.put("assignment_group", supportCase.isForPeople()
+            var fields = new LinkedHashMap<String, String>();
+            fields.put(ServiceNowFields.ASSIGNMENT_GROUP, supportCase.isForPeople()
                     ? properties.teams().get(properties.defaultTeam()).group()
                     : properties.agentGroup());
-            fields.put("short_description", supportCase.title());
-            fields.put("description", supportCase.description());
-            fields.put("correlation_id", supportCase.orderId() == null ? "" : supportCase.orderId().toString());
-            fields.put("correlation_display", supportCase.id().toString());
+            fields.put(ServiceNowFields.SHORT_DESCRIPTION, supportCase.title());
+            fields.put(ServiceNowFields.DESCRIPTION, supportCase.description());
+            fields.put(ServiceNowFields.CORRELATION_ID,
+                    supportCase.orderId() == null ? "" : supportCase.orderId().toString());
+            fields.put(ServiceNowFields.CORRELATION_DISPLAY, supportCase.id().toString());
             incident = serviceNow.create(fields);
         }
-        String link = serviceNow.linkTo(incident);
-        governance.linkIncident(authorization(), supportCase.id(), new GovernanceApi.IncidentLink(incident.number(), link));
+        var link = serviceNow.linkTo(incident);
+        governance.linkIncident(authorization(), supportCase.id(), new IncidentLink(incident.number(), link));
         return link;
     }
 
-    private GovernanceApi.IncidentState stateOf(ServiceNowClient.Incident incident) {
-        UUID orderId = incident.linkedOrder();
+    private IncidentState stateOf(Incident incident) {
+        var orderId = incident.linkedOrder();
         if (incident.isFinished()) {
-            return new GovernanceApi.IncidentState(incident.number(), RESOLVED, incident.assignmentGroup(),
+            return new IncidentState(incident.number(), CaseStatuses.RESOLVED, incident.assignmentGroup(),
                     incident.isFinal(), orderId);
         }
-        boolean takenByAPerson = incident.isAssigned()
+        var takenByAPerson = incident.isAssigned()
                 && !serviceNow.integrationUserSysId().equals(incident.assignedToSysId());
         // The agent only claims new incidents and only works ones in progress; in any other state, such as On Hold, a
         // person put it there and has it.
-        boolean workableByTheAgent = ServiceNowClient.STATE_NEW.equals(incident.state())
-                || ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state());
+        var workableByTheAgent = IncidentStates.NEW.equals(incident.state())
+                || IncidentStates.IN_PROGRESS.equals(incident.state());
         if (properties.agentGroup().equals(incident.assignmentGroup()) && !takenByAPerson && workableByTheAgent) {
-            return new GovernanceApi.IncidentState(incident.number(), WITH_AGENT, incident.assignmentGroup(), false,
+            return new IncidentState(incident.number(), CaseStatuses.WITH_AGENT, incident.assignmentGroup(), false,
                     orderId);
         }
         // A person who took the incident has it, even while it is still in the agent's group.
-        String group = incident.assignmentGroup().isBlank() ? "no group" : incident.assignmentGroup();
-        String owner = takenByAPerson ? group + " (" + incident.assignedTo() + ")"
-                : workableByTheAgent ? group : group + " (" + incident.stateName() + ")";
-        return new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, owner, false, orderId);
+        var group = incident.assignmentGroup().isBlank() ? IncidentTexts.NO_GROUP : incident.assignmentGroup();
+        var owner = takenByAPerson ? IncidentTexts.GROUP_WITH_DETAIL.formatted(group, incident.assignedTo())
+                : workableByTheAgent ? group : IncidentTexts.GROUP_WITH_DETAIL.formatted(group, incident.stateName());
+        return new IncidentState(incident.number(), CaseStatuses.WITH_TEAM, owner, false, orderId);
     }
 
-    private void report(UUID caseId, GovernanceApi.IncidentState state) {
+    private void report(UUID caseId, IncidentState state) {
         governance.followIncident(authorization(), caseId, state);
     }
 
     private String authorization() {
-        return "Bearer " + agents.tokenOf(properties.agent());
+        return AuthValues.BEARER_PREFIX + agents.tokenOf(properties.agent());
     }
 }
