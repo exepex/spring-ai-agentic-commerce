@@ -388,6 +388,7 @@ class ServiceNowMcpServerIntegrationTest {
                 + incidentRow("INC0010009", "sys-9", "1", "Online Shop Agent", "", caseId, Instant.now()) + "}")));
         stubIncident("INC0010009", "sys-9", "1", "Online Shop Agent", "", caseId, Instant.now());
         SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-9")).willReturn(okJson("{\"result\": {}}")));
+        stubJournal("sys-9", "{\"result\": [{\"work_notes\": \"\", \"comments\": \"\"}]}");
 
         poller.poll();
 
@@ -403,8 +404,74 @@ class ServiceNowMcpServerIntegrationTest {
                 .withRequestBody(matchingJsonPath("$.number", equalTo("INC0010009")))
                 .withRequestBody(matchingJsonPath("$.url", equalTo(SERVICES.baseUrl() + "/incident.do?sys_id=sys-9"))));
         SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-9"))
-                .withRequestBody(equalToJson("{\"work_notes\": \"Raised again by the catalog.\"}")));
+                .withRequestBody(equalToJson("{\"work_notes\": \"Raised again by the catalog.\\n\\n[shop note " + noteId + "]\"}")));
         SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + noteId + "/sent")));
+    }
+
+    @Test
+    void aNoteTheIncidentAlreadyHoldsIsMarkedSentWithoutBeingAddedAgain() {
+        String caseId = UUID.randomUUID().toString();
+        String noteId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "type": "STOCK_OUT", "status": "WITH_AGENT", "incidentNumber": "INC0010009"},
+                  "unsentNotes": [{"id": "%s", "text": "Raised again by the catalog."}]}]"""
+                .formatted(caseId, noteId))));
+        stubIncident("INC0010009", "sys-9", "2", "Online Shop Agent", AGENT_USER, caseId, Instant.now());
+        // ServiceNow applied the note earlier, but its answer never arrived, so the shop still holds it as unsent.
+        stubJournal("sys-9", """
+                {"result": [{"work_notes": "2026-10-02 02:05:00 - Trailhead Agent (Work notes)\\nRaised again by the catalog.\\n\\n[shop note %s]\\n\\n",
+                             "comments": ""}]}""".formatted(noteId));
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-9")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + noteId + "/sent")));
+    }
+
+    @Test
+    void aNoteFarBackInALongJournalIsStillFoundAndNotAddedAgain() {
+        String caseId = UUID.randomUUID().toString();
+        String noteId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "type": "STOCK_OUT", "status": "WITH_AGENT", "incidentNumber": "INC0010009"},
+                  "unsentNotes": [{"id": "%s", "text": "Raised again by the catalog."}]}]"""
+                .formatted(caseId, noteId))));
+        stubIncident("INC0010009", "sys-9", "2", "Online Shop Agent", AGENT_USER, caseId, Instant.now());
+        // Much was written after the note, so its marker lies beyond what get_incident shows the agent.
+        String newer = "2026-10-02 03:00:00 - Ana Desk (Work notes)\\n" + "x".repeat(25_000) + "\\n\\n";
+        stubJournal("sys-9", """
+                {"result": [{"work_notes": "%s2026-10-02 02:05:00 - Trailhead Agent (Work notes)\\nRaised again by the catalog.\\n\\n[shop note %s]\\n\\n",
+                             "comments": ""}]}""".formatted(newer, noteId));
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-9")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + noteId + "/sent")));
+    }
+
+    @Test
+    void aNoteAtTheLongestLengthIsShortenedSoItsMarkerFits() {
+        String caseId = UUID.randomUUID().toString();
+        String noteId = UUID.randomUUID().toString();
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": {"id": "%s", "type": "STOCK_OUT", "status": "WITH_AGENT", "incidentNumber": "INC0010009"},
+                  "unsentNotes": [{"id": "%s", "text": "%s"}]}]"""
+                .formatted(caseId, noteId, "y".repeat(4_000)))));
+        stubIncident("INC0010009", "sys-9", "2", "Online Shop Agent", AGENT_USER, caseId, Instant.now());
+        stubJournal("sys-9", "{\"result\": [{\"work_notes\": \"\", \"comments\": \"\"}]}");
+        SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-9")).willReturn(okJson("{\"result\": {}}")));
+
+        poller.poll();
+
+        String workNote = JsonPath.read(SERVICES.findAll(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-9")))
+                .getFirst().getBodyAsString(), "$.work_notes");
+        assertThat(workNote).hasSize(4_000).endsWith("\n\n[shop note " + noteId + "]").startsWith("yyy");
     }
 
     @Test
@@ -489,20 +556,27 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
-    void notesForAnIncidentAlreadyResolvedAreNotSentThere() {
+    void notesForAnIncidentAlreadyResolvedAreNotSentThereButOnesItAlreadyHoldsAreMarkedSent() {
         String caseId = UUID.randomUUID().toString();
+        String appliedNoteId = UUID.randomUUID().toString();
+        String newNoteId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
         SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
                 [{"supportCase": {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010015"},
-                  "unsentNotes": [{"id": "%s", "text": "The customer called again."}]}]"""
-                .formatted(caseId, UUID.randomUUID()))));
+                  "unsentNotes": [{"id": "%s", "text": "The customer wrote."}, {"id": "%s", "text": "The customer called again."}]}]"""
+                .formatted(caseId, appliedNoteId, newNoteId))));
         stubIncident("INC0010015", "sys-15", "6", "Online Shop Agent", "", caseId, Instant.now());
+        // ServiceNow applied the first note, but its answer never arrived; then a person resolved the incident.
+        stubJournal("sys-15", """
+                {"result": [{"work_notes": "2026-10-02 02:05:00 - Trailhead Agent (Work notes)\\nThe customer wrote.\\n\\n[shop note %s]\\n\\n",
+                             "comments": ""}]}""".formatted(appliedNoteId));
 
         poller.poll();
 
         SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-15")));
-        SERVICES.verify(0, postRequestedFor(urlPathMatching("/api/agent/cases/.*/notes/.*/sent")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + appliedNoteId + "/sent")));
+        SERVICES.verify(0, postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/notes/" + newNoteId + "/sent")));
     }
 
     @Test
@@ -518,10 +592,14 @@ class ServiceNowMcpServerIntegrationTest {
                         {"number": "INC0010001", "status": "WITH_TEAM", "assignmentGroup": "Fulfilment"}""")));
     }
 
-    /** The incident's journal fields as a real instance shows them with sysparm_display_value=true. */
     private void stubJournal(String body) {
+        stubJournal("sys-1", body);
+    }
+
+    /** The incident's journal fields as a real instance shows them with sysparm_display_value=true. */
+    private void stubJournal(String sysId, String body) {
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
-                .withQueryParam("sysparm_query", equalTo("sys_id=sys-1"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=" + sysId))
                 .withQueryParam("sysparm_display_value", equalTo("true"))
                 .willReturn(okJson(body)));
     }

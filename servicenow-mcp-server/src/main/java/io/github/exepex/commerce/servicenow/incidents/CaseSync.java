@@ -28,6 +28,8 @@ class CaseSync {
     static final String RESOLVED = "RESOLVED";
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CaseSync.class);
+    /** The longest work note sent, as for the agent's own notes: a case's note can be this long before its marker. */
+    private static final int MAX_WORK_NOTE_LENGTH = 4000;
 
     private final ServiceNowClient serviceNow;
     private final ServiceNowProperties properties;
@@ -60,19 +62,40 @@ class CaseSync {
     }
 
     /**
-     * Sends the notes as work notes. An incident already resolved gets none: nobody reads it any more. The shop learns
-     * of the resolution from the read-back and opens a new case for the notes that did not reach it.
+     * Sends the notes as work notes, each ending with its {@link #markerOf marker}. A note whose marker the incident
+     * already shows was applied before, though ServiceNow's answer or the shop's confirmation was lost: it is only
+     * marked sent, so a retry never adds it twice, even once the incident is resolved. An incident already resolved
+     * gets no new notes: nobody reads it any more. The shop learns of the resolution from the read-back and opens a new
+     * case for the notes that did not reach it.
      */
     private void sendNotes(GovernanceApi.Case supportCase, String number, List<GovernanceApi.Note> notes) {
         ServiceNowClient.Incident incident = serviceNow.findByNumber(number)
                 .orElseThrow(() -> new IllegalStateException("Incident " + number + " is gone"));
-        if (ServiceNowClient.STATES_FINISHED.contains(incident.state())) {
-            return;
-        }
+        boolean finished = ServiceNowClient.STATES_FINISHED.contains(incident.state());
+        String workNotes = serviceNow.allWorkNotesOf(incident.sysId());
         for (GovernanceApi.Note note : notes) {
-            serviceNow.update(incident.sysId(), Map.of("work_notes", note.text()));
+            boolean applied = workNotes.contains(markerOf(note));
+            if (!applied && finished) {
+                continue;
+            }
+            if (!applied) {
+                serviceNow.update(incident.sysId(), Map.of("work_notes", workNoteOf(note)));
+            }
             governance.markNoteSent(authorization(), supportCase.id(), note.id());
         }
+    }
+
+    /** The note as a work note: its text, shortened if need be so that its marker always fits within the limit. */
+    private static String workNoteOf(GovernanceApi.Note note) {
+        String ending = "\n\n" + markerOf(note);
+        String text = note.text();
+        int room = MAX_WORK_NOTE_LENGTH - ending.length();
+        return (text.length() <= room ? text : text.substring(0, room)) + ending;
+    }
+
+    /** The line that ends a case note's work note, so the incident shows which notes it already holds. */
+    private static String markerOf(GovernanceApi.Note note) {
+        return "[shop note " + note.id() + "]";
     }
 
     /** Reads who has each case's incident now and tells the shop. An incident that cannot be read is tried next poll. */
