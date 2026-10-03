@@ -112,7 +112,7 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    idempotency key, then assigns the incident to the Payments team instead of guessing. Once payments are back, any
    operator clicks **Retry refund** on the failed refund in the console: it runs exactly once, with the same key.
 5. **Kill switch.** Switch the incident agent off: the next incident goes straight to a team in ServiceNow, without
-   calling the model. The switch is kept by the commerce MCP server, so it stays off after a restart, and both MCP
+   calling the model, even while agent-service is down. The switch is kept by the commerce MCP server, so it stays off after a restart, and both MCP
    servers refuse every tool call of a switched-off agent except handing the work to people.
 6. **Prompt injection.** Ask the assistant to cancel another customer's order. The customer's identity is injected
    by code and the MCP server checks ownership, so the attempt is refused and recorded as *denied*.
