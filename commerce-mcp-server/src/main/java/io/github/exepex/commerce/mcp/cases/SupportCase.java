@@ -9,6 +9,9 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /**
  * A problem that needs handling, worked as one ServiceNow incident: first by the incident agent, then by a team when
@@ -16,6 +19,8 @@ import java.util.UUID;
  */
 @Entity
 @Table(name = "support_case")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class SupportCase {
 
     public enum Status {
@@ -79,10 +84,6 @@ public class SupportCase {
 
     @Column(name = "updated_at")
     private Instant updatedAt;
-
-    protected SupportCase() {
-        // for JPA
-    }
 
     SupportCase(UUID orderId, CaseType type, String description, String raisedBy, Instant now) {
         this.id = UUID.randomUUID();
@@ -168,57 +169,5 @@ public class SupportCase {
     /** Becomes the order's open case of its problem, the one a problem raised again goes to. */
     void becomeTheOpenCase() {
         reopenedBesideOpenCase = false;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getOrderId() {
-        return orderId;
-    }
-
-    public CaseType getType() {
-        return type;
-    }
-
-    public Status getStatus() {
-        return status;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public String getDescription() {
-        return description;
-    }
-
-    public String getRaisedBy() {
-        return raisedBy;
-    }
-
-    public String getIncidentNumber() {
-        return incidentNumber;
-    }
-
-    public String getIncidentUrl() {
-        return incidentUrl;
-    }
-
-    public String getAssignmentGroup() {
-        return assignmentGroup;
-    }
-
-    public boolean isForPeople() {
-        return forPeople;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
-    }
-
-    public Instant getUpdatedAt() {
-        return updatedAt;
     }
 }

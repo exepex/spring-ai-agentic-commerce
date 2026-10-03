@@ -7,6 +7,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -18,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
  * handing work to a human.
  */
 @Service
+@RequiredArgsConstructor
 public class AgentSwitches {
 
     private final AgentSwitchRepository switches;
@@ -25,15 +27,6 @@ public class AgentSwitches {
     private final AuditTrail audit;
     private final JdbcClient jdbc;
     private final Clock clock;
-
-    AgentSwitches(AgentSwitchRepository switches, AgentDefinitions definitions, AuditTrail audit, JdbcClient jdbc,
-            Clock clock) {
-        this.switches = switches;
-        this.definitions = definitions;
-        this.audit = audit;
-        this.jdbc = jdbc;
-        this.clock = clock;
-    }
 
     public boolean isEnabled(String agentId) {
         return switches.findById(agentId).map(AgentSwitch::isEnabled).orElse(true);

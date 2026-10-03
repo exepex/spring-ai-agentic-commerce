@@ -1,15 +1,16 @@
 package io.github.exepex.commerce.mcp.downstream;
 
 import java.util.function.Supplier;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClientException;
 
 /** Runs a call to a commerce service and turns any HTTP failure into a {@link DownstreamException}. */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 public final class Downstream {
-
-    private Downstream() {}
 
     public static <T> T call(String service, Supplier<T> request) {
         try {

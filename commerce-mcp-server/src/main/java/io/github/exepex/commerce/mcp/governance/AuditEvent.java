@@ -8,10 +8,14 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 /** One thing that happened: who or what did it, to which order, how it turned out, and why. */
 @Entity
 @Table(name = "audit_event")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AuditEvent {
 
     public enum ActorType {
@@ -29,39 +33,45 @@ public class AuditEvent {
     }
 
     @Id
+    @Getter
     private UUID id;
 
     @Column(name = "occurred_at")
+    @Getter
     private Instant occurredAt;
 
     @Column(name = "order_id")
+    @Getter
     private UUID orderId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "actor_type")
+    @Getter
     private ActorType actorType;
 
+    @Getter
     private String actor;
 
+    @Getter
     private String action;
 
     @Enumerated(EnumType.STRING)
+    @Getter
     private Outcome outcome;
 
+    @Getter
     private String summary;
 
+    @Getter
     private String details;
 
     @Column(name = "trace_id")
+    @Getter
     private String traceId;
 
     /** The id the announcing service gave a system event, so a redelivered event is recorded only once. */
     @Column(name = "source_event_id")
     private UUID sourceEventId;
-
-    protected AuditEvent() {
-        // for JPA
-    }
 
     AuditEvent(Instant occurredAt, UUID orderId, ActorType actorType, String actor, String action, Outcome outcome,
             String summary, String details, String traceId, UUID sourceEventId) {
@@ -76,45 +86,5 @@ public class AuditEvent {
         this.details = details;
         this.traceId = traceId;
         this.sourceEventId = sourceEventId;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public Instant getOccurredAt() {
-        return occurredAt;
-    }
-
-    public UUID getOrderId() {
-        return orderId;
-    }
-
-    public ActorType getActorType() {
-        return actorType;
-    }
-
-    public String getActor() {
-        return actor;
-    }
-
-    public String getAction() {
-        return action;
-    }
-
-    public Outcome getOutcome() {
-        return outcome;
-    }
-
-    public String getSummary() {
-        return summary;
-    }
-
-    public String getDetails() {
-        return details;
-    }
-
-    public String getTraceId() {
-        return traceId;
     }
 }

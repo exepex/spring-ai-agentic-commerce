@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.mcp.cases;
 
+import io.github.exepex.commerce.mcp.governance.AdvisoryLocks;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.AuditTrail;
 import io.github.exepex.commerce.mcp.governance.GovernanceException;
@@ -11,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -28,14 +30,14 @@ import org.springframework.transaction.annotation.Transactional;
  * reports back who has each incident.
  */
 @Service
+@RequiredArgsConstructor
 public class CaseService {
 
     /** The actor recorded for what ServiceNow did, as reported by its poller. */
     static final String SERVICENOW = "servicenow";
-    private static final String RAISE_CASE = "raise_case";
-    private static final String FOLLOW_INCIDENT = "follow_incident";
+    static final String RAISE_CASE = "raise_case";
+    static final String FOLLOW_INCIDENT = "follow_incident";
 
-    private static final int MAX_TEXT_LENGTH = 4000;
     private static final List<SupportCase.Status> UNRESOLVED = List.of(SupportCase.Status.PENDING,
             SupportCase.Status.WITH_AGENT, SupportCase.Status.WITH_TEAM);
     private static final List<SupportCase.Status> IN_SERVICENOW = List.of(SupportCase.Status.WITH_AGENT,
@@ -46,20 +48,13 @@ public class CaseService {
 
     private final SupportCaseRepository cases;
     private final CaseNoteRepository notes;
+    private final ServiceDeskCases serviceDesk;
     private final AuditTrail audit;
     private final JdbcClient jdbc;
     private final Clock clock;
-    private final String worker;
 
-    CaseService(SupportCaseRepository cases, CaseNoteRepository notes, AuditTrail audit, JdbcClient jdbc, Clock clock,
-            @Value("${commerce.cases.worker}") String worker) {
-        this.cases = cases;
-        this.notes = notes;
-        this.audit = audit;
-        this.jdbc = jdbc;
-        this.clock = clock;
-        this.worker = worker;
-    }
+    @Value("${commerce.cases.worker}")
+    private final String worker;
 
     /**
      * Opens a case, or adds {@code details} to the order's open case of the same type. The case, its note and its
@@ -100,7 +95,7 @@ public class CaseService {
     /** Opens the case or adds to the open one, within the caller's transaction. */
     private SupportCase openOrAddTo(CaseType type, UUID orderId, String details, AuditEvent.ActorType raisedByType,
             String raisedBy) {
-        String text = fit(details);
+        String text = CaseTexts.fit(details);
         Instant now = Instant.now(clock);
         if (orderId != null) {
             // Two raises of the same problem at once must not each miss the other's case.
@@ -116,7 +111,7 @@ public class CaseService {
             if (open.isPresent()) {
                 notes.save(new CaseNote(open.get().getId(), text, now));
                 audit.record(orderId, raisedByType, raisedBy, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
-                        "Added to the open " + type + " case" + incidentOf(open.get()), text);
+                        "Added to the open " + type + " case" + CaseTexts.incidentOf(open.get()), text);
                 return open.get();
             }
         }
@@ -140,12 +135,9 @@ public class CaseService {
         if (open.isEmpty()) {
             return;
         }
-        SupportCase supportCase = open.get();
-        String who = supportCase.getStatus() == SupportCase.Status.WITH_TEAM
-                ? "with the " + supportCase.getAssignmentGroup() + " team in ServiceNow" + incidentOf(supportCase)
-                : "an open " + supportCase.getType() + " case" + incidentOf(supportCase) + " that the support team handles";
-        throw new GovernanceException(HttpStatus.CONFLICT, "This order is " + who + ", who will finish it. Do not "
-                + "retry or refund it another way; tell the customer a person is looking into it.");
+        throw new GovernanceException(HttpStatus.CONFLICT, "This order is " + CaseTexts.holderOf(open.get())
+                + ", who will finish it. Do not retry or refund it another way; tell the customer a person is looking "
+                + "into it.");
     }
 
     private boolean blocksPayment(SupportCase supportCase, String agentId, String incidentNumber) {
@@ -204,67 +196,7 @@ public class CaseService {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "A service-desk incident being worked is with the agent or a team");
         }
-        Optional<SupportCase> recorded = cases.findByTypeAndIncidentUrl(CaseType.SERVICE_DESK, url);
-        if (recorded.isPresent()) {
-            followServiceDeskIncident(recorded.get(), number, orderId, status, assignmentGroup);
-            return recorded.get();
-        }
-        SupportCase supportCase = cases.save(SupportCase.forServiceDeskIncident(orderId, number, url, shortDescription,
-                status, assignmentGroup, Instant.now(clock)));
-        audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
-                "The service desk raised incident " + number + " about this order; agents leave its money to whoever "
-                        + "works it", shortDescription);
-        return supportCase;
-    }
-
-    /**
-     * Follows a service-desk incident whose Correlation ID no longer names the case's order: one that names none frees
-     * the order, and one that names another order takes the case there.
-     *
-     * @return whether the incident names another order than the case's, or none, and was followed
-     */
-    private boolean followOrderOfServiceDeskIncident(SupportCase supportCase, String number, SupportCase.Status status,
-            String assignmentGroup, boolean incidentFinal, UUID incidentOrderId, Instant now) {
-        if (incidentOrderId == null) {
-            // Followed even while resolved, so that the case learns when its incident becomes final.
-            boolean wasOpen = supportCase.getStatus() != SupportCase.Status.RESOLVED;
-            if (supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, false, now)
-                    && wasOpen) {
-                audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                        AuditEvent.Outcome.SUCCEEDED, number + " no longer names this order, so its case is closed and "
-                                + "agents may handle the order's money again", null);
-            }
-            return true;
-        }
-        if (!incidentOrderId.equals(supportCase.getOrderId())) {
-            followServiceDeskIncident(supportCase, number, incidentOrderId, status, assignmentGroup);
-            return true;
-        }
-        return false;
-    }
-
-    /** Moves a service-desk case to the order its incident names now, or opens it again, with entries on the timeline. */
-    private void followServiceDeskIncident(SupportCase supportCase, String number, UUID orderId,
-            SupportCase.Status status, String assignmentGroup) {
-        UUID before = supportCase.getOrderId();
-        boolean wasResolved = supportCase.getStatus() == SupportCase.Status.RESOLVED;
-        if (supportCase.followServiceDeskIncident(orderId, status, assignmentGroup, Instant.now(clock))) {
-            if (!orderId.equals(before)) {
-                audit.record(before, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                        AuditEvent.Outcome.SUCCEEDED, number + " is now about order " + orderId, null);
-            }
-            audit.record(orderId, AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                    AuditEvent.Outcome.SUCCEEDED, describeServiceDeskIncident(number, status, wasResolved), null);
-        }
-    }
-
-    /** A resolved incident blocks nobody, so only an open one tells agents to leave the order's money alone. */
-    private static String describeServiceDeskIncident(String number, SupportCase.Status status, boolean wasResolved) {
-        if (status == SupportCase.Status.RESOLVED) {
-            return number + " is now about this order and is resolved";
-        }
-        String change = wasResolved ? " was reopened" : " is now about this order";
-        return number + change + "; agents leave its money to whoever works it";
+        return serviceDesk.record(orderId, number, url, shortDescription, status, assignmentGroup);
     }
 
     @Transactional
@@ -323,8 +255,8 @@ public class CaseService {
         }
         Instant now = Instant.now(clock);
         if (supportCase.getType() == CaseType.SERVICE_DESK
-                && followOrderOfServiceDeskIncident(supportCase, number, status, assignmentGroup, incidentFinal,
-                        incidentOrderId, now)) {
+                && serviceDesk.followOrder(supportCase, number, status, assignmentGroup, incidentFinal, incidentOrderId,
+                        now)) {
             return supportCase;
         }
         boolean reopened = supportCase.getStatus() == SupportCase.Status.RESOLVED
@@ -332,15 +264,9 @@ public class CaseService {
         // Looked up before the case changes, so that it does not find itself.
         Optional<SupportCase> open = reopened ? openCaseOfTheSameProblem(supportCase) : Optional.empty();
         if (supportCase.followIncident(status, assignmentGroup, incidentFinal, open.isPresent(), Instant.now(clock))) {
-            String incident = supportCase.getIncidentNumber() + (reopened ? " was reopened and" : "");
-            String summary = switch (status) {
-                case WITH_AGENT -> incident + " is with the incident agent";
-                case WITH_TEAM -> incident + " is assigned to " + assignmentGroup;
-                case RESOLVED -> incident + " is resolved";
-                case PENDING -> throw new IllegalStateException();
-            };
-            String details = open.map(other -> "The order's open " + other.getType() + " case" + incidentOf(other)
-                    + " still takes what is raised again.").orElse(null);
+            String summary = CaseTexts.followed(supportCase.getIncidentNumber(), reopened, status, assignmentGroup);
+            String details = open.map(other -> "The order's open " + other.getType() + " case"
+                    + CaseTexts.incidentOf(other) + " still takes what is raised again.").orElse(null);
             audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
                     AuditEvent.Outcome.SUCCEEDED, summary, details);
             if (status == SupportCase.Status.RESOLVED) {
@@ -379,10 +305,7 @@ public class CaseService {
 
     /** Serializes everything that opens, adds to or resolves the order's case of this type. */
     private void lockProblem(UUID orderId, CaseType type) {
-        jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:key, 2))")
-                .param("key", orderId + "/" + type)
-                .query((row, number) -> number)
-                .single();
+        AdvisoryLocks.lock(jdbc, orderId + "/" + type, 2);
     }
 
     public List<SupportCase> unresolved() {
@@ -400,17 +323,5 @@ public class CaseService {
     private SupportCase find(UUID caseId) {
         return cases.findById(caseId)
                 .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Case " + caseId + " does not exist"));
-    }
-
-    private static String incidentOf(SupportCase supportCase) {
-        return supportCase.getIncidentNumber() == null ? "" : " (" + supportCase.getIncidentNumber() + ")";
-    }
-
-    /** Fits ServiceNow's description and work note, however long the details. */
-    private static String fit(String details) {
-        if (details == null || details.isBlank()) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "Say what the problem is");
-        }
-        return details.length() <= MAX_TEXT_LENGTH ? details : details.substring(0, MAX_TEXT_LENGTH - 1) + "…";
     }
 }

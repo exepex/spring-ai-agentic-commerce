@@ -95,8 +95,4 @@ class AgentSwitchIntegrationTest extends McpServerTestSupport {
         return rest().put().uri("/api/agent-switches/{agentId}", agentId).contentType(MediaType.APPLICATION_JSON)
                 .body(change).exchange((request, response) -> response.getStatusCode().value());
     }
-
-    private String timeline(UUID orderId) {
-        return rest().get().uri("/api/orders/{orderId}/timeline", orderId).retrieve().body(String.class);
-    }
 }

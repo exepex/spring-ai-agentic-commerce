@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.mcp.downstream;
 
+import lombok.Getter;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.ErrorResponseException;
@@ -10,15 +11,12 @@ import org.springframework.web.ErrorResponseException;
  */
 public class DownstreamException extends ErrorResponseException {
 
+    @Getter
     private final boolean retryable;
 
     DownstreamException(HttpStatusCode status, String message, boolean retryable, Throwable cause) {
         super(status, ProblemDetail.forStatusAndDetail(status, message), cause);
         this.retryable = retryable;
-    }
-
-    public boolean isRetryable() {
-        return retryable;
     }
 
     @Override

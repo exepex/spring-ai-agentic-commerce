@@ -5,6 +5,7 @@ import io.github.exepex.commerce.mcp.cases.CaseType;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -17,19 +18,13 @@ import tools.jackson.databind.json.JsonMapper;
  * Kafka delivers it. Events are read as plain JSON: the topics are contracts, not shared Java types.
  */
 @Component
+@RequiredArgsConstructor
 class SystemEventRecorder {
 
     private final AuditTrail audit;
     private final CaseService cases;
     private final JsonMapper jsonMapper;
     private final Clock clock;
-
-    SystemEventRecorder(AuditTrail audit, CaseService cases, JsonMapper jsonMapper, Clock clock) {
-        this.audit = audit;
-        this.cases = cases;
-        this.jsonMapper = jsonMapper;
-        this.clock = clock;
-    }
 
     @KafkaListener(topics = "${commerce.topics.order-events}")
     void onOrderEvent(String json) {

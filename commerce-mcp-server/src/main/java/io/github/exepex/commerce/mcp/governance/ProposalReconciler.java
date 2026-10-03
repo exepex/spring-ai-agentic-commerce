@@ -3,8 +3,8 @@ package io.github.exepex.commerce.mcp.governance;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -15,23 +15,17 @@ import org.springframework.stereotype.Component;
  * counts as stalled once it is older than {@code commerce.reconciliation.settle-after}, so one still running is left
  * alone.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class ProposalReconciler {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(ProposalReconciler.class);
 
     private final OrderProposalRepository proposals;
     private final ProposalService proposalService;
-    private final Duration settleAfter;
     private final Clock clock;
 
-    ProposalReconciler(OrderProposalRepository proposals, ProposalService proposalService,
-            @Value("${commerce.reconciliation.settle-after}") Duration settleAfter, Clock clock) {
-        this.proposals = proposals;
-        this.proposalService = proposalService;
-        this.settleAfter = settleAfter;
-        this.clock = clock;
-    }
+    @Value("${commerce.reconciliation.settle-after}")
+    private final Duration settleAfter;
 
     @Scheduled(fixedDelayString = "${commerce.reconciliation.interval}", initialDelayString = "${commerce.reconciliation.interval}")
     public void reconcile() {
@@ -40,7 +34,7 @@ public class ProposalReconciler {
             try {
                 proposalService.settle(proposal);
             } catch (RuntimeException failure) {
-                LOGGER.warn("Could not settle the confirmation of proposal {}; it will be retried", proposal.getId(), failure);
+                log.warn("Could not settle the confirmation of proposal {}; it will be retried", proposal.getId(), failure);
             }
         }
     }

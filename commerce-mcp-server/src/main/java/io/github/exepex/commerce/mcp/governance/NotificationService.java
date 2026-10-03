@@ -5,12 +5,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@RequiredArgsConstructor
 public class NotificationService {
 
     /** A notification, and whether this call sent it or an earlier one with the same key did. */
@@ -24,13 +26,6 @@ public class NotificationService {
     private final JdbcClient jdbc;
     private final Clock clock;
 
-    NotificationService(CustomerNotificationRepository notifications, AuditTrail audit, JdbcClient jdbc, Clock clock) {
-        this.notifications = notifications;
-        this.audit = audit;
-        this.jdbc = jdbc;
-        this.clock = clock;
-    }
-
     /**
      * Sends a message to the customer. With a key, the message is sent once: asking again with the same key returns
      * the first notification and sends nothing. The notification and its audit entry are saved together or not at all.
@@ -43,10 +38,7 @@ public class NotificationService {
                         "An idempotency key can be at most " + MAX_KEY_LENGTH + " characters.");
             }
             // Two sends with the same key at once must not both miss the other's notification.
-            jdbc.sql("select pg_advisory_xact_lock(hashtextextended(:key, 3))")
-                    .param("key", idempotencyKey)
-                    .query((row, number) -> number)
-                    .single();
+            AdvisoryLocks.lock(jdbc, idempotencyKey, 3);
             Optional<CustomerNotification> sent = notifications.findByIdempotencyKey(idempotencyKey);
             if (sent.isPresent()) {
                 audit.record(orderId, AuditEvent.ActorType.AGENT, sentBy, "notify_customer", AuditEvent.Outcome.SUCCEEDED,

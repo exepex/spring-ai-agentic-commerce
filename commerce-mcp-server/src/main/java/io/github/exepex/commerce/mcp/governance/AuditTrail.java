@@ -6,23 +6,19 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 /** Records what happens, tagged with the current trace so each entry links to its distributed trace. */
 @Service
+@RequiredArgsConstructor
 public class AuditTrail {
 
     private final AuditEventRepository events;
     private final ObjectProvider<Tracer> tracer;
     private final Clock clock;
-
-    AuditTrail(AuditEventRepository events, ObjectProvider<Tracer> tracer, Clock clock) {
-        this.events = events;
-        this.tracer = tracer;
-        this.clock = clock;
-    }
 
     public void record(UUID orderId, AuditEvent.ActorType actorType, String actor, String action,
             AuditEvent.Outcome outcome, String summary, String details) {

@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.mcp.governance;
 
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -8,15 +9,11 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** Acts on what the payment service announces on Kafka: a refund that failed after the processor accepted it. */
 @Component
+@RequiredArgsConstructor
 class PaymentEventListener {
 
     private final RefundService refunds;
     private final JsonMapper jsonMapper;
-
-    PaymentEventListener(RefundService refunds, JsonMapper jsonMapper) {
-        this.refunds = refunds;
-        this.jsonMapper = jsonMapper;
-    }
 
     @KafkaListener(topics = "${commerce.topics.payment-events}")
     void onPaymentEvent(String json) {
