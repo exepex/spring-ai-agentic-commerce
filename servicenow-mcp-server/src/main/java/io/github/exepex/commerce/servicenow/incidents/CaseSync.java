@@ -60,12 +60,10 @@ class CaseSync {
         for (GovernanceApi.OutgoingCase outgoing : governance.outgoingCases(authorization())) {
             GovernanceApi.Case supportCase = outgoing.supportCase();
             try {
-                String number = supportCase.incidentNumber();
-                if (number == null || number.isBlank()) {
-                    number = openIncident(supportCase);
-                }
+                String link = supportCase.incidentNumber() == null || supportCase.incidentNumber().isBlank()
+                        ? openIncident(supportCase) : supportCase.incidentUrl();
                 if (!outgoing.unsentNotes().isEmpty()) {
-                    sendNotes(supportCase, number, outgoing.unsentNotes());
+                    sendNotes(supportCase, link, outgoing.unsentNotes());
                 }
             } catch (RuntimeException failure) {
                 failed.add(supportCase.id());
@@ -81,10 +79,16 @@ class CaseSync {
      * marked sent, so a retry never adds it twice, even once the incident is resolved. An incident already resolved
      * gets no new notes: nobody reads it any more. The shop learns of the resolution from the read-back and opens a new
      * case for the notes that did not reach it.
+     *
+     * <p>A case whose incident is not on this instance, such as one opened on an earlier simulator run, gets none:
+     * there is nowhere to send them.
      */
-    private void sendNotes(GovernanceApi.Case supportCase, String number, List<GovernanceApi.Note> notes) {
-        ServiceNowClient.Incident incident = serviceNow.findByNumber(number)
-                .orElseThrow(() -> new IllegalStateException("Incident " + number + " is gone"));
+    private void sendNotes(GovernanceApi.Case supportCase, String link, List<GovernanceApi.Note> notes) {
+        ServiceNowClient.Incident incident = serviceNow.findLinked(link).orElse(null);
+        if (incident == null) {
+            LOGGER.warn("The incident of case {} is not on this instance; its notes are not sent", supportCase.id());
+            return;
+        }
         boolean finished = ServiceNowClient.STATES_FINISHED.contains(incident.state());
         String workNotes = serviceNow.allWorkNotesOf(incident.sysId());
         for (GovernanceApi.Note note : notes) {
@@ -137,7 +141,9 @@ class CaseSync {
     }
 
     /**
-     * Reads who has each case's incident now and tells the shop. An incident that cannot be read is tried next poll.
+     * Reads who has each case's incident now and tells the shop. Each incident is found by the case's link, so a case
+     * whose incident is on another instance is left alone, even if this instance has an incident with its number. An
+     * incident that cannot be read is tried next poll.
      *
      * <p>A case's resolution is reported only once its notes are settled: a note may have reached its incident though
      * ServiceNow's answer was lost, and the shop carries a resolved case's unsent notes over to a new case. The next
@@ -149,7 +155,7 @@ class CaseSync {
     void readBackIncidents(Predicate<UUID> notesSettled) {
         for (GovernanceApi.Case supportCase : governance.casesInServiceNow(authorization())) {
             try {
-                serviceNow.findByNumber(supportCase.incidentNumber()).ifPresentOrElse(
+                serviceNow.findLinked(supportCase.incidentUrl()).ifPresentOrElse(
                         incident -> {
                             GovernanceApi.IncidentState state = stateOf(incident);
                             if (RESOLVED.equals(state.status()) && !notesSettled.test(supportCase.id())) {
@@ -158,7 +164,7 @@ class CaseSync {
                             }
                             report(supportCase.id(), state);
                         },
-                        () -> LOGGER.warn("Incident {} of case {} is not in ServiceNow", supportCase.incidentNumber(),
+                        () -> LOGGER.warn("Incident {} of case {} is not on this instance", supportCase.incidentNumber(),
                                 supportCase.id()));
             } catch (RuntimeException failure) {
                 LOGGER.warn("Could not read incident {} back; trying again next time", supportCase.incidentNumber(), failure);
@@ -182,6 +188,7 @@ class CaseSync {
         }
     }
 
+    /** Opens the case's incident, or finds the one opened before, links the case to it, and returns the link. */
     private String openIncident(GovernanceApi.Case supportCase) {
         ServiceNowClient.Incident incident = serviceNow.findByCaseId(supportCase.id()).orElse(null);
         if (incident == null) {
@@ -195,9 +202,9 @@ class CaseSync {
             fields.put("correlation_display", supportCase.id().toString());
             incident = serviceNow.create(fields);
         }
-        governance.linkIncident(authorization(), supportCase.id(),
-                new GovernanceApi.IncidentLink(incident.number(), serviceNow.linkTo(incident)));
-        return incident.number();
+        String link = serviceNow.linkTo(incident);
+        governance.linkIncident(authorization(), supportCase.id(), new GovernanceApi.IncidentLink(incident.number(), link));
+        return link;
     }
 
     private GovernanceApi.IncidentState stateOf(ServiceNowClient.Incident incident) {
