@@ -16,8 +16,10 @@ import io.github.exepex.commerce.agent.dto.Agent;
 import io.github.exepex.commerce.agent.dto.Agents;
 import io.github.exepex.commerce.agent.dto.ServiceNow;
 import io.github.exepex.commerce.agent.dto.Slack;
-import io.github.exepex.commerce.agent.exception.HandOffFailedException;
+import io.github.exepex.commerce.agent.exception.HandOffRejectedException;
+import io.github.exepex.commerce.agent.exception.HandOffUnreachableException;
 import io.github.exepex.commerce.agents.AgentDefinitions;
+import io.github.exepex.commerce.governance.api.client.AgentSwitchesClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.util.List;
 import java.util.Map;
@@ -78,11 +80,11 @@ class IncidentAgentTest {
     void aHandOffServiceNowDidNotTakeIsDeliveredAgain() {
         when(toolboxes.callAsIncidentAgent(eq("assign_to_team"), any())).thenReturn(result("502 Bad Gateway", true));
         assertThatThrownBy(() -> agent(mock(ChatModel.class), false).handleIncident(INCIDENT, "", "{}"))
-                .isInstanceOf(HandOffFailedException.class);
+                .isInstanceOf(HandOffRejectedException.class);
 
         when(toolboxes.callAsIncidentAgent(eq("assign_to_team"), any())).thenThrow(new IllegalStateException("down"));
         assertThatThrownBy(() -> agent(mock(ChatModel.class), false).handleIncident(INCIDENT, "", "{}"))
-                .isInstanceOf(HandOffFailedException.class);
+                .isInstanceOf(HandOffUnreachableException.class);
     }
 
     @Test
@@ -117,7 +119,7 @@ class IncidentAgentTest {
     }
 
     private IncidentAgent agent(ChatModel model, boolean switchedOn) {
-        var switches = mock(AgentSwitchesApi.class);
+        var switches = mock(AgentSwitchesClient.class);
         when(switches.all()).thenReturn(Map.of(AgentIds.INCIDENT_AGENT, switchedOn));
         return new IncidentAgent(model, toolboxes, new AgentSwitchboard(switches), mock(DecisionRecorder.class),
                 DEFINITIONS, PROPERTIES);

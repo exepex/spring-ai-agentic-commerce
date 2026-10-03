@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.agent;
 
-import io.github.exepex.commerce.agent.dto.Change;
+import io.github.exepex.commerce.governance.api.client.AgentSwitchesClient;
+import io.github.exepex.commerce.governance.api.dto.SwitchChange;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -15,7 +16,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class AgentSwitchboard {
 
-    private final AgentSwitchesApi switches;
+    private final AgentSwitchesClient switches;
 
     /** Read before every run. Throws if the MCP server cannot be reached; callers decide what that means. */
     public boolean isEnabled(String agentId) {
@@ -27,6 +28,6 @@ public class AgentSwitchboard {
     }
 
     public void set(String agentId, boolean on, String by) {
-        switches.set(agentId, new Change(on, by));
+        switches.set(agentId, new SwitchChange(on, by));
     }
 }

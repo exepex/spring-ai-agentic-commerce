@@ -8,6 +8,7 @@ import io.github.exepex.commerce.agent.constants.Prompts;
 import io.github.exepex.commerce.agent.dto.Reply;
 import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.agents.AgentDefinitions;
+import io.github.exepex.commerce.platform.logging.LogValues;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
