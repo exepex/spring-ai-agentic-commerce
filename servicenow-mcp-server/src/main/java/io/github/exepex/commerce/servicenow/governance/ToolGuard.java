@@ -4,8 +4,8 @@ import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import io.github.exepex.commerce.servicenow.security.CallingAgent;
 import io.modelcontextprotocol.common.McpTransportContext;
 import java.util.function.Function;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 /**
@@ -13,21 +13,16 @@ import org.springframework.stereotype.Component;
  * the tool and be switched on, and the call is recorded in the shared audit trail. Handing an incident to a team is
  * allowed even when the agent is switched off, so its work always reaches a person.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class ToolGuard {
 
     /** The tool that hands work to people; never blocked by the kill switch. */
     public static final String HAND_TO_TEAM = "assign_to_team";
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(ToolGuard.class);
-
     private final AgentRegistry agents;
     private final GovernanceApi governance;
-
-    ToolGuard(AgentRegistry agents, GovernanceApi governance) {
-        this.agents = agents;
-        this.governance = governance;
-    }
 
     /**
      * @param summary what the call does, for the audit trail, naming the incident
@@ -62,7 +57,7 @@ public class ToolGuard {
         try {
             return Boolean.TRUE.equals(governance.switches().get(agentId));
         } catch (RuntimeException unreadable) {
-            LOGGER.warn("Could not read the kill switch of {}; refusing its call", agentId, unreadable);
+            log.warn("Could not read the kill switch of {}; refusing its call", agentId, unreadable);
             return false;
         }
     }
@@ -76,7 +71,7 @@ public class ToolGuard {
             governance.recordToolCall("Bearer " + agents.tokenOf(agentId),
                     new GovernanceApi.ToolCall(null, "servicenow:" + tool, outcome, summary, null));
         } catch (RuntimeException unreachable) {
-            LOGGER.warn("Could not record {} by {} in the audit trail: {}", tool, agentId, summary, unreachable);
+            log.warn("Could not record {} by {} in the audit trail: {}", tool, agentId, summary, unreachable);
         }
     }
 }

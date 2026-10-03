@@ -14,8 +14,8 @@ import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -46,33 +46,24 @@ import org.springframework.stereotype.Component;
  * agent-service was down or its run stopped, is handed to the default team, so no incident waits for an agent that
  * is not coming.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class IncidentPoller {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(IncidentPoller.class);
     private static final long SEND_TIMEOUT_SECONDS = 10;
 
     private final ServiceNowClient serviceNow;
     private final CaseSync cases;
     private final ServiceNowProperties properties;
     private final KafkaTemplate<String, IncidentEvent> kafka;
+
+    @Value("${commerce.topics.incidents}")
     private final String topic;
+
     private final GovernanceApi governance;
     private final AgentRegistry agents;
     private final Clock clock;
-
-    IncidentPoller(ServiceNowClient serviceNow, CaseSync cases, ServiceNowProperties properties,
-            KafkaTemplate<String, IncidentEvent> kafka, @Value("${commerce.topics.incidents}") String topic,
-            GovernanceApi governance, AgentRegistry agents, Clock clock) {
-        this.serviceNow = serviceNow;
-        this.cases = cases;
-        this.properties = properties;
-        this.kafka = kafka;
-        this.topic = topic;
-        this.governance = governance;
-        this.agents = agents;
-        this.clock = clock;
-    }
 
     @Scheduled(fixedDelayString = "${commerce.servicenow.poll-interval}",
             initialDelayString = "${commerce.servicenow.poll-interval}")
@@ -97,7 +88,7 @@ public class IncidentPoller {
             step.run();
             return true;
         } catch (RuntimeException unavailable) {
-            LOGGER.warn("Could not {}; trying again next poll", what, unavailable);
+            log.warn("Could not {}; trying again next poll", what, unavailable);
             return false;
         }
     }
@@ -132,7 +123,7 @@ public class IncidentPoller {
             }
             if (cases.isServiceDeskIncidentAboutAnOrder(incident)
                     && !CaseSync.isRecordedForItsOrder(incident, recorded)) {
-                LOGGER.info("{} waits until the shop has it as a case", incident.number());
+                log.info("{} waits until the shop has it as a case", incident.number());
                 continue;
             }
             Map<String, String> claim = new LinkedHashMap<>();
@@ -169,7 +160,7 @@ public class IncidentPoller {
             Thread.currentThread().interrupt();
             return false;
         } catch (ExecutionException | TimeoutException notSent) {
-            LOGGER.warn("Could not announce incident {}; giving the claim back to try again", incident.number(), notSent);
+            log.warn("Could not announce incident {}; giving the claim back to try again", incident.number(), notSent);
             return false;
         }
     }
@@ -181,10 +172,8 @@ public class IncidentPoller {
      */
     private void giveBack(String number) {
         ServiceNowClient.Incident incident = serviceNow.findByNumber(number).orElse(null);
-        if (incident == null || !serviceNow.integrationUserSysId().equals(incident.assignedToSysId())
-                || !ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())
-                || !properties.agentGroup().equals(incident.assignmentGroup())) {
-            LOGGER.info("Incident {} is no longer the agent's claim, so it is not given back", number);
+        if (incident == null || !incident.isClaimedBy(serviceNow.integrationUserSysId(), properties.agentGroup())) {
+            log.info("Incident {} is no longer the agent's claim, so it is not given back", number);
             return;
         }
         Map<String, String> release = new LinkedHashMap<>();
@@ -221,9 +210,7 @@ public class IncidentPoller {
      * An incident a person moved to another group without changing its assignee stays where they put it.
      */
     private boolean isStaleClaim(ServiceNowClient.Incident incident, Instant staleBefore) {
-        return serviceNow.integrationUserSysId().equals(incident.assignedToSysId())
-                && ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())
-                && properties.agentGroup().equals(incident.assignmentGroup())
+        return incident.isClaimedBy(serviceNow.integrationUserSysId(), properties.agentGroup())
                 && incident.updatedAt() != null && incident.updatedAt().isBefore(staleBefore);
     }
 
@@ -233,7 +220,7 @@ public class IncidentPoller {
             governance.recordToolCall("Bearer " + agents.tokenOf(properties.agent()),
                     new GovernanceApi.ToolCall(null, "servicenow:" + tool, "SUCCEEDED", summary, null));
         } catch (RuntimeException unreachable) {
-            LOGGER.warn("Could not record {} in the audit trail: {}", tool, summary, unreachable);
+            log.warn("Could not record {} in the audit trail: {}", tool, summary, unreachable);
         }
     }
 }

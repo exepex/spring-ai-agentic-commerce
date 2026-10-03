@@ -3,12 +3,15 @@ package io.github.exepex.commerce.servicenow.incidents;
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
 import io.github.exepex.commerce.servicenow.governance.ToolGuard;
 import io.github.exepex.commerce.servicenow.governance.ToolRefusedException;
+import io.github.exepex.commerce.servicenow.incidents.IncidentViews.Acknowledgement;
+import io.github.exepex.commerce.servicenow.incidents.IncidentViews.IncidentView;
+import io.github.exepex.commerce.servicenow.incidents.IncidentViews.TeamView;
 import io.modelcontextprotocol.common.McpTransportContext;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import lombok.RequiredArgsConstructor;
 import org.springframework.ai.mcp.annotation.McpTool;
 import org.springframework.ai.mcp.annotation.McpToolParam;
 import org.springframework.stereotype.Component;
@@ -19,15 +22,8 @@ import org.springframework.stereotype.Component;
  * its to change.
  */
 @Component
+@RequiredArgsConstructor
 class IncidentTools {
-
-    record IncidentView(String number, String shortDescription, String description, String state, String caller,
-            String assignmentGroup, String assignedTo, String linkedOrderId, Instant openedAt, String workNotes,
-            String comments) {}
-
-    record TeamView(String team, String handles) {}
-
-    record Acknowledgement(String number, String message) {}
 
     private static final Pattern INCIDENT_NUMBER = Pattern.compile("INC\\d{7,}");
     private static final int MAX_NOTE_LENGTH = 4000;
@@ -36,13 +32,6 @@ class IncidentTools {
     private final ServiceNowClient serviceNow;
     private final CaseSync cases;
     private final ServiceNowProperties properties;
-
-    IncidentTools(ToolGuard guard, ServiceNowClient serviceNow, CaseSync cases, ServiceNowProperties properties) {
-        this.guard = guard;
-        this.serviceNow = serviceNow;
-        this.cases = cases;
-        this.properties = properties;
-    }
 
     @McpTool(name = "get_incident", description = """
             Read an incident you are working: what was reported, by whom and when, its state and assignment, the \
@@ -53,10 +42,7 @@ class IncidentTools {
             @McpToolParam(description = "The incident number, such as INC0010001") String number) {
         return guard.run(context, "get_incident", "Read incident " + number, agentId -> {
             ServiceNowClient.Incident incident = owned(number);
-            ServiceNowClient.Journal journal = serviceNow.journalOf(incident.sysId());
-            return new IncidentView(incident.number(), incident.shortDescription(), incident.description(),
-                    incident.stateName(), incident.caller(), incident.assignmentGroup(), incident.assignedTo(),
-                    incident.orderId(), incident.openedAt(), journal.workNotes(), journal.comments());
+            return IncidentViews.toView(incident, serviceNow.journalOf(incident.sysId()));
         });
     }
 
@@ -75,9 +61,8 @@ class IncidentTools {
 
     @McpTool(name = "list_teams", description = "List the teams an incident can be handed to, and what each one handles.")
     List<TeamView> listTeams(McpTransportContext context) {
-        return guard.run(context, "list_teams", "Listed the teams", agentId -> properties.teams().entrySet().stream()
-                .map(team -> new TeamView(team.getKey(), team.getValue().handles()))
-                .toList());
+        return guard.run(context, "list_teams", "Listed the teams",
+                agentId -> IncidentViews.toViews(properties.teams()));
     }
 
     @McpTool(name = ToolGuard.HAND_TO_TEAM, description = """
@@ -137,10 +122,7 @@ class IncidentTools {
     /** The incident, if the agent is the one working it; otherwise the call is refused. */
     private ServiceNowClient.Incident owned(String number) {
         ServiceNowClient.Incident incident = find(number);
-        // A person who moved the incident to another group has it, even if they left it assigned to the agent.
-        if (!serviceNow.integrationUserSysId().equals(incident.assignedToSysId())
-                || !ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state())
-                || !properties.agentGroup().equals(incident.assignmentGroup())) {
+        if (!incident.isClaimedBy(serviceNow.integrationUserSysId(), properties.agentGroup())) {
             throw new ToolRefusedException("Incident " + number + " is not yours to change: it is " + incident.stateName()
                     + (incident.isAssigned() ? " and assigned to " + incident.assignedTo() : " and unassigned")
                     + " in " + incident.assignmentGroup() + ".");

@@ -2,9 +2,6 @@ package io.github.exepex.commerce.servicenow.incidents;
 
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -33,14 +30,6 @@ class ServiceNowClient {
     /** Closed and cancelled: unlike a resolved incident, it can no longer be reopened. */
     static final Set<String> STATES_FINAL = Set.of("7", "8");
 
-    private static final DateTimeFormatter SERVICENOW_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final String INCIDENT_FIELDS = "sys_id,number,short_description,description,state,assignment_group,"
-            + "assigned_to,caller_id,correlation_id,correlation_display,sys_created_on,sys_updated_on";
-    /**
-     * How much of each journal field is kept, newest first: enough for every note of a working incident, while a
-     * long-lived incident's history cannot flood the agent.
-     */
-    private static final int MAX_JOURNAL_LENGTH = 20_000;
     private static final int PAGE_SIZE = 100;
     private static final Pattern SYS_ID = Pattern.compile("[A-Za-z0-9-]+");
 
@@ -73,6 +62,35 @@ class ServiceNowClient {
         boolean isAssigned() {
             return assignedToSysId != null && !assignedToSysId.isBlank();
         }
+
+        /** Resolved, closed or cancelled: the incident needs nothing more. */
+        boolean isFinished() {
+            return STATES_FINISHED.contains(state);
+        }
+
+        /** Closed or cancelled: unlike a resolved incident, it can no longer be reopened. */
+        boolean isFinal() {
+            return STATES_FINAL.contains(state);
+        }
+
+        /**
+         * Still the agent's claim: assigned to the integration user, in progress, and in the agent's group. A person who
+         * moved the incident to another group has it, even if they left it assigned to the agent.
+         */
+        boolean isClaimedBy(String integrationUserSysId, String agentGroup) {
+            return integrationUserSysId.equals(assignedToSysId) && STATE_IN_PROGRESS.equals(state)
+                    && agentGroup.equals(assignmentGroup);
+        }
+
+        /** The order the incident names now, in its Correlation ID; null when it names none. */
+        UUID linkedOrder() {
+            return TableApiRows.idOrNull(orderId);
+        }
+
+        /** The case the incident was opened for; null for an incident the service desk raised. */
+        UUID openedForCase() {
+            return TableApiRows.idOrNull(caseId);
+        }
     }
 
     /**
@@ -99,13 +117,13 @@ class ServiceNowClient {
         JsonNode body = restClient.post()
                 .uri(uri -> uri.path("/api/now/table/incident")
                         .queryParam("sysparm_input_display_value", true)
-                        .queryParam("sysparm_fields", INCIDENT_FIELDS)
+                        .queryParam("sysparm_fields", TableApiRows.INCIDENT_FIELDS)
                         .queryParam("sysparm_display_value", "all")
                         .build())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(fields)
                 .retrieve().body(JsonNode.class);
-        return incidentOf(body.path("result"));
+        return TableApiRows.incidentOf(body.path("result"));
     }
 
     /** Where a person opens the incident in ServiceNow. */
@@ -168,14 +186,12 @@ class ServiceNowClient {
      * contain a line that looks like another entry's heading.
      */
     Journal journalOf(String incidentSysId) {
-        JsonNode incident = journalFieldsOf(incidentSysId);
-        return new Journal(newest(incident.path("work_notes").asString("")),
-                newest(incident.path("comments").asString("")));
+        return TableApiRows.journalOf(journalFieldsOf(incidentSysId));
     }
 
     /** All of the incident's work notes as shown, not cut like {@link #journalOf}: for finding what was sent before. */
     String allWorkNotesOf(String incidentSysId) {
-        return journalFieldsOf(incidentSysId).path("work_notes").asString("");
+        return TableApiRows.allWorkNotesOf(journalFieldsOf(incidentSysId));
     }
 
     private JsonNode journalFieldsOf(String incidentSysId) {
@@ -187,14 +203,7 @@ class ServiceNowClient {
                         .queryParam("sysparm_limit", 1)
                         .build())
                 .retrieve().body(JsonNode.class);
-        return body.path("result").path(0);
-    }
-
-    /** The newest part of a journal field: it is shown newest first, so older entries are cut from the end. */
-    private static String newest(String shown) {
-        String journal = shown.strip();
-        return journal.length() <= MAX_JOURNAL_LENGTH ? journal
-                : journal.substring(0, MAX_JOURNAL_LENGTH) + "\n[Older entries left out.]";
+        return TableApiRows.firstRowOf(body);
     }
 
     /** Updates fields of an incident with their stored values: state codes and sys_ids. */
@@ -228,7 +237,7 @@ class ServiceNowClient {
                             .queryParam("sysparm_limit", 1)
                             .build())
                     .retrieve().body(JsonNode.class);
-            String sysId = body.path("result").path(0).path("sys_id").asString("");
+            String sysId = TableApiRows.firstRowOf(body).path("sys_id").asString("");
             if (sysId.isBlank()) {
                 throw new IllegalStateException("ServiceNow has no user " + properties.username());
             }
@@ -245,37 +254,12 @@ class ServiceNowClient {
         JsonNode body = restClient.get()
                 .uri(uri -> uri.path("/api/now/table/incident")
                         .queryParam("sysparm_query", encodedQuery)
-                        .queryParam("sysparm_fields", INCIDENT_FIELDS)
+                        .queryParam("sysparm_fields", TableApiRows.INCIDENT_FIELDS)
                         .queryParam("sysparm_display_value", "all")
                         .queryParam("sysparm_limit", limit)
                         .queryParam("sysparm_offset", offset)
                         .build())
                 .retrieve().body(JsonNode.class);
-        List<Incident> incidents = new ArrayList<>();
-        for (JsonNode row : body.path("result")) {
-            incidents.add(incidentOf(row));
-        }
-        return incidents;
-    }
-
-    private static Incident incidentOf(JsonNode row) {
-        return new Incident(value(row, "sys_id"), value(row, "number"), value(row, "short_description"),
-                value(row, "description"), value(row, "state"), display(row, "state"), display(row, "assignment_group"),
-                value(row, "assigned_to"), display(row, "assigned_to"), display(row, "caller_id"),
-                value(row, "correlation_id").strip(), value(row, "correlation_display").strip(),
-                utc(value(row, "sys_created_on")), utc(value(row, "sys_updated_on")));
-    }
-
-    private static String value(JsonNode row, String field) {
-        return row.path(field).path("value").asString("");
-    }
-
-    private static String display(JsonNode row, String field) {
-        return row.path(field).path("display_value").asString("");
-    }
-
-    /** ServiceNow stores times in UTC as {@code yyyy-MM-dd HH:mm:ss}. */
-    private static Instant utc(String serviceNowTime) {
-        return serviceNowTime.isBlank() ? null : LocalDateTime.parse(serviceNowTime, SERVICENOW_TIME).toInstant(ZoneOffset.UTC);
+        return TableApiRows.incidentsOf(body);
     }
 }

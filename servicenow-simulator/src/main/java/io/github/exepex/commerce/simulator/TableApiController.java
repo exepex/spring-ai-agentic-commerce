@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -26,15 +27,11 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
  * as a real instance shows them; their journal rows are not readable, as for an integration user on a real instance.
  */
 @RestController
+@RequiredArgsConstructor
 class TableApiController {
 
     private final Tables tables;
     private final SimulatorProperties properties;
-
-    TableApiController(Tables tables, SimulatorProperties properties) {
-        this.tables = tables;
-        this.properties = properties;
-    }
 
     @GetMapping("/api/now/table/{table}")
     Map<String, Object> query(@PathVariable String table,
@@ -90,7 +87,7 @@ class TableApiController {
     private String link(String field, String sysId) {
         return ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/api/now/table/{table}/{sysId}")
-                .buildAndExpand(tables.referencedTable(field), sysId)
+                .buildAndExpand(TableFields.referencedTable(field), sysId)
                 .toUriString();
     }
 
@@ -100,9 +97,9 @@ class TableApiController {
         Map<String, Object> rendered = new LinkedHashMap<>();
         for (String field : shown) {
             String value = row.getOrDefault(field, "");
-            String display = tables.isJournal(table, field) ? tables.journalShown(row.get("sys_id"), field)
+            String display = TableFields.isJournal(table, field) ? tables.journalShown(row.get("sys_id"), field)
                     : tables.displayValue(table, field, value);
-            boolean reference = tables.isReference(table, field) && !value.isEmpty();
+            boolean reference = TableFields.isReference(table, field) && !value.isEmpty();
             rendered.put(field, switch (displayValue) {
                 case "all" -> reference ? Map.of("value", value, "display_value", display, "link", link(field, value))
                         : Map.of("value", value, "display_value", display);
