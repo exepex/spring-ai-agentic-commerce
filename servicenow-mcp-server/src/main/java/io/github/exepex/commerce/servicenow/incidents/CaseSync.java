@@ -60,8 +60,10 @@ class CaseSync {
     }
 
     /**
-     * Sends the notes as work notes. An incident already resolved gets none: nobody reads it any more. The shop learns
-     * of the resolution from the read-back and opens a new case for the notes that did not reach it.
+     * Sends the notes as work notes, each ending with its {@link #markerOf marker}. A note whose marker the incident
+     * already shows was applied before, though ServiceNow's answer or the shop's confirmation was lost: it is only
+     * marked sent, so a retry never adds it twice. An incident already resolved gets none: nobody reads it any more.
+     * The shop learns of the resolution from the read-back and opens a new case for the notes that did not reach it.
      */
     private void sendNotes(GovernanceApi.Case supportCase, String number, List<GovernanceApi.Note> notes) {
         ServiceNowClient.Incident incident = serviceNow.findByNumber(number)
@@ -69,10 +71,18 @@ class CaseSync {
         if (ServiceNowClient.STATES_FINISHED.contains(incident.state())) {
             return;
         }
+        String workNotes = serviceNow.journalOf(incident.sysId()).workNotes();
         for (GovernanceApi.Note note : notes) {
-            serviceNow.update(incident.sysId(), Map.of("work_notes", note.text()));
+            if (!workNotes.contains(markerOf(note))) {
+                serviceNow.update(incident.sysId(), Map.of("work_notes", note.text() + "\n\n" + markerOf(note)));
+            }
             governance.markNoteSent(authorization(), supportCase.id(), note.id());
         }
+    }
+
+    /** The line that ends a case note's work note, so the incident shows which notes it already holds. */
+    private static String markerOf(GovernanceApi.Note note) {
+        return "[shop note " + note.id() + "]";
     }
 
     /** Reads who has each case's incident now and tells the shop. An incident that cannot be read is tried next poll. */
