@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -39,6 +40,7 @@ class ServiceNowClient {
      */
     private static final int MAX_JOURNAL_LENGTH = 20_000;
     private static final int PAGE_SIZE = 100;
+    private static final Pattern SYS_ID = Pattern.compile("[A-Za-z0-9-]+");
 
     private final ServiceNowProperties properties;
     private final RestClient restClient;
@@ -106,7 +108,28 @@ class ServiceNowClient {
 
     /** Where a person opens the incident in ServiceNow. */
     String linkTo(Incident incident) {
-        return properties.instanceUrl().replaceAll("/+$", "") + "/incident.do?sys_id=" + incident.sysId();
+        return linkPrefix() + incident.sysId();
+    }
+
+    /**
+     * The incident a link from {@link #linkTo} points at, read by its sys_id. A link to another instance, such as one an
+     * earlier simulator run handed out, points at none of this instance's incidents, whatever its number: numbers
+     * repeat across instances.
+     */
+    Optional<Incident> findLinked(String link) {
+        if (link == null || !link.startsWith(linkPrefix())) {
+            return Optional.empty();
+        }
+        String sysId = link.substring(linkPrefix().length());
+        // Only a plain id goes into the query: anything else in a link could add terms of its own.
+        if (!SYS_ID.matcher(sysId).matches()) {
+            return Optional.empty();
+        }
+        return query("sys_id=" + sysId, 1).stream().findFirst();
+    }
+
+    private String linkPrefix() {
+        return properties.instanceUrl().replaceAll("/+$", "") + "/incident.do?sys_id=";
     }
 
     /** New incidents in the agent's group that nobody has taken yet. */

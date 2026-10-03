@@ -19,6 +19,7 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder;
 import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
@@ -37,6 +38,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -438,7 +441,7 @@ class ServiceNowMcpServerIntegrationTest {
         String noteId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okCases("""
                 [{"supportCase": {"id": "%s", "orderId": "%s", "type": "STOCK_OUT", "status": "PENDING",
                   "title": "[STOCK_OUT] Order 6f0c2b8e can no longer be fulfilled", "description": "Water damage.",
                   "raisedBy": "catalog-service", "incidentNumber": null, "createdAt": "2026-10-02T09:15:00Z"},
@@ -477,7 +480,7 @@ class ServiceNowMcpServerIntegrationTest {
         String noteId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okCases("""
                 [{"supportCase": {"id": "%s", "type": "STOCK_OUT", "status": "WITH_AGENT", "incidentNumber": "INC0010009"},
                   "unsentNotes": [{"id": "%s", "text": "Raised again by the catalog."}]}]"""
                 .formatted(caseId, noteId))));
@@ -499,7 +502,7 @@ class ServiceNowMcpServerIntegrationTest {
         String noteId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okCases("""
                 [{"supportCase": {"id": "%s", "type": "STOCK_OUT", "status": "WITH_AGENT", "incidentNumber": "INC0010009"},
                   "unsentNotes": [{"id": "%s", "text": "Raised again by the catalog."}]}]"""
                 .formatted(caseId, noteId))));
@@ -522,7 +525,7 @@ class ServiceNowMcpServerIntegrationTest {
         String noteId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okCases("""
                 [{"supportCase": {"id": "%s", "type": "STOCK_OUT", "status": "WITH_AGENT", "incidentNumber": "INC0010009"},
                   "unsentNotes": [{"id": "%s", "text": "%s"}]}]"""
                 .formatted(caseId, noteId, "y".repeat(4_000)))));
@@ -542,7 +545,7 @@ class ServiceNowMcpServerIntegrationTest {
         String caseId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okCases("""
                 [{"supportCase": {"id": "%s", "orderId": null, "type": "HANDOFF", "status": "PENDING",
                   "title": "[HANDOFF] A request needs a person", "description": "Help."}, "unsentNotes": []}]"""
                 .formatted(caseId))));
@@ -559,6 +562,31 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void aCaseWhoseIncidentIsOnAnotherInstanceIsLeftAloneThoughThisInstanceHasAnIncidentWithItsNumber() {
+        String caseId = UUID.randomUUID().toString();
+        String noteId = UUID.randomUUID().toString();
+        // Opened on an earlier simulator run, which numbered its incidents from INC0010001 too.
+        String elsewhere = """
+                {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010030",
+                 "incidentUrl": "http://localhost:1/incident.do?sys_id=sys-30"}""".formatted(caseId);
+        stubNewIncidents("[]");
+        stubClaimed("[]");
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+                [{"supportCase": %s, "unsentNotes": [{"id": "%s", "text": "The customer called again."}]}]"""
+                .formatted(elsewhere, noteId))));
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("[" + elsewhere + "]")));
+        stubIncident("INC0010030", "sys-31", "2", "Payments", "", "", Instant.now());
+        stubJournal("sys-31", "{\"result\": [{\"work_notes\": \"\", \"comments\": \"\"}]}");
+        SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-31")).willReturn(okJson("{\"result\": {}}")));
+
+        poller.poll();
+
+        SERVICES.verify(0, postRequestedFor(urlEqualTo("/api/agent/cases/" + caseId + "/incident-state")));
+        SERVICES.verify(0, postRequestedFor(urlPathMatching("/api/agent/cases/" + caseId + "/notes/.*")));
+        SERVICES.verify(0, patchRequestedFor(urlPathMatching("/api/now/table/incident/.*")));
+    }
+
+    @Test
     void readsBackWhoHasEachCasesIncident() {
         String withAgent = UUID.randomUUID().toString();
         String withTeam = UUID.randomUUID().toString();
@@ -567,7 +595,7 @@ class ServiceNowMcpServerIntegrationTest {
         String onHold = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okCases("""
                 [{"id": "%s", "incidentNumber": "INC0010011"}, {"id": "%s", "incidentNumber": "INC0010012"},
                  {"id": "%s", "incidentNumber": "INC0010013"}, {"id": "%s", "incidentNumber": "INC0010014"},
                  {"id": "%s", "incidentNumber": "INC0010016"}]"""
@@ -602,7 +630,7 @@ class ServiceNowMcpServerIntegrationTest {
         String caseId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okCases("""
                 [{"supportCase": {"id": "%s", "type": "HANDOFF", "status": "PENDING", "title": "[HANDOFF] A request needs a person",
                   "description": "Carried over from the escalation queue.", "forPeople": true}, "unsentNotes": []}]"""
                 .formatted(caseId))));
@@ -624,34 +652,38 @@ class ServiceNowMcpServerIntegrationTest {
         String noteId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okCases("""
                 [{"supportCase": {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010016"},
                   "unsentNotes": [{"id": "%s", "text": "The customer called again."}]}]"""
                 .formatted(caseId, noteId))));
-        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okCases("""
                 [{"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010016"}]"""
                 .formatted(caseId))));
         // ServiceNow applies the note, but its answer is lost; meanwhile a person resolves the incident.
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
                 .whenScenarioStateIs(Scenario.STARTED)
-                .withQueryParam("sysparm_query", equalTo("number=INC0010016"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-16"))
+                .withQueryParam("sysparm_display_value", equalTo("all"))
                 .willReturn(okJson("{\"result\": [" + incidentRow("INC0010016", "sys-16", "2", "Online Shop Agent",
                         AGENT_USER, caseId, Instant.now()) + "]}")));
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
                 .whenScenarioStateIs(Scenario.STARTED)
                 .withQueryParam("sysparm_query", equalTo("sys_id=sys-16"))
+                .withQueryParam("sysparm_display_value", equalTo("true"))
                 .willReturn(okJson("{\"result\": [{\"work_notes\": \"\", \"comments\": \"\"}]}")));
         SERVICES.stubFor(patch(urlPathEqualTo("/api/now/table/incident/sys-16")).inScenario("lost answer")
                 .whenScenarioStateIs(Scenario.STARTED).willSetStateTo("resolved")
                 .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
                 .whenScenarioStateIs("resolved")
-                .withQueryParam("sysparm_query", equalTo("number=INC0010016"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=sys-16"))
+                .withQueryParam("sysparm_display_value", equalTo("all"))
                 .willReturn(okJson("{\"result\": [" + incidentRow("INC0010016", "sys-16", "6", "Online Shop Agent",
                         AGENT_USER, caseId, Instant.now()) + "]}")));
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident")).inScenario("lost answer")
                 .whenScenarioStateIs("resolved")
                 .withQueryParam("sysparm_query", equalTo("sys_id=sys-16"))
+                .withQueryParam("sysparm_display_value", equalTo("true"))
                 .willReturn(okJson("""
                         {"result": [{"work_notes": "2026-10-02 02:05:00 - Trailhead Agent (Work notes)\\nThe customer called again.\\n\\n[shop note %s]\\n\\n",
                                      "comments": ""}]}""".formatted(noteId))));
@@ -678,7 +710,7 @@ class ServiceNowMcpServerIntegrationTest {
         stubNewIncidents("[]");
         stubClaimed("[]");
         SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(aResponse().withStatus(503)));
-        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okCases("""
                 [{"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010017"},
                  {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010018"}]"""
                 .formatted(takenCase, resolvedCase))));
@@ -699,7 +731,7 @@ class ServiceNowMcpServerIntegrationTest {
         String newNoteId = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
-        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okJson("""
+        SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(okCases("""
                 [{"supportCase": {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010015"},
                   "unsentNotes": [{"id": "%s", "text": "The customer wrote."}, {"id": "%s", "text": "The customer called again."}]}]"""
                 .formatted(caseId, appliedNoteId, newNoteId))));
@@ -749,12 +781,27 @@ class ServiceNowMcpServerIntegrationTest {
         stubIncident("INC0010001", "sys-1", state, "Online Shop Agent", assignedTo, "", updatedAt);
     }
 
+    /** The incident, found by its number, as the tools and the claim find it, and by its link, as a case finds it. */
     private void stubIncident(String number, String sysId, String state, String group, String assignedTo, String caseId,
             Instant updatedAt) {
+        String found = "{\"result\": [" + incidentRow(number, sysId, state, group, assignedTo, caseId, updatedAt) + "]}";
         SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
                 .withQueryParam("sysparm_query", equalTo("number=" + number))
-                .willReturn(okJson("{\"result\": [" + incidentRow(number, sysId, state, group, assignedTo, caseId, updatedAt)
-                        + "]}")));
+                .willReturn(okJson(found)));
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("sys_id=" + sysId))
+                .withQueryParam("sysparm_display_value", equalTo("all"))
+                .willReturn(okJson(found)));
+    }
+
+    /**
+     * The shop's cases as it lists them, each linked to its incident on this instance the way the poller links it. The
+     * tests number a case's incident INC00100NN and give it the sys_id sys-NN.
+     */
+    private static ResponseDefinitionBuilder okCases(String cases) {
+        return okJson(Pattern.compile("\"incidentNumber\": \"INC00100(\\d\\d)\"").matcher(cases).replaceAll(number ->
+                Matcher.quoteReplacement(number.group() + ", \"incidentUrl\": \"" + SERVICES.baseUrl()
+                        + "/incident.do?sys_id=sys-" + Integer.parseInt(number.group(1)) + "\"")));
     }
 
     private static String incidentRow(String number, String sysId, String state, String group, String assignedTo,

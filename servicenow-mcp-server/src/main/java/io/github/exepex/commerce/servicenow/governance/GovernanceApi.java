@@ -19,11 +19,12 @@ public interface GovernanceApi {
     record ToolCall(UUID orderId, String action, String outcome, String summary, String details) {}
 
     /**
-     * A shop case; {@code incidentNumber} is empty until its incident is opened. {@code forPeople} means its incident
-     * goes straight to the default team, not to the agent; missing means no.
+     * A shop case; {@code incidentNumber} and {@code incidentUrl} are empty until its incident is opened. The link, not
+     * the number, says which incident it is: numbers repeat across instances. {@code forPeople} means its incident goes
+     * straight to the default team, not to the agent; missing means no.
      */
     record Case(UUID id, UUID orderId, String type, String status, String title, String description,
-            String incidentNumber, String assignmentGroup, Boolean forPeople) {
+            String incidentNumber, String incidentUrl, String assignmentGroup, Boolean forPeople) {
 
         public boolean isForPeople() {
             return Boolean.TRUE.equals(forPeople);
