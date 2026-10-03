@@ -283,9 +283,10 @@ public class CaseService {
         }
         Instant now = Instant.now(clock);
         if (supportCase.getType() == CaseType.SERVICE_DESK && incidentOrderId == null) {
-            if (supportCase.getStatus() != SupportCase.Status.RESOLVED
-                    && supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, false,
-                            now)) {
+            // Followed even while resolved, so that the case learns when its incident becomes final.
+            boolean wasOpen = supportCase.getStatus() != SupportCase.Status.RESOLVED;
+            if (supportCase.followIncident(SupportCase.Status.RESOLVED, assignmentGroup, incidentFinal, false, now)
+                    && wasOpen) {
                 audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
                         AuditEvent.Outcome.SUCCEEDED, number + " no longer names this order, so its case is closed and "
                                 + "agents may handle the order's money again", null);

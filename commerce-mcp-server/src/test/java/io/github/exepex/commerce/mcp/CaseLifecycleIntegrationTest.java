@@ -520,6 +520,20 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void aServiceDeskCaseFreedFromItsOrderIsNoLongerReadBackOnceItsIncidentIsClosed() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        assertThat(recordServiceDeskIncident(Map.of("orderId", orderId.toString(), "number", "INC0010037",
+                "url", "https://dev.example.com/incident.do?sys_id=sys-37", "shortDescription", "Arrived broken",
+                "status", "WITH_TEAM", "assignmentGroup", "Payments"))).isEqualTo(200);
+        String caseId = JsonPath.read(cases(orderId), "$[0].id");
+        followIncident(caseId, "INC0010037", "WITH_TEAM", "Payments");
+
+        assertThat(followIncident(caseId, "INC0010037", "RESOLVED", "Payments", true)).isEqualTo(200);
+
+        assertThat(inServiceNow()).doesNotContain(caseId);
+    }
+
+    @Test
     void anOrderCanHaveSeveralServiceDeskIncidentsAtOnceEvenWithTheSameNumberOnAnotherInstance() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         Map<String, Object> first = Map.of("orderId", orderId.toString(), "number", "INC0010011",
