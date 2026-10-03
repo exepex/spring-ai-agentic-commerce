@@ -9,6 +9,8 @@ import io.github.exepex.commerce.servicenow.exception.IntegrationUserNotFoundExc
 import io.github.exepex.commerce.servicenow.incidents.dto.Incident;
 import io.github.exepex.commerce.servicenow.incidents.dto.Journal;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -81,15 +83,39 @@ class ServiceNowClient implements IncidentSystem {
     /** Read by the sys_id that ends the link. */
     @Override
     public Optional<Incident> findLinked(String link) {
+        return sysIdOf(link).flatMap(sysId -> query(IncidentQueries.BY_SYS_ID.formatted(sysId), 1).stream().findFirst());
+    }
+
+    /** One request per hundred links, instead of one per link: ServiceNow limits how often an integration may call. */
+    @Override
+    public Map<String, Incident> findAllLinked(List<String> links) {
+        var linkBySysId = new LinkedHashMap<String, String>();
+        for (var link : links) {
+            sysIdOf(link).ifPresent(sysId -> linkBySysId.put(sysId, link));
+        }
+        var sysIds = List.copyOf(linkBySysId.keySet());
+        var found = new HashMap<String, Incident>();
+        for (var from = 0; from < sysIds.size(); from += PAGE_SIZE) {
+            var page = sysIds.subList(from, Math.min(from + PAGE_SIZE, sysIds.size()));
+            var query = IncidentQueries.BY_SYS_IDS.formatted(String.join(IncidentQueries.LIST_SEPARATOR, page));
+            for (var incident : query(query, page.size())) {
+                var link = linkBySysId.get(incident.sysId());
+                if (link != null) {
+                    found.put(link, incident);
+                }
+            }
+        }
+        return found;
+    }
+
+    /** The incident's sys_id in a link to this instance; none for another instance's link or anything else. */
+    private Optional<String> sysIdOf(String link) {
         if (link == null || !link.startsWith(linkPrefix())) {
             return Optional.empty();
         }
         var sysId = link.substring(linkPrefix().length());
-        // Only a plain id goes into the query: anything else in a link could add terms of its own.
-        if (!SYS_ID.matcher(sysId).matches()) {
-            return Optional.empty();
-        }
-        return query(IncidentQueries.BY_SYS_ID.formatted(sysId), 1).stream().findFirst();
+        // Only a plain id goes into a query: anything else in a link could add terms of its own.
+        return SYS_ID.matcher(sysId).matches() ? Optional.of(sysId) : Optional.empty();
     }
 
     private String linkPrefix() {

@@ -9,6 +9,9 @@ public final class IncidentQueries {
 
     public static final String BY_NUMBER = "number=%s";
     public static final String BY_SYS_ID = "sys_id=%s";
+    /** Several incidents at once, by their comma-separated sys_ids. */
+    public static final String BY_SYS_IDS = "sys_idIN%s";
+    public static final String LIST_SEPARATOR = ",";
     public static final String BY_CASE = "correlation_display=%s";
     /** New incidents in a group that nobody has taken yet. */
     public static final String NEW_IN_GROUP = "assignment_group.name=%s^assigned_toISEMPTY^state=" + IncidentStates.NEW;

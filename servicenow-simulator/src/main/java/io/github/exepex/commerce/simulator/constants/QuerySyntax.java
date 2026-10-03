@@ -14,5 +14,7 @@ public final class QuerySyntax {
     public static final String IS_NOT_EMPTY = "ISNOTEMPTY";
     public static final String IS_EMPTY = "ISEMPTY";
     public static final String NOT_IN = "NOT IN";
+    /** A field followed by IN and a list of values: the field is one of them. */
+    public static final String IN = "^([a-z0-9_.]+)IN(.*)$";
     public static final String LIST_SEPARATOR = ",";
 }
