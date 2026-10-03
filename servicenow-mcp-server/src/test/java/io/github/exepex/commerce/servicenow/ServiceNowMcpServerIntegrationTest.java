@@ -612,14 +612,24 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
-    void whileTheCasesToSendCannotBeListedNoIncidentIsReadBack() {
+    void whileTheCasesToSendCannotBeListedOwnersAreReadBackButNoResolution() {
+        String takenCase = UUID.randomUUID().toString();
+        String resolvedCase = UUID.randomUUID().toString();
         stubNewIncidents("[]");
         stubClaimed("[]");
         SERVICES.stubFor(get("/api/agent/cases/outgoing").willReturn(aResponse().withStatus(503)));
+        SERVICES.stubFor(get("/api/agent/cases/in-servicenow").willReturn(okJson("""
+                [{"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010017"},
+                 {"id": "%s", "type": "HANDOFF", "status": "WITH_AGENT", "incidentNumber": "INC0010018"}]"""
+                .formatted(takenCase, resolvedCase))));
+        stubIncident("INC0010017", "sys-17", "2", "Payments", "", takenCase, Instant.now());
+        stubIncident("INC0010018", "sys-18", "6", "Online Shop Agent", "", resolvedCase, Instant.now());
 
         poller.poll();
 
-        SERVICES.verify(0, getRequestedFor(urlEqualTo("/api/agent/cases/in-servicenow")));
+        SERVICES.verify(postRequestedFor(urlEqualTo("/api/agent/cases/" + takenCase + "/incident-state"))
+                .withRequestBody(matchingJsonPath("$.status", equalTo("WITH_TEAM"))));
+        SERVICES.verify(0, postRequestedFor(urlEqualTo("/api/agent/cases/" + resolvedCase + "/incident-state")));
     }
 
     @Test

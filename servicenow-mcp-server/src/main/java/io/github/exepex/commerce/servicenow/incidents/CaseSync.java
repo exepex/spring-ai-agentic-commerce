@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -111,19 +112,20 @@ class CaseSync {
     /**
      * Reads who has each case's incident now and tells the shop. An incident that cannot be read is tried next poll.
      *
-     * <p>The resolution of a case whose sending just failed is reported only next poll: a note may have reached its
-     * incident though ServiceNow's answer was lost, and the shop carries a resolved case's unsent notes over to a new
-     * case. The next poll finds the note's marker on the incident and marks it sent first.
+     * <p>A case's resolution is reported only once its notes are settled: a note may have reached its incident though
+     * ServiceNow's answer was lost, and the shop carries a resolved case's unsent notes over to a new case. The next
+     * poll finds the note's marker on the incident and marks it sent first. Every other change of owner is reported
+     * at once.
      *
-     * @param unsent the cases whose sending failed in this poll
+     * @param notesSettled whether a case's notes are settled, so its resolution may be reported
      */
-    void readBackIncidents(Set<UUID> unsent) {
+    void readBackIncidents(Predicate<UUID> notesSettled) {
         for (GovernanceApi.Case supportCase : governance.casesInServiceNow(authorization())) {
             try {
                 serviceNow.findByNumber(supportCase.incidentNumber()).ifPresentOrElse(
                         incident -> {
                             GovernanceApi.IncidentState state = stateOf(incident);
-                            if (unsent.contains(supportCase.id()) && RESOLVED.equals(state.status())) {
+                            if (RESOLVED.equals(state.status()) && !notesSettled.test(supportCase.id())) {
                                 LOGGER.info("{} is resolved; telling the shop once its notes are settled", incident.number());
                                 return;
                             }
