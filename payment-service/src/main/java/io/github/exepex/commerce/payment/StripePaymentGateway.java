@@ -5,14 +5,13 @@ import com.stripe.exception.CardException;
 import com.stripe.exception.StripeException;
 import com.stripe.model.PaymentIntent;
 import com.stripe.model.Refund;
-import com.stripe.net.RequestOptions;
 import com.stripe.param.PaymentIntentCreateParams;
 import com.stripe.param.RefundCreateParams;
 import java.math.BigDecimal;
 import java.util.Locale;
 
 /** Charges and refunds through Stripe. Use a test-mode key: test cards such as {@code pm_card_visa} move no money. */
-class StripePaymentGateway implements PaymentGateway {
+final class StripePaymentGateway implements PaymentGateway {
 
     private final StripeClient stripe;
 
@@ -29,7 +28,7 @@ class StripePaymentGateway implements PaymentGateway {
     public ChargeResult charge(BigDecimal amount, String currency, String paymentMethod, String description,
             String idempotencyKey) {
         PaymentIntentCreateParams params = PaymentIntentCreateParams.builder()
-                .setAmount(minorUnits(amount))
+                .setAmount(StripeRequests.minorUnits(amount))
                 .setCurrency(currency.toLowerCase(Locale.ROOT))
                 .setPaymentMethod(paymentMethod)
                 // Confirmed on the server, so no customer is present to follow a redirect: allow only methods without one.
@@ -41,15 +40,12 @@ class StripePaymentGateway implements PaymentGateway {
                 .setDescription(description)
                 .build();
         try {
-            PaymentIntent intent = stripe.v1().paymentIntents().create(params, idempotent(idempotencyKey));
+            PaymentIntent intent = stripe.v1().paymentIntents().create(params, StripeRequests.idempotent(idempotencyKey));
             return "succeeded".equals(intent.getStatus())
                     ? ChargeResult.succeeded(intent.getId())
                     : ChargeResult.declined(intent.getId(), "Payment ended in status " + intent.getStatus());
         } catch (CardException declined) {
-            String reference = declined.getStripeError() != null && declined.getStripeError().getPaymentIntent() != null
-                    ? declined.getStripeError().getPaymentIntent().getId()
-                    : null;
-            return ChargeResult.declined(reference, declined.getUserMessage());
+            return ChargeResult.declined(StripeRequests.declinedPaymentIntent(declined), declined.getUserMessage());
         } catch (StripeException failure) {
             throw new PaymentProviderUnavailableException(failure);
         }
@@ -59,11 +55,11 @@ class StripePaymentGateway implements PaymentGateway {
     public RefundResult refund(String chargeReference, BigDecimal amount, String idempotencyKey) {
         RefundCreateParams params = RefundCreateParams.builder()
                 .setPaymentIntent(chargeReference)
-                .setAmount(minorUnits(amount))
+                .setAmount(StripeRequests.minorUnits(amount))
                 .setReason(RefundCreateParams.Reason.REQUESTED_BY_CUSTOMER)
                 .build();
         try {
-            Refund refund = stripe.v1().refunds().create(params, idempotent(idempotencyKey));
+            Refund refund = stripe.v1().refunds().create(params, StripeRequests.idempotent(idempotencyKey));
             RefundStatus status = statusOf(refund.getStatus());
             if (status == RefundStatus.FAILED) {
                 throw PaymentProblems.refundNotCompleted(refund.getStatus());
@@ -93,13 +89,5 @@ class StripePaymentGateway implements PaymentGateway {
             case "failed", "canceled" -> RefundStatus.FAILED;
             default -> RefundStatus.PENDING;
         };
-    }
-
-    private static long minorUnits(BigDecimal amount) {
-        return amount.movePointRight(2).longValueExact();
-    }
-
-    private static RequestOptions idempotent(String idempotencyKey) {
-        return RequestOptions.builder().setIdempotencyKey(idempotencyKey).build();
     }
 }

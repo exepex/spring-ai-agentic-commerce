@@ -1,5 +1,8 @@
 package io.github.exepex.commerce.payment;
 
+import io.github.exepex.commerce.payment.PaymentViews.OutageView;
+import io.github.exepex.commerce.payment.PaymentViews.PaymentView;
+import io.github.exepex.commerce.payment.PaymentViews.RefundView;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -7,9 +10,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
-import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
+@RequiredArgsConstructor
 class PaymentController {
 
     record ChargeRequest(@NotNull UUID orderId, @NotBlank @Email String customerEmail, @NotNull @Positive BigDecimal amount,
@@ -33,39 +36,19 @@ class PaymentController {
 
     record OutageRequest(boolean active) {}
 
-    record OutageView(boolean active) {}
-
-    record RefundView(UUID id, BigDecimal amount, String reason, String idempotencyKey, String providerReference,
-            String status, Instant createdAt) {
-
-        static RefundView of(Refund refund) {
-            return new RefundView(refund.getId(), refund.getAmount(), refund.getReason(), refund.getIdempotencyKey(),
-                    refund.getProviderReference(), refund.getStatus().name(), refund.getCreatedAt());
-        }
-    }
-
-    record PaymentView(UUID id, UUID orderId, String customerEmail, BigDecimal amount, BigDecimal refundedAmount,
-            BigDecimal refundable, String currency, String status, String provider, String providerReference,
-            String failureMessage, Instant createdAt, List<RefundView> refunds) {}
-
     private final PaymentService paymentService;
     private final SimulatedOutage outage;
-
-    PaymentController(PaymentService paymentService, SimulatedOutage outage) {
-        this.paymentService = paymentService;
-        this.outage = outage;
-    }
 
     /** Answers 201 when the card was charged and 402 with the processor's message when it was declined. */
     @PostMapping("/api/payments")
     ResponseEntity<?> charge(@Valid @RequestBody ChargeRequest request) {
         Payment payment = paymentService.charge(request.orderId(), request.customerEmail(), request.amount(),
                 request.currency(), request.paymentMethod());
-        if (payment.getStatus() == Payment.Status.DECLINED) {
-            return ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
+        return switch (payment.getStatus()) {
+            case DECLINED -> ResponseEntity.status(HttpStatus.PAYMENT_REQUIRED)
                     .body(ProblemDetail.forStatusAndDetail(HttpStatus.PAYMENT_REQUIRED, payment.getFailureMessage()));
-        }
-        return ResponseEntity.status(HttpStatus.CREATED).body(view(payment));
+            case SUCCEEDED -> ResponseEntity.status(HttpStatus.CREATED).body(view(payment));
+        };
     }
 
     @GetMapping("/api/payments/{orderId}")
@@ -76,7 +59,8 @@ class PaymentController {
     @PostMapping("/api/payments/{orderId}/refunds")
     @ResponseStatus(HttpStatus.CREATED)
     RefundView refund(@PathVariable UUID orderId, @Valid @RequestBody RefundRequest request) {
-        return RefundView.of(paymentService.refund(orderId, request.amount(), request.reason(), request.idempotencyKey()));
+        return PaymentViews.toView(paymentService.refund(orderId, request.amount(), request.reason(),
+                request.idempotencyKey()));
     }
 
     @GetMapping("/api/admin/simulated-outage")
@@ -91,9 +75,6 @@ class PaymentController {
     }
 
     private PaymentView view(Payment payment) {
-        return new PaymentView(payment.getId(), payment.getOrderId(), payment.getCustomerEmail(), payment.getAmount(),
-                payment.getRefundedAmount(), payment.refundable(), payment.getCurrency(), payment.getStatus().name(),
-                payment.getProvider(), payment.getProviderReference(), payment.getFailureMessage(),
-                payment.getCreatedAt(), paymentService.refundsOf(payment).stream().map(RefundView::of).toList());
+        return PaymentViews.toView(payment, paymentService.refundsOf(payment));
     }
 }

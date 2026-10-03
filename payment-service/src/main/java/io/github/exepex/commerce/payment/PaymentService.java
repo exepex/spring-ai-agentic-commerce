@@ -4,12 +4,13 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@RequiredArgsConstructor
 public class PaymentService {
 
     private final PaymentRepository payments;
@@ -17,28 +18,21 @@ public class PaymentService {
     private final PaymentGateway gateway;
     private final Clock clock;
 
-    PaymentService(PaymentRepository payments, RefundRepository refunds, PaymentGateway gateway, Clock clock) {
-        this.payments = payments;
-        this.refunds = refunds;
-        this.gateway = gateway;
-        this.clock = clock;
-    }
-
     /** Charges the order once. Asking again for the same order returns the first result instead of charging again. */
     public Payment charge(UUID orderId, String customerEmail, BigDecimal amount, String currency, String paymentMethod) {
-        Optional<Payment> existing = payments.findByOrderId(orderId);
-        if (existing.isPresent()) {
-            Payment earlier = existing.get();
-            if (earlier.getAmount().compareTo(amount) != 0 || !earlier.getCurrency().equals(currency)
-                    || !earlier.getCustomerEmail().equalsIgnoreCase(customerEmail)) {
-                throw PaymentProblems.chargeConflicts(orderId);
-            }
-            return earlier;
-        }
-        PaymentGateway.ChargeResult charge = gateway.charge(amount, currency, paymentMethod,
-                "Order " + orderId, "charge-" + orderId);
-        return payments.save(new Payment(orderId, customerEmail, amount, currency, gateway.name(), charge,
-                Instant.now(clock)));
+        return payments.findByOrderId(orderId)
+                .map(earlier -> {
+                    if (!earlier.isSameChargeAs(customerEmail, amount, currency)) {
+                        throw PaymentProblems.chargeConflicts(orderId);
+                    }
+                    return earlier;
+                })
+                .orElseGet(() -> {
+                    PaymentGateway.ChargeResult charge = gateway.charge(amount, currency, paymentMethod,
+                            "Order " + orderId, "charge-" + orderId);
+                    return payments.save(new Payment(orderId, customerEmail, amount, currency, gateway.name(), charge,
+                            Instant.now(clock)));
+                });
     }
 
     public Payment getPayment(UUID orderId) {
@@ -59,16 +53,9 @@ public class PaymentService {
     public Refund refund(UUID orderId, BigDecimal amount, String reason, String idempotencyKey) {
         Payment payment = payments.findByOrderIdForUpdate(orderId)
                 .orElseThrow(() -> PaymentProblems.paymentNotFound(orderId));
-        Optional<Refund> earlier = refunds.findByIdempotencyKey(idempotencyKey);
+        var earlier = refunds.findByIdempotencyKey(idempotencyKey);
         if (earlier.isPresent()) {
-            Refund refund = earlier.get();
-            if (!refund.getPaymentId().equals(payment.getId()) || refund.getAmount().compareTo(amount) != 0) {
-                throw PaymentProblems.idempotencyKeyReused(idempotencyKey);
-            }
-            if (refund.getStatus() == PaymentGateway.RefundStatus.FAILED) {
-                throw PaymentProblems.refundNotCompleted("failed");
-            }
-            return refund;
+            return repeated(earlier.get(), payment, amount, idempotencyKey);
         }
         if (amount.compareTo(payment.refundable()) > 0) {
             throw PaymentProblems.refundExceedsPayment(amount, payment.refundable());
@@ -76,5 +63,15 @@ public class PaymentService {
         PaymentGateway.RefundResult result = gateway.refund(payment.getProviderReference(), amount, idempotencyKey);
         payment.recordRefund(amount);
         return refunds.save(new Refund(payment.getId(), amount, reason, idempotencyKey, result, Instant.now(clock)));
+    }
+
+    private static Refund repeated(Refund refund, Payment payment, BigDecimal amount, String idempotencyKey) {
+        if (!refund.isSameRefundAs(payment.getId(), amount)) {
+            throw PaymentProblems.idempotencyKeyReused(idempotencyKey);
+        }
+        if (refund.getStatus() == PaymentGateway.RefundStatus.FAILED) {
+            throw PaymentProblems.refundNotCompleted("failed");
+        }
+        return refund;
     }
 }

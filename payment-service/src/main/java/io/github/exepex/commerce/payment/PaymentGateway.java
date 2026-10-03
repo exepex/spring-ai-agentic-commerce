@@ -3,7 +3,7 @@ package io.github.exepex.commerce.payment;
 import java.math.BigDecimal;
 
 /** The card processor. Every call carries an idempotency key, so a retried request never charges or refunds twice. */
-interface PaymentGateway {
+sealed interface PaymentGateway permits SimulatedPaymentGateway, StripePaymentGateway {
 
     record ChargeResult(boolean succeeded, String reference, String failureMessage) {
 

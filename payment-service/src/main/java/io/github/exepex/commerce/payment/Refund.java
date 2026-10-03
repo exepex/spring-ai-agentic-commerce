@@ -8,8 +8,14 @@ import jakarta.persistence.Id;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
+/** One refund of a payment, and where it stands at the card processor. */
 @Entity
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Refund {
 
     @Id
@@ -37,10 +43,6 @@ public class Refund {
     @Column(name = "created_at")
     private Instant createdAt;
 
-    protected Refund() {
-        // for JPA
-    }
-
     Refund(UUID paymentId, BigDecimal amount, String reason, String idempotencyKey,
             PaymentGateway.RefundResult result, Instant createdAt) {
         this.id = UUID.randomUUID();
@@ -54,42 +56,15 @@ public class Refund {
         this.createdAt = createdAt;
     }
 
+    /** A repeated refund must be of the same payment and for the same amount as the first one. */
+    boolean isSameRefundAs(UUID otherPaymentId, BigDecimal otherAmount) {
+        return paymentId.equals(otherPaymentId) && amount.compareTo(otherAmount) == 0;
+    }
+
     void updateStatus(PaymentGateway.RefundStatus latest, Instant now) {
         if (latest == PaymentGateway.RefundStatus.SUCCEEDED && status != PaymentGateway.RefundStatus.SUCCEEDED) {
             succeededAt = now;
         }
         status = latest;
-    }
-
-    public UUID getId() {
-        return id;
-    }
-
-    public UUID getPaymentId() {
-        return paymentId;
-    }
-
-    public BigDecimal getAmount() {
-        return amount;
-    }
-
-    public String getReason() {
-        return reason;
-    }
-
-    public String getIdempotencyKey() {
-        return idempotencyKey;
-    }
-
-    public String getProviderReference() {
-        return providerReference;
-    }
-
-    public PaymentGateway.RefundStatus getStatus() {
-        return status;
-    }
-
-    public Instant getCreatedAt() {
-        return createdAt;
     }
 }

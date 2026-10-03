@@ -2,14 +2,15 @@ package io.github.exepex.commerce.payment;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.ErrorResponseException;
 
 /** The payment-service's error responses, as RFC 9457 problem details. */
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class PaymentProblems {
-
-    private PaymentProblems() {}
 
     static ErrorResponseException paymentNotFound(UUID orderId) {
         return problem(HttpStatus.NOT_FOUND, "Order " + orderId + " has no payment");

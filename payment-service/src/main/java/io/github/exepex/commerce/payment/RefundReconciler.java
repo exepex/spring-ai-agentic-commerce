@@ -3,8 +3,8 @@ package io.github.exepex.commerce.payment;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -19,30 +19,20 @@ import org.springframework.transaction.support.TransactionTemplate;
  * payments the current processor took are checked: after switching between the simulator and Stripe, the other one's
  * refunds are unknown to it. The demo asks instead of receiving Stripe webhooks, so it needs no public URL.
  */
+@Slf4j
 @Component
+@RequiredArgsConstructor
 class RefundReconciler {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(RefundReconciler.class);
 
     private final RefundRepository refunds;
     private final PaymentRepository payments;
     private final PaymentGateway gateway;
     private final TransactionTemplate transaction;
     private final ApplicationEventPublisher events;
-    private final Duration watch;
     private final Clock clock;
 
-    RefundReconciler(RefundRepository refunds, PaymentRepository payments, PaymentGateway gateway,
-            TransactionTemplate transaction, ApplicationEventPublisher events,
-            @Value("${commerce.payments.refund-check.watch}") Duration watch, Clock clock) {
-        this.refunds = refunds;
-        this.payments = payments;
-        this.gateway = gateway;
-        this.transaction = transaction;
-        this.events = events;
-        this.watch = watch;
-        this.clock = clock;
-    }
+    @Value("${commerce.payments.refund-check.watch}")
+    private final Duration watch;
 
     @Scheduled(fixedDelayString = "${commerce.payments.refund-check.interval}",
             initialDelayString = "${commerce.payments.refund-check.interval}")
@@ -54,7 +44,7 @@ class RefundReconciler {
                     record(refund, latest);
                 }
             } catch (RuntimeException failure) {
-                LOGGER.warn("Could not check refund {} with the card processor; it will be retried", refund.getId(), failure);
+                log.warn("Could not check refund {} with the card processor; it will be retried", refund.getId(), failure);
             }
         }
     }
@@ -70,7 +60,7 @@ class RefundReconciler {
             if (latest == PaymentGateway.RefundStatus.FAILED) {
                 payment.reverseRefund(current.getAmount());
                 events.publishEvent(RefundFailedEvent.of(payment, current, Instant.now(clock)));
-                LOGGER.warn("Refund {} of {} {} failed at the card processor; no money was returned",
+                log.warn("Refund {} of {} {} failed at the card processor; no money was returned",
                         current.getId(), current.getAmount(), payment.getCurrency());
             }
             current.updateStatus(latest, Instant.now(clock));
