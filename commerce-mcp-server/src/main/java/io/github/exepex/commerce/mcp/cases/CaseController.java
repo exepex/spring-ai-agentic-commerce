@@ -50,10 +50,11 @@ class CaseController {
 
     /**
      * Who has a case's incident now. {@code number} is the incident the state was read from; it must be the case's own.
-     * {@code incidentFinal} means a resolved one is closed or cancelled.
+     * {@code incidentFinal} means a resolved one is closed or cancelled, and {@code orderId} is the order the incident
+     * names now, if any.
      */
     record IncidentState(@NotBlank @Size(max = 40) String number, @NotNull SupportCase.Status status,
-            @Size(max = 200) String assignmentGroup, boolean incidentFinal) {}
+            @Size(max = 200) String assignmentGroup, boolean incidentFinal, UUID orderId) {}
 
     /** An incident the service desk raised about an order, as the poller found it; see {@link CaseType#SERVICE_DESK}. */
     record ServiceDeskIncident(@NotNull UUID orderId, @NotBlank @Size(max = 40) String number,
@@ -119,7 +120,7 @@ class CaseController {
             @PathVariable UUID caseId, @Valid @RequestBody IncidentState state) {
         ensureWorker(agentId);
         return CaseView.of(cases.followIncident(caseId, state.number(), state.status(), state.assignmentGroup(),
-                state.incidentFinal()));
+                state.incidentFinal(), state.orderId()));
     }
 
     private void ensureWorker(String agentId) {

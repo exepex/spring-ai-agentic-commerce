@@ -199,7 +199,8 @@ class CaseSync {
             return;
         }
         try {
-            report(caseId, new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, group, false));
+            report(caseId, new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, group, false,
+                    uuidOrNull(incident.orderId())));
         } catch (RuntimeException failure) {
             LOGGER.warn("Could not tell the shop that {} went to {}; the next poll will", incident.number(), group, failure);
         }
@@ -225,9 +226,10 @@ class CaseSync {
     }
 
     private GovernanceApi.IncidentState stateOf(ServiceNowClient.Incident incident) {
+        UUID orderId = uuidOrNull(incident.orderId());
         if (ServiceNowClient.STATES_FINISHED.contains(incident.state())) {
             return new GovernanceApi.IncidentState(incident.number(), RESOLVED, incident.assignmentGroup(),
-                    ServiceNowClient.STATES_FINAL.contains(incident.state()));
+                    ServiceNowClient.STATES_FINAL.contains(incident.state()), orderId);
         }
         boolean takenByAPerson = incident.isAssigned()
                 && !serviceNow.integrationUserSysId().equals(incident.assignedToSysId());
@@ -236,13 +238,14 @@ class CaseSync {
         boolean workableByTheAgent = ServiceNowClient.STATE_NEW.equals(incident.state())
                 || ServiceNowClient.STATE_IN_PROGRESS.equals(incident.state());
         if (properties.agentGroup().equals(incident.assignmentGroup()) && !takenByAPerson && workableByTheAgent) {
-            return new GovernanceApi.IncidentState(incident.number(), WITH_AGENT, incident.assignmentGroup(), false);
+            return new GovernanceApi.IncidentState(incident.number(), WITH_AGENT, incident.assignmentGroup(), false,
+                    orderId);
         }
         // A person who took the incident has it, even while it is still in the agent's group.
         String group = incident.assignmentGroup().isBlank() ? "no group" : incident.assignmentGroup();
         String owner = takenByAPerson ? group + " (" + incident.assignedTo() + ")"
                 : workableByTheAgent ? group : group + " (" + incident.stateName() + ")";
-        return new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, owner, false);
+        return new GovernanceApi.IncidentState(incident.number(), WITH_TEAM, owner, false, orderId);
     }
 
     private void report(UUID caseId, GovernanceApi.IncidentState state) {
