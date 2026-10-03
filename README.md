@@ -122,7 +122,8 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    raised again adds a work note to its incident. The incident agent works each case first; a failed delivery goes
    to Fulfilment and a failed refund to Payments. The console's **Cases** card shows who has each incident now. While
    a team or a person has one of an order's incidents, agents leave the order's money to them: their refunds are
-   refused. While any case of an order is open, the shopping assistant may not refund it either.
+   refused. While any case of an order is open, the shopping assistant may not refund it either, and the incident
+   agent refunds only for the incident it is working, while the order's other cases have not reached ServiceNow yet.
 8. **Incident from the service desk.** The service desk raises an incident in the agent's assignment group, for example
    "Order arrived broken, the customer wants their money back", with the order's id in the incident's Correlation ID
    field. The incident agent claims it, reads it, checks

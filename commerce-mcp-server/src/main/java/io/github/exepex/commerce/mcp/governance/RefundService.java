@@ -81,9 +81,12 @@ public class RefundService {
         }
     }
 
-    /** Asking again with the same idempotency key returns the first request, retrying it only if it had failed. */
+    /**
+     * Asking again with the same idempotency key returns the first request, retrying it only if it had failed.
+     * {@code incidentNumber} is the incident an incident run is working, for {@link CaseService#ensureAgentMayPay}.
+     */
     public RefundRequest requestRefund(String agentId, UUID orderId, BigDecimal amount, String reason,
-            String idempotencyKey) {
+            String idempotencyKey, String incidentNumber) {
         if (reason != null && reason.length() > MAX_REASON_LENGTH) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
                     "A refund reason can be at most " + MAX_REASON_LENGTH + " characters; say it in one sentence.");
@@ -94,10 +97,10 @@ public class RefundService {
         }
         Optional<RefundRequest> earlier = requests.findByIdempotencyKey(idempotencyKey);
         if (earlier.isPresent()) {
-            return repeat(earlier.get(), orderId, amount, idempotencyKey, agentId);
+            return repeat(earlier.get(), orderId, amount, idempotencyKey, agentId, incidentNumber);
         }
         // An order people are working is theirs: a new refund from an agent could pay out what they are paying back.
-        cases.ensureAgentMayPay(orderId, agentId);
+        cases.ensureAgentMayPay(orderId, agentId, incidentNumber);
         PaymentApi.Payment payment = paymentIfReachable(orderId);
         if (payment != null && amount.compareTo(payment.refundable()) > 0) {
             throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "A refund of " + amount + " "
@@ -128,7 +131,7 @@ public class RefundService {
         });
         RefundRequest request = decided.request();
         if (!decided.isNew()) {
-            return repeat(request, orderId, amount, idempotencyKey, agentId);
+            return repeat(request, orderId, amount, idempotencyKey, agentId, incidentNumber);
         }
         if (request.getStatus() == RefundRequest.Status.PENDING_APPROVAL) {
             audit.record(orderId, AuditEvent.ActorType.AGENT, agentId, "issue_refund", AuditEvent.Outcome.PENDING_APPROVAL,
@@ -204,7 +207,7 @@ public class RefundService {
 
     /** A request with a key seen before returns the first request, retrying it only if it had failed. */
     private RefundRequest repeat(RefundRequest earlier, UUID orderId, BigDecimal amount, String idempotencyKey,
-            String agentId) {
+            String agentId, String incidentNumber) {
         if (!earlier.matches(orderId, amount)) {
             throw new GovernanceException(HttpStatus.CONFLICT, "Idempotency key " + idempotencyKey
                     + " was already used for a different refund. Use a new key for a new refund.");
@@ -218,7 +221,7 @@ public class RefundService {
             return earlier;
         }
         // A failed refund of an order people are working is theirs to retry, not the agent's.
-        cases.ensureAgentMayPay(orderId, agentId);
+        cases.ensureAgentMayPay(orderId, agentId, incidentNumber);
         return execute(earlier, agentId);
     }
 

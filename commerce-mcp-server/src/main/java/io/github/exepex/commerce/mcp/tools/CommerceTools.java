@@ -194,11 +194,13 @@ class CommerceTools {
             @McpToolParam(description = "The amount to refund, in the order's currency") BigDecimal amount,
             @McpToolParam(description = "Why the customer is refunded, in a sentence") String reason,
             @McpToolParam(description = "A key that identifies this refund; reuse it only to retry the same refund") String idempotencyKey,
-            @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
+            @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail,
+            @McpToolParam(description = "The incident the refund is for; set by the agent platform, not by the model",
+                    required = false) String incidentNumber) {
         UUID id = ToolGuard.parseOrderId(orderId);
         return guard.run(context, "issue_refund", id, "Asked to refund " + amount, true, agentId -> {
             guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
-            RefundRequest request = refunds.requestRefund(agentId, id, amount, reason, idempotencyKey);
+            RefundRequest request = refunds.requestRefund(agentId, id, amount, reason, idempotencyKey, incidentNumber);
             return new RefundResult(request.getId(), request.getStatus().name(), request.getAmount(),
                     request.getCurrency(), messageFor(request));
         });

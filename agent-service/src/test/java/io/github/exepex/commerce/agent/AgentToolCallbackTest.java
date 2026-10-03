@@ -17,7 +17,8 @@ class AgentToolCallbackTest {
 
     private static final String SCHEMA = """
             {"type": "object",
-             "properties": {"orderId": {"type": "string"}, "customerEmail": {"type": "string"}},
+             "properties": {"orderId": {"type": "string"}, "customerEmail": {"type": "string"},
+                            "incidentNumber": {"type": "string"}},
              "required": ["orderId", "customerEmail"]}""";
 
     /** Stands in for an MCP tool and remembers the arguments it was called with. */
@@ -171,6 +172,23 @@ class AgentToolCallbackTest {
                 .isEqualTo("notify-" + linkedOrder + "-INC0010001");
         assertThat(notifyOutsideAnIncident.inputs.getFirst()).doesNotContain("idempotencyKey");
         assertThat(tool.getToolDefinition().inputSchema()).doesNotContain("idempotencyKey");
+    }
+
+    @Test
+    void anIncidentRunsRefundCarriesItsIncidentWhichTheModelCannotSet() {
+        String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        RecordingTool refund = new RecordingTool("issue_refund");
+        AgentToolCallback tool = new AgentToolCallback(refund, false, () -> true);
+        ToolContext incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(linkedOrder), orderId -> true));
+
+        tool.call("{\"orderId\": \"" + linkedOrder + "\", \"incidentNumber\": \"INC0010999\"}", incidentRun);
+        RecordingTool refundInAChat = new RecordingTool("issue_refund");
+        new AgentToolCallback(refundInAChat, true, () -> true)
+                .call("{\"orderId\": \"o-1\", \"incidentNumber\": \"INC0010999\"}", contextFor(new ToolRun("ada@example.com", 5)));
+
+        assertThat(JsonPath.<String>read(refund.inputs.getFirst(), "$.incidentNumber")).isEqualTo("INC0010001");
+        assertThat(refundInAChat.inputs.getFirst()).doesNotContain("incidentNumber");
+        assertThat(tool.getToolDefinition().inputSchema()).doesNotContain("incidentNumber");
     }
 
     @Test

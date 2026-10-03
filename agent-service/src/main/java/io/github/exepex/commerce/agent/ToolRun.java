@@ -67,6 +67,11 @@ public final class ToolRun {
         return customerEmail;
     }
 
+    /** What this run was started for, such as an incident number; null for a conversation. */
+    String workId() {
+        return workId;
+    }
+
     /** Whether this run may work the given incident: only the one it was started for, if any. */
     boolean mayWorkIncident(String number) {
         return workId == null || workId.equals(number == null ? null : number.strip());

@@ -118,14 +118,16 @@ public class CaseService {
     }
 
     /**
-     * Whether the agent may pay money back on the order now. While a team has one of the order's incidents, no agent
-     * may: the people working it may be paying the customer back another way. While any case of the order is open, only
-     * the agent that works cases may, since the others cannot see who has the incident at this moment: a person may
-     * have taken it since ServiceNow was last read.
+     * Whether the agent may pay money back on the order now. While any case of the order is open, only the agent that
+     * works cases may: the others cannot see who has its incident at this moment. That agent may pay only for the
+     * incident it is working ({@code incidentNumber}, set by agent-service from the run, never by the model), and only
+     * while each other open case is still on its way to ServiceNow: a person may have taken any other incident since
+     * ServiceNow was last read, and while a team has one, they may be paying the customer back another way.
      */
-    public void ensureAgentMayPay(UUID orderId, String agentId) {
-        List<SupportCase.Status> blocking = worker.equals(agentId) ? List.of(SupportCase.Status.WITH_TEAM) : UNRESOLVED;
-        Optional<SupportCase> open = cases.findByOrderIdAndStatusIn(orderId, blocking).stream().findFirst();
+    public void ensureAgentMayPay(UUID orderId, String agentId, String incidentNumber) {
+        Optional<SupportCase> open = cases.findByOrderIdAndStatusIn(orderId, UNRESOLVED).stream()
+                .filter(supportCase -> blocksPayment(supportCase, agentId, incidentNumber))
+                .findFirst();
         if (open.isEmpty()) {
             return;
         }
@@ -135,6 +137,17 @@ public class CaseService {
                 : "an open " + supportCase.getType() + " case" + incidentOf(supportCase) + " that the support team handles";
         throw new GovernanceException(HttpStatus.CONFLICT, "This order is " + who + ", who will finish it. Do not "
                 + "retry or refund it another way; tell the customer a person is looking into it.");
+    }
+
+    private boolean blocksPayment(SupportCase supportCase, String agentId, String incidentNumber) {
+        if (!worker.equals(agentId) || supportCase.getStatus() == SupportCase.Status.WITH_TEAM) {
+            return true;
+        }
+        if (supportCase.getStatus() == SupportCase.Status.PENDING) {
+            // Not in ServiceNow yet, so nobody can have taken it; unless it is meant for people from the start.
+            return supportCase.isForPeople();
+        }
+        return incidentNumber == null || !incidentNumber.strip().equals(supportCase.getIncidentNumber());
     }
 
     /** Cases whose incident is still to be created, and cases with notes still to be sent, oldest first. */
