@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.payment;
 
+import io.github.exepex.commerce.payment.constants.ConfigKeys;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -16,7 +17,7 @@ class PaymentEventPublisher {
 
     private final KafkaTemplate<String, RefundFailedEvent> kafkaTemplate;
 
-    @Value("${commerce.topics.payment-events}")
+    @Value(ConfigKeys.PAYMENT_EVENTS_TOPIC)
     private final String topic;
 
     @TransactionalEventListener

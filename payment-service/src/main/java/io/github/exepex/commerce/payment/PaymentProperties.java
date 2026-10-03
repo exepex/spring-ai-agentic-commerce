@@ -1,8 +1,9 @@
 package io.github.exepex.commerce.payment;
 
+import io.github.exepex.commerce.payment.constants.ConfigKeys;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties("commerce.payments")
+@ConfigurationProperties(ConfigKeys.PAYMENTS_PREFIX)
 record PaymentProperties(String stripeSecretKey) {
 
     boolean usesStripe() {

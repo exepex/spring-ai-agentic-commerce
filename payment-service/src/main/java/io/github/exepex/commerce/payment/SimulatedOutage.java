@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.payment;
 
+import io.github.exepex.commerce.payment.constants.ApiPaths;
+import io.github.exepex.commerce.payment.constants.ErrorMessages;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -30,7 +32,7 @@ class SimulatedOutage extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/payments");
+        return !request.getRequestURI().startsWith(ApiPaths.PAYMENTS);
     }
 
     @Override
@@ -42,7 +44,6 @@ class SimulatedOutage extends OncePerRequestFilter {
         }
         response.setStatus(HttpStatus.SERVICE_UNAVAILABLE.value());
         response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        response.getWriter().write("""
-                {"status": 503, "title": "Service Unavailable", "detail": "The payment service is down (simulated outage)"}""");
+        response.getWriter().write(ErrorMessages.SIMULATED_OUTAGE);
     }
 }
