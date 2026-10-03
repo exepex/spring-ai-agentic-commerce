@@ -165,6 +165,11 @@ public class SupportCase {
         return true;
     }
 
+    /** Becomes the order's open case of its problem, the one a problem raised again goes to. */
+    void becomeTheOpenCase() {
+        reopenedBesideOpenCase = false;
+    }
+
     public UUID getId() {
         return id;
     }

@@ -107,6 +107,12 @@ public class CaseService {
             lockProblem(orderId, type);
             Optional<SupportCase> open = cases.findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(orderId,
                     type, SupportCase.Status.RESOLVED);
+            if (open.isEmpty()) {
+                // The case a reopened one stood beside is resolved: the reopened one takes the problem over.
+                open = cases.findFirstByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseTrueOrderByCreatedAtDesc(
+                        orderId, type, SupportCase.Status.RESOLVED);
+                open.ifPresent(SupportCase::becomeTheOpenCase);
+            }
             if (open.isPresent()) {
                 notes.save(new CaseNote(open.get().getId(), text, now));
                 audit.record(orderId, raisedByType, raisedBy, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,

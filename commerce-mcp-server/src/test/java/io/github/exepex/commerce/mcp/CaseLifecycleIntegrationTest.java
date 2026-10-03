@@ -240,6 +240,27 @@ class CaseLifecycleIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void onceTheNewerCaseIsResolvedTheReopenedOneTakesTheProblemRaisedAgain() {
+        UUID orderId = stubOrder("ada@example.com", "39.50");
+        handOff(orderId, "first");
+        String earlier = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", earlier, Map.of("number", "INC0010036"));
+        followIncident(earlier, "INC0010036", "RESOLVED", "Online Shop Agent");
+        handOff(orderId, "the customer called again");
+        String newer = JsonPath.read(outgoingFor(orderId), "$[0].supportCase.id");
+        sync("/api/agent/cases/{id}/incident", newer, Map.of("number", "INC0010037"));
+        followIncident(earlier, "INC0010036", "WITH_TEAM", "Payments");
+        followIncident(newer, "INC0010037", "RESOLVED", "Online Shop Agent");
+
+        handOff(orderId, "and once more");
+
+        assertThat((List<String>) JsonPath.read(cases(orderId), "$[?(@.status != 'RESOLVED')].id"))
+                .containsExactly(earlier);
+        assertThat((List<String>) JsonPath.read(outgoingFor(orderId), "$[?(@.supportCase.id == '" + earlier
+                + "')].unsentNotes[*].text")).anySatisfy(text -> assertThat(text).contains("once more"));
+    }
+
+    @Test
     void anIncidentReopenedIntoTheGroupItWasResolvedInOpensItsCaseAgain() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         handOff(orderId, "first");
