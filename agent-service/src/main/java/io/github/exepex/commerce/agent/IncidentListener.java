@@ -1,5 +1,8 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.constants.ConfigKeys;
+import io.github.exepex.commerce.agent.constants.IncidentEventFields;
+import io.github.exepex.commerce.agent.exception.HandOffFailedException;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -7,7 +10,6 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.util.backoff.FixedBackOff;
-import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -28,16 +30,17 @@ class IncidentListener {
      */
     @Bean
     static DefaultErrorHandler handOffRetries() {
-        DefaultErrorHandler retries = new DefaultErrorHandler(
+        var retries = new DefaultErrorHandler(
                 new FixedBackOff(Duration.ofSeconds(15).toMillis(), FixedBackOff.UNLIMITED_ATTEMPTS));
         retries.defaultFalse();
         retries.addRetryableExceptions(HandOffFailedException.class);
         return retries;
     }
 
-    @KafkaListener(topics = "${commerce.topics.incidents}", autoStartup = "#{'${commerce.servicenow.mcp-url:}' != ''}")
+    @KafkaListener(topics = ConfigKeys.INCIDENTS_TOPIC, autoStartup = ConfigKeys.INCIDENT_LISTENER_AUTO_STARTUP)
     void onIncident(String json) {
-        JsonNode event = jsonMapper.readTree(json);
-        agent.handleIncident(event.path("number").asString(), event.path("orderId").asString(""), json);
+        var event = jsonMapper.readTree(json);
+        agent.handleIncident(event.path(IncidentEventFields.NUMBER).asString(),
+                event.path(IncidentEventFields.ORDER_ID).asString(""), json);
     }
 }

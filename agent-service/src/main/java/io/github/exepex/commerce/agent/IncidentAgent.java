@@ -1,5 +1,16 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.constants.AgentIds;
+import io.github.exepex.commerce.agent.constants.AuditTexts;
+import io.github.exepex.commerce.agent.constants.HandOffNotes;
+import io.github.exepex.commerce.agent.constants.McpValues;
+import io.github.exepex.commerce.agent.constants.Prompts;
+import io.github.exepex.commerce.agent.constants.Refusals;
+import io.github.exepex.commerce.agent.constants.ToolNames;
+import io.github.exepex.commerce.agent.constants.ToolParameters;
+import io.github.exepex.commerce.agent.exception.HandOffRejectedException;
+import io.github.exepex.commerce.agent.exception.HandOffUnreachableException;
+import io.github.exepex.commerce.agent.exception.KillSwitchUnreadableException;
 import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -23,8 +34,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class IncidentAgent {
 
-    /** How the ServiceNow MCP server marks a call its rules refuse, which asking again will not change. */
-    private static final String REFUSED = "Refused: ";
     /** The longest note the ServiceNow MCP server accepts; a longer hand-off note is cut to fit. */
     private static final int MAX_NOTE_LENGTH = 4000;
 
@@ -37,7 +46,7 @@ public class IncidentAgent {
 
     IncidentAgent(ChatModel chatModel, McpToolboxes toolboxes, AgentSwitchboard switchboard, DecisionRecorder decisions,
             AgentDefinitions definitions, AgentProperties properties) {
-        this.definition = definitions.get(AgentSwitchboard.INCIDENT_AGENT);
+        this.definition = definitions.get(AgentIds.INCIDENT_AGENT);
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultOptions(ClaudeOptions.forAgent(definition.model(), definition.effort()))
                 .build();
@@ -54,42 +63,39 @@ public class IncidentAgent {
     public void handleIncident(String number, String linkedOrderId, String incidentEvent) {
         boolean enabled;
         try {
-            enabled = switchboard.isEnabled(AgentSwitchboard.INCIDENT_AGENT);
+            enabled = switchboard.isEnabled(AgentIds.INCIDENT_AGENT);
         } catch (RuntimeException unreachable) {
-            throw new HandOffFailedException("Could not read the kill switch, so incident " + number
-                    + " was neither worked nor handed to a team", unreachable);
+            throw new KillSwitchUnreadableException(number, unreachable);
         }
         if (!enabled) {
-            handToTeam(number, "The incident agent is switched off, so this incident goes straight to a person. "
-                    + "Nothing was checked or changed yet.");
+            handToTeam(number, HandOffNotes.AGENT_SWITCHED_OFF);
             return;
         }
-        Instant started = Instant.now();
-        ToolRun run = new ToolRun(null, definition.toolCallBudget(), number,
+        var started = Instant.now();
+        var run = new ToolRun(null, definition.toolCallBudget(), number,
                 linkedOrderId == null || linkedOrderId.isBlank() ? Set.of() : Set.of(linkedOrderId),
                 orderId -> stillLinksTo(number, orderId));
         ChatResponse response;
         try {
             response = chatClient.prompt()
                     .system(systemPrompt)
-                    .user("Work ServiceNow incident " + number + ". It was announced as:\n" + incidentEvent)
+                    .user(Prompts.WORK_INCIDENT.formatted(number, incidentEvent))
                     .toolCallbacks(toolboxes.incidentAgentTools())
-                    .toolContext(Map.of(ToolRun.CONTEXT_KEY, run))
+                    .toolContext(Map.of(McpValues.TOOL_RUN_CONTEXT_KEY, run))
                     .call()
                     .chatResponse();
         } catch (RuntimeException failure) {
             log.error("The incident agent failed on incident {}", number, failure);
-            handToTeam(number, "The incident agent failed while working this incident (" + failure.getMessage()
-                    + "). Check its earlier work notes, then finish it.");
+            handToTeam(number, HandOffNotes.AGENT_FAILED.formatted(failure.getMessage()));
             return;
         }
-        String summary = ClaudeReply.textOf(response);
-        decisions.record(AgentSwitchboard.INCIDENT_AGENT, orderOf(linkedOrderId), "Incident " + number + ": " + summary,
-                "Triggered by ServiceNow incident " + number + ": " + incidentEvent, response,
+        var summary = ClaudeReply.textOf(response);
+        decisions.record(AgentIds.INCIDENT_AGENT, orderOf(linkedOrderId),
+                AuditTexts.INCIDENT_WORKED.formatted(number, summary),
+                AuditTexts.TRIGGERED_BY_INCIDENT.formatted(number, incidentEvent), response,
                 Duration.between(started, Instant.now()));
         if (!isFinished(number, run)) {
-            handToTeam(number, "The incident agent finished without resolving this incident or handing it to a team, "
-                    + "so a person must finish it. The agent said: " + summary);
+            handToTeam(number, HandOffNotes.NOT_FINISHED.formatted(summary));
         }
     }
 
@@ -109,11 +115,12 @@ public class IncidentAgent {
      */
     boolean stillLinksTo(String number, String orderId) {
         try {
-            McpSchema.CallToolResult incident = toolboxes.callAsIncidentAgent("get_incident", Map.of("number", number));
+            var incident = toolboxes.callAsIncidentAgent(ToolNames.GET_INCIDENT,
+                    Map.of(ToolParameters.NUMBER, number));
             if (Boolean.TRUE.equals(incident.isError())) {
                 return false;
             }
-            UUID linked = orderOf(ToolJson.textField(McpResults.textOf(incident), "linkedOrderId"));
+            var linked = orderOf(ToolJson.textField(McpResults.textOf(incident), ToolParameters.LINKED_ORDER_ID));
             return linked != null && linked.equals(orderOf(orderId));
         } catch (RuntimeException unavailable) {
             log.warn("Could not check that incident {} is still the agent's and about order {}", number, orderId,
@@ -125,8 +132,9 @@ public class IncidentAgent {
     /** Finished means resolved or handed to a team in this run, for this incident; the model's summary is not trusted. */
     static boolean isFinished(String number, ToolRun run) {
         return run.succeeded().stream()
-                .filter(call -> "resolve_incident".equals(call.tool()) || "assign_to_team".equals(call.tool()))
-                .anyMatch(call -> number.equals(ToolJson.textField(call.arguments(), "number")));
+                .filter(call -> ToolNames.RESOLVE_INCIDENT.equals(call.tool())
+                        || ToolNames.ASSIGN_TO_TEAM.equals(call.tool()))
+                .anyMatch(call -> number.equals(ToolJson.textField(call.arguments(), ToolParameters.NUMBER)));
     }
 
     /**
@@ -137,21 +145,20 @@ public class IncidentAgent {
     private void handToTeam(String number, String note) {
         McpSchema.CallToolResult result;
         try {
-            result = toolboxes.callAsIncidentAgent("assign_to_team",
-                    Map.of("number", number, "note", AgentTexts.abbreviate(note, MAX_NOTE_LENGTH, "…")));
+            result = toolboxes.callAsIncidentAgent(ToolNames.ASSIGN_TO_TEAM, Map.of(ToolParameters.NUMBER, number,
+                    ToolParameters.NOTE, AgentTexts.abbreviate(note, MAX_NOTE_LENGTH, HandOffNotes.ELLIPSIS)));
         } catch (RuntimeException unavailable) {
-            throw new HandOffFailedException("Could not hand incident " + number + " to a team: " + note, unavailable);
+            throw new HandOffUnreachableException(number, note, unavailable);
         }
         if (Boolean.TRUE.equals(result.isError())) {
-            String message = McpResults.textOf(result);
-            if (message.startsWith(REFUSED)) {
+            var message = McpResults.textOf(result);
+            if (message.startsWith(Refusals.REFUSED)) {
                 // Usually a person took the incident meanwhile. Whatever the reason, an incident the agent still owns
                 // goes to the default team once its claim is stale, so it is never left without an owner.
                 log.warn("Incident {} was not handed to a team: {}", LogValues.safe(number), LogValues.safe(message));
                 return;
             }
-            throw new HandOffFailedException("ServiceNow did not take the hand-off of incident " + number + ": " + message,
-                    null);
+            throw new HandOffRejectedException(number, message);
         }
     }
 }

@@ -1,10 +1,8 @@
 package io.github.exepex.commerce.agent;
 
-import java.util.List;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.springframework.ai.chat.model.ChatResponse;
-import org.springframework.ai.chat.model.Generation;
 
 /**
  * Reads the answer out of a Claude response. With thinking on, Spring AI returns each thinking block as a generation
@@ -15,7 +13,7 @@ import org.springframework.ai.chat.model.Generation;
 final class ClaudeReply {
 
     static String textOf(ChatResponse response) {
-        List<Generation> generations = response.getResults();
+        var generations = response.getResults();
         return generations.isEmpty() ? null : generations.getLast().getOutput().getText();
     }
 }

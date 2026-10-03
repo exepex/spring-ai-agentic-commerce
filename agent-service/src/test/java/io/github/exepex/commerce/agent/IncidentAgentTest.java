@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import io.github.exepex.commerce.agent.constants.AgentIds;
+import io.github.exepex.commerce.agent.exception.HandOffFailedException;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.modelcontextprotocol.spec.McpSchema;
 import java.util.List;
@@ -36,7 +38,7 @@ class IncidentAgentTest {
 
     @Test
     void aSwitchedOffAgentHandsTheIncidentToATeamWithoutCallingTheModel() {
-        ChatModel model = mock(ChatModel.class);
+        var model = mock(ChatModel.class);
         when(toolboxes.callAsIncidentAgent(eq("assign_to_team"), any())).thenReturn(result("Assigned", false));
 
         agent(model, false).handleIncident(INCIDENT, "", "{}");
@@ -48,7 +50,7 @@ class IncidentAgentTest {
 
     @Test
     void aRunThatNeitherResolvesNorHandsOverGoesToATeam() {
-        ChatModel model = mock(ChatModel.class);
+        var model = mock(ChatModel.class);
         when(model.getOptions()).thenReturn(ChatOptions.builder().build());
         when(model.call(any(Prompt.class)))
                 .thenReturn(new ChatResponse(List.of(new Generation(new AssistantMessage("I looked at it.")))));
@@ -81,7 +83,7 @@ class IncidentAgentTest {
 
     @Test
     void onlyResolvingOrHandingOverThisIncidentFinishesIt() {
-        ToolRun run = new ToolRun(null, 10);
+        var run = new ToolRun(null, 10);
         run.recordSuccess("add_work_note", "{\"number\": \"" + INCIDENT + "\"}", "{}");
         run.recordSuccess("resolve_incident", "{\"number\": \"INC0099999\"}", "{}");
         assertThat(IncidentAgent.isFinished(INCIDENT, run)).isFalse();
@@ -92,9 +94,9 @@ class IncidentAgentTest {
 
     @Test
     void anOrderMayOnlyChangeWhileTheIncidentIsStillTheAgentsAndStillLinksToIt() {
-        String orderA = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
-        String orderB = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
-        IncidentAgent agent = agent(mock(ChatModel.class), true);
+        var orderA = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        var orderB = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+        var agent = agent(mock(ChatModel.class), true);
 
         when(toolboxes.callAsIncidentAgent(eq("get_incident"), any()))
                 .thenReturn(result("{\"number\": \"INC0010001\", \"linkedOrderId\": \"" + orderA + "\"}", false));
@@ -111,8 +113,8 @@ class IncidentAgentTest {
     }
 
     private IncidentAgent agent(ChatModel model, boolean switchedOn) {
-        AgentSwitchesApi switches = mock(AgentSwitchesApi.class);
-        when(switches.all()).thenReturn(Map.of(AgentSwitchboard.INCIDENT_AGENT, switchedOn));
+        var switches = mock(AgentSwitchesApi.class);
+        when(switches.all()).thenReturn(Map.of(AgentIds.INCIDENT_AGENT, switchedOn));
         return new IncidentAgent(model, toolboxes, new AgentSwitchboard(switches), mock(DecisionRecorder.class),
                 DEFINITIONS, PROPERTIES);
     }

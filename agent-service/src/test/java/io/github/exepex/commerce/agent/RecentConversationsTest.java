@@ -10,7 +10,7 @@ class RecentConversationsTest {
 
     @Test
     void forgetsTheLeastRecentlyUsedConversationOnceTheLimitIsReached() {
-        RecentConversations conversations = new RecentConversations(2);
+        var conversations = new RecentConversations(2);
         conversations.saveAll("first", List.of(new UserMessage("hi")));
         conversations.saveAll("second", List.of(new UserMessage("hello")));
         conversations.findByConversationId("first");

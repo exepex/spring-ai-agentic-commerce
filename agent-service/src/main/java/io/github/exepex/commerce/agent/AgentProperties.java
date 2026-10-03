@@ -1,5 +1,8 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.constants.AgentIds;
+import io.github.exepex.commerce.agent.constants.ConfigKeys;
+import io.github.exepex.commerce.agent.exception.UnknownAgentException;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -10,7 +13,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param slack the Slack MCP server and the one channel agents may post in
  * @param servicenow the ServiceNow MCP server
  */
-@ConfigurationProperties("commerce")
+@ConfigurationProperties(ConfigKeys.COMMERCE_PREFIX)
 public record AgentProperties(Agents agents, Slack slack, ServiceNow servicenow) {
 
     /**
@@ -23,9 +26,9 @@ public record AgentProperties(Agents agents, Slack slack, ServiceNow servicenow)
         /** The bearer token the given agent presents to the MCP servers. */
         public String tokenOf(String agentId) {
             return switch (agentId) {
-                case AgentSwitchboard.SHOPPING_ASSISTANT -> shoppingAssistant.token();
-                case AgentSwitchboard.INCIDENT_AGENT -> incidentAgent.token();
-                default -> throw new IllegalArgumentException("Unknown agent " + agentId);
+                case AgentIds.SHOPPING_ASSISTANT -> shoppingAssistant.token();
+                case AgentIds.INCIDENT_AGENT -> incidentAgent.token();
+                default -> throw new UnknownAgentException(agentId);
             };
         }
     }

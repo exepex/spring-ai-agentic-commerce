@@ -3,6 +3,7 @@ package io.github.exepex.commerce.agent;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
+import io.github.exepex.commerce.agent.constants.McpValues;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -46,8 +47,8 @@ class AgentToolCallbackTest {
 
     @Test
     void hidesTheCustomerFromTheModelAndFillsInTheSignedInCustomer() {
-        RecordingTool mcpTool = new RecordingTool("get_order");
-        AgentToolCallback tool = new AgentToolCallback(mcpTool, true, () -> true);
+        var mcpTool = new RecordingTool("get_order");
+        var tool = new AgentToolCallback(mcpTool, true, () -> true);
 
         assertThat(tool.getToolDefinition().inputSchema()).doesNotContain("customerEmail").contains("orderId");
 
@@ -59,20 +60,20 @@ class AgentToolCallbackTest {
 
     @Test
     void leavesTheSchemaAloneForAnAgentThatIsNotCustomerFacing() {
-        AgentToolCallback tool = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true);
+        var tool = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true);
 
         assertThat(tool.getToolDefinition().inputSchema()).contains("customerEmail");
     }
 
     @Test
     void refusesCallsOnceTheRunHasSpentItsBudget() {
-        RecordingTool mcpTool = new RecordingTool("get_order");
-        AgentToolCallback tool = new AgentToolCallback(mcpTool, false, () -> true);
-        ToolContext context = contextFor(new ToolRun(null, 2));
+        var mcpTool = new RecordingTool("get_order");
+        var tool = new AgentToolCallback(mcpTool, false, () -> true);
+        var context = contextFor(new ToolRun(null, 2));
 
         tool.call("{}", context);
         tool.call("{}", context);
-        String third = tool.call("{}", context);
+        var third = tool.call("{}", context);
 
         assertThat(third).startsWith("Refused");
         assertThat(mcpTool.inputs).hasSize(2);
@@ -80,14 +81,14 @@ class AgentToolCallbackTest {
 
     @Test
     void refusesAThirdPartyToolOnceTheAgentIsSwitchedOffDuringTheRun() {
-        RecordingTool slackTool = new RecordingTool("conversations_add_message");
-        AtomicBoolean switchedOn = new AtomicBoolean(true);
-        AgentToolCallback tool = new AgentToolCallback(slackTool, false, switchedOn::get);
-        ToolContext context = contextFor(new ToolRun(null, 5));
+        var slackTool = new RecordingTool("conversations_add_message");
+        var switchedOn = new AtomicBoolean(true);
+        var tool = new AgentToolCallback(slackTool, false, switchedOn::get);
+        var context = contextFor(new ToolRun(null, 5));
 
         tool.call("{}", context);
         switchedOn.set(false);
-        String afterSwitchOff = tool.call("{}", context);
+        var afterSwitchOff = tool.call("{}", context);
 
         assertThat(afterSwitchOff).startsWith("Refused").contains("switched off");
         assertThat(slackTool.inputs).hasSize(1);
@@ -95,13 +96,13 @@ class AgentToolCallbackTest {
 
     @Test
     void aRunLimitedToOneOrderMayChangeOnlyThatOrder() {
-        String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
-        RecordingTool refund = new RecordingTool("issue_refund");
-        AgentToolCallback tool = new AgentToolCallback(refund, false, () -> true);
-        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(linkedOrder), orderId -> true));
+        var linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        var refund = new RecordingTool("issue_refund");
+        var tool = new AgentToolCallback(refund, false, () -> true);
+        var context = contextFor(new ToolRun(null, 5, null, Set.of(linkedOrder), orderId -> true));
 
-        String otherOrder = tool.call("{\"orderId\": \"7c9e6679-7425-40de-944b-e07fc1f90ae7\"}", context);
-        String sameOrderInCapitals = tool.call("{\"orderId\": \" " + linkedOrder.toUpperCase() + "\"}", context);
+        var otherOrder = tool.call("{\"orderId\": \"7c9e6679-7425-40de-944b-e07fc1f90ae7\"}", context);
+        var sameOrderInCapitals = tool.call("{\"orderId\": \" " + linkedOrder.toUpperCase() + "\"}", context);
 
         assertThat(otherOrder).startsWith("Refused").contains("only change the order linked to its incident");
         assertThat(sameOrderInCapitals).doesNotStartWith("Refused");
@@ -110,13 +111,13 @@ class AgentToolCallbackTest {
 
     @Test
     void aRunWithNoLinkedOrderMayReadOrdersButChangeNone() {
-        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(), orderId -> true));
+        var context = contextFor(new ToolRun(null, 5, null, Set.of(), orderId -> true));
 
-        String lookup = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true)
+        var lookup = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true)
                 .call("{\"orderId\": \"o-1\"}", context);
-        String cancel = new AgentToolCallback(new RecordingTool("cancel_order"), false, () -> true)
+        var cancel = new AgentToolCallback(new RecordingTool("cancel_order"), false, () -> true)
                 .call("{\"orderId\": \"o-1\"}", context);
-        String notify = new AgentToolCallback(new RecordingTool("notify_customer"), false, () -> true).call("{}", context);
+        var notify = new AgentToolCallback(new RecordingTool("notify_customer"), false, () -> true).call("{}", context);
 
         assertThat(lookup).doesNotStartWith("Refused");
         assertThat(cancel).startsWith("Refused");
@@ -125,15 +126,15 @@ class AgentToolCallbackTest {
 
     @Test
     void aRunWhoseIncidentWasTakenOverChangesNoOrder() {
-        String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
-        AtomicBoolean stillOwned = new AtomicBoolean(true);
-        RecordingTool cancel = new RecordingTool("cancel_order");
-        AgentToolCallback tool = new AgentToolCallback(cancel, false, () -> true);
-        ToolContext context = contextFor(new ToolRun(null, 5, null, Set.of(linkedOrder), orderId -> stillOwned.get()));
+        var linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        var stillOwned = new AtomicBoolean(true);
+        var cancel = new RecordingTool("cancel_order");
+        var tool = new AgentToolCallback(cancel, false, () -> true);
+        var context = contextFor(new ToolRun(null, 5, null, Set.of(linkedOrder), orderId -> stillOwned.get()));
 
         stillOwned.set(false);
-        String afterTakeOver = tool.call("{\"orderId\": \"" + linkedOrder + "\"}", context);
-        String lookup = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true)
+        var afterTakeOver = tool.call("{\"orderId\": \"" + linkedOrder + "\"}", context);
+        var lookup = new AgentToolCallback(new RecordingTool("get_order"), false, () -> true)
                 .call("{\"orderId\": \"" + linkedOrder + "\"}", context);
 
         assertThat(afterTakeOver).startsWith("Refused").contains("no longer this agent's");
@@ -143,12 +144,12 @@ class AgentToolCallbackTest {
 
     @Test
     void anIncidentRunWorksOnlyItsOwnIncident() {
-        RecordingTool resolve = new RecordingTool("resolve_incident");
-        AgentToolCallback tool = new AgentToolCallback(resolve, false, () -> true);
-        ToolContext incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(), orderId -> true));
+        var resolve = new RecordingTool("resolve_incident");
+        var tool = new AgentToolCallback(resolve, false, () -> true);
+        var incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(), orderId -> true));
 
-        String other = tool.call("{\"number\": \"INC0010002\", \"resolution\": \"Done\"}", incidentRun);
-        String own = tool.call("{\"number\": \"INC0010001\", \"resolution\": \"Done\"}", incidentRun);
+        var other = tool.call("{\"number\": \"INC0010002\", \"resolution\": \"Done\"}", incidentRun);
+        var own = tool.call("{\"number\": \"INC0010001\", \"resolution\": \"Done\"}", incidentRun);
 
         assertThat(other).startsWith("Refused").contains("INC0010002 is not it");
         assertThat(own).doesNotStartWith("Refused");
@@ -157,14 +158,14 @@ class AgentToolCallbackTest {
 
     @Test
     void anIncidentRunsMessageToTheCustomerCarriesAKeyThatCodeSets() {
-        String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
-        RecordingTool notify = new RecordingTool("notify_customer");
-        AgentToolCallback tool = new AgentToolCallback(notify, false, () -> true);
-        ToolContext incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(linkedOrder), orderId -> true));
+        var linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        var notify = new RecordingTool("notify_customer");
+        var tool = new AgentToolCallback(notify, false, () -> true);
+        var incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(linkedOrder), orderId -> true));
 
         tool.call("{\"orderId\": \"" + linkedOrder + "\", \"message\": \"Sorry\", \"idempotencyKey\": \"mine\"}",
                 incidentRun);
-        RecordingTool notifyOutsideAnIncident = new RecordingTool("notify_customer");
+        var notifyOutsideAnIncident = new RecordingTool("notify_customer");
         new AgentToolCallback(notifyOutsideAnIncident, false, () -> true)
                 .call("{\"orderId\": \"o-1\", \"idempotencyKey\": \"mine\"}", contextFor(new ToolRun(null, 5)));
 
@@ -176,13 +177,13 @@ class AgentToolCallbackTest {
 
     @Test
     void anIncidentRunsRefundCarriesItsIncidentWhichTheModelCannotSet() {
-        String linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
-        RecordingTool refund = new RecordingTool("issue_refund");
-        AgentToolCallback tool = new AgentToolCallback(refund, false, () -> true);
-        ToolContext incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(linkedOrder), orderId -> true));
+        var linkedOrder = "0b6f2a3e-5d1c-4c1e-9a7b-2f1d3c4b5a69";
+        var refund = new RecordingTool("issue_refund");
+        var tool = new AgentToolCallback(refund, false, () -> true);
+        var incidentRun = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(linkedOrder), orderId -> true));
 
         tool.call("{\"orderId\": \"" + linkedOrder + "\", \"incidentNumber\": \"INC0010999\"}", incidentRun);
-        RecordingTool refundInAChat = new RecordingTool("issue_refund");
+        var refundInAChat = new RecordingTool("issue_refund");
         new AgentToolCallback(refundInAChat, true, () -> true)
                 .call("{\"orderId\": \"o-1\", \"incidentNumber\": \"INC0010999\"}", contextFor(new ToolRun("ada@example.com", 5)));
 
@@ -193,7 +194,7 @@ class AgentToolCallbackTest {
 
     @Test
     void collectsOrderProposalsForTheChatToShow() {
-        ToolRun run = new ToolRun("ada@example.com", 5);
+        var run = new ToolRun("ada@example.com", 5);
 
         new AgentToolCallback(new RecordingTool("propose_order"), true, () -> true).call("{}", contextFor(run));
 
@@ -201,6 +202,6 @@ class AgentToolCallbackTest {
     }
 
     private static ToolContext contextFor(ToolRun run) {
-        return new ToolContext(Map.of(ToolRun.CONTEXT_KEY, run));
+        return new ToolContext(Map.of(McpValues.TOOL_RUN_CONTEXT_KEY, run));
     }
 }

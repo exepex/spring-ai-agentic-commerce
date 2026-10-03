@@ -13,7 +13,7 @@ class ClaudeReplyTest {
 
     @Test
     void readsTheAnswerNotTheThinkingBlocksThatComeBeforeIt() {
-        ChatResponse response = new ChatResponse(List.of(
+        var response = new ChatResponse(List.of(
                 new Generation(AssistantMessage.builder().content("private reasoning")
                         .properties(Map.of("signature", "sig")).build()),
                 new Generation(AssistantMessage.builder().content("").properties(Map.of("signature", "sig")).build()),

@@ -27,7 +27,7 @@ final class Demo {
     static final String HEADLAMP = "8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0004";
     static final String SHOE_42 = "8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0001";
     static final String INCIDENT_AGENT = "incident-agent";
-    static final String OPERATOR = "evals@trailhead.example";
+    private static final String OPERATOR = "evals@trailhead.example";
     private static final String STOCK_OUT_TOPIC = "inventory.stock-out";
 
     /** A case reaches ServiceNow, is worked and read back within a few poll intervals and one agent run. */
@@ -58,8 +58,8 @@ final class Demo {
 
     /** Writes off one unit more than is available, so the newest order for the product becomes a stock-out. */
     int causeStockOut(String productId) {
-        JsonNode product = api.get().uri("/catalog/api/products/{id}", productId).retrieve().body(JsonNode.class);
-        int units = product.path("available").asInt() + 1;
+        var product = api.get().uri("/catalog/api/products/{id}", productId).retrieve().body(JsonNode.class);
+        var units = product.path("available").asInt() + 1;
         adjustStock(productId, -units, "eval: damaged in warehouse");
         return units;
     }
@@ -95,19 +95,19 @@ final class Demo {
      * its offset. Kafka is reached at {@code evals.kafka} (by default the demo's {@code localhost:9092}).
      */
     void redeliverStockOutOf(String orderId) {
-        String bootstrapServers = System.getProperty("evals.kafka", "localhost:9092");
-        Map<String, Object> consumerProperties = Map.of(
+        var bootstrapServers = System.getProperty("evals.kafka", "localhost:9092");
+        var consumerProperties = Map.<String, Object>of(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                 ConsumerConfig.GROUP_ID_CONFIG, "evals-" + UUID.randomUUID(),
                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest",
                 ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         ConsumerRecord<String, String> stockOut = null;
-        try (KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties)) {
+        try (var consumer = new KafkaConsumer<String, String>(consumerProperties)) {
             consumer.subscribe(List.of(STOCK_OUT_TOPIC));
-            long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+            var deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
             while (stockOut == null && System.nanoTime() < deadline) {
-                for (ConsumerRecord<String, String> record : consumer.poll(Duration.ofSeconds(1))) {
+                for (var record : consumer.poll(Duration.ofSeconds(1))) {
                     if (record.value().contains(orderId)) {
                         stockOut = record;
                     }
@@ -117,11 +117,11 @@ final class Demo {
         if (stockOut == null) {
             throw new IllegalStateException("No stock-out names order " + orderId);
         }
-        Map<String, Object> producerProperties = Map.of(
+        var producerProperties = Map.<String, Object>of(
                 ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers,
                 ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class,
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        try (KafkaProducer<String, String> producer = new KafkaProducer<>(producerProperties)) {
+        try (var producer = new KafkaProducer<String, String>(producerProperties)) {
             producer.send(new ProducerRecord<>(STOCK_OUT_TOPIC, stockOut.key(), stockOut.value()));
         }
     }
@@ -167,7 +167,7 @@ final class Demo {
         return casesOf(orderId).getFirst();
     }
 
-    static boolean is(JsonNode event, String actor, String action) {
+    private static boolean is(JsonNode event, String actor, String action) {
         return actor.equals(event.path("actor").asString()) && action.equals(event.path("action").asString());
     }
 
@@ -191,7 +191,7 @@ final class Demo {
      * answers. A chat with the model can take a while, but no call may hang forever.
      */
     private static JdkClientHttpRequestFactory httpOneOneWithTimeouts() {
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(HttpClient.newBuilder()
+        var requestFactory = new JdkClientHttpRequestFactory(HttpClient.newBuilder()
                 .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(5))
                 .build());
