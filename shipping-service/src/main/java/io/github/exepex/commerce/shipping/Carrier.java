@@ -1,5 +1,9 @@
 package io.github.exepex.commerce.shipping;
 
+import io.github.exepex.commerce.shipping.constants.ShippingValues;
+import io.github.exepex.commerce.shipping.exception.NotACarrierOutcomeException;
+import io.github.exepex.commerce.shipping.exception.ShipmentNotFoundException;
+import io.github.exepex.commerce.shipping.exception.ShipmentNotOnItsWayException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
@@ -28,17 +32,16 @@ class Carrier {
     @Transactional
     public Shipment report(UUID orderId, Shipment.Status outcome, String deliveryProblem) {
         if (!outcome.isCarrierOutcome()) {
-            throw ShippingProblems.notACarrierOutcome(outcome);
+            throw new NotACarrierOutcomeException(outcome);
         }
-        Shipment shipment = shipments.findForUpdate(orderId)
-                .orElseThrow(() -> ShippingProblems.shipmentNotFound(orderId));
+        var shipment = shipments.findForUpdate(orderId).orElseThrow(() -> new ShipmentNotFoundException(orderId));
         if (shipment.getStatus() == outcome) {
             return shipment;
         }
         if (shipment.getStatus() != Shipment.Status.SHIPPED) {
-            throw ShippingProblems.notOnItsWay(orderId, shipment.getStatus());
+            throw new ShipmentNotOnItsWayException(orderId, shipment.getStatus());
         }
-        Instant now = Instant.now(clock);
+        var now = Instant.now(clock);
         shipment.recordCarrierOutcome(outcome, problemOrDefault(outcome, deliveryProblem), now);
         events.publishEvent(ShipmentEvent.of(shipment, now));
         return shipment;
@@ -49,6 +52,6 @@ class Carrier {
         if (deliveryProblem != null && !deliveryProblem.isBlank()) {
             return deliveryProblem.strip();
         }
-        return outcome == Shipment.Status.LOST ? "The carrier lost the parcel" : "The carrier could not deliver the parcel";
+        return outcome == Shipment.Status.LOST ? ShippingValues.PARCEL_LOST : ShippingValues.PARCEL_NOT_DELIVERED;
     }
 }

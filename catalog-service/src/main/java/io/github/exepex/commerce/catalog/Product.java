@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.catalog;
 
+import io.github.exepex.commerce.catalog.exception.InsufficientStockException;
+import io.github.exepex.commerce.catalog.exception.InvalidStockAdjustmentException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;

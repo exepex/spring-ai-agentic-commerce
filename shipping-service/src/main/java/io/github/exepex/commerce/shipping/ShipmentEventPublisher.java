@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.shipping;
 
+import io.github.exepex.commerce.shipping.constants.ConfigKeys;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -16,7 +17,7 @@ class ShipmentEventPublisher {
 
     private final KafkaTemplate<String, ShipmentEvent> kafkaTemplate;
 
-    @Value("${commerce.topics.shipment-events}")
+    @Value(ConfigKeys.SHIPMENT_EVENTS_TOPIC)
     private final String topic;
 
     @TransactionalEventListener

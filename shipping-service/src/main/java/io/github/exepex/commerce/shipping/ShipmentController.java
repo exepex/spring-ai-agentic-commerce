@@ -1,9 +1,10 @@
 package io.github.exepex.commerce.shipping;
 
-import io.github.exepex.commerce.shipping.ShipmentViews.ShipmentView;
+import io.github.exepex.commerce.shipping.constants.ApiPaths;
+import io.github.exepex.commerce.shipping.dto.CarrierReportRequest;
+import io.github.exepex.commerce.shipping.dto.ShipmentView;
+import io.github.exepex.commerce.shipping.exception.ShipmentNotFoundException;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -18,33 +19,27 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 class ShipmentController {
 
-    /**
-     * {@code deliveryProblem} says why a parcel was not delivered, with a plain default when it is left out; it is not
-     * used for a delivered one.
-     */
-    record CarrierReportRequest(@NotNull Shipment.Status outcome, @Size(max = 500) String deliveryProblem) {}
-
     private final ShipmentRepository shipments;
     private final Carrier carrier;
 
     /** The 100 most recent shipments, optionally only those with the given statuses. */
-    @GetMapping("/api/shipments")
+    @GetMapping(ApiPaths.SHIPMENTS)
     List<ShipmentView> findShipments(@RequestParam(required = false) List<Shipment.Status> status) {
-        List<Shipment> found = status == null || status.isEmpty()
+        var found = status == null || status.isEmpty()
                 ? shipments.findTop100ByOrderByCreatedAtDesc()
                 : shipments.findTop100ByStatusInOrderByCreatedAtDesc(status);
-        return found.stream().map(ShipmentViews::toView).toList();
+        return found.stream().map(ShipmentMapper::toView).toList();
     }
 
-    @GetMapping("/api/shipments/{orderId}")
+    @GetMapping(ApiPaths.SHIPMENT)
     ShipmentView getShipment(@PathVariable UUID orderId) {
-        return shipments.findByOrderId(orderId).map(ShipmentViews::toView)
-                .orElseThrow(() -> ShippingProblems.shipmentNotFound(orderId));
+        return shipments.findByOrderId(orderId).map(ShipmentMapper::toView)
+                .orElseThrow(() -> new ShipmentNotFoundException(orderId));
     }
 
     /** What the carrier reports about the order's shipped parcel. */
-    @PostMapping("/api/shipments/{orderId}/carrier-reports")
+    @PostMapping(ApiPaths.CARRIER_REPORTS)
     ShipmentView reportFromCarrier(@PathVariable UUID orderId, @Valid @RequestBody CarrierReportRequest request) {
-        return ShipmentViews.toView(carrier.report(orderId, request.outcome(), request.deliveryProblem()));
+        return ShipmentMapper.toView(carrier.report(orderId, request.outcome(), request.deliveryProblem()));
     }
 }

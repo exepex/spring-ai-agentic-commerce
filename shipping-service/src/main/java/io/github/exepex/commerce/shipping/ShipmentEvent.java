@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.shipping;
 
+import io.github.exepex.commerce.shipping.exception.NoCarrierReportException;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -17,11 +18,11 @@ public record ShipmentEvent(UUID eventId, Type type, UUID orderId, String custom
     }
 
     static ShipmentEvent of(Shipment shipment, Instant now) {
-        Type type = switch (shipment.getStatus()) {
+        var type = switch (shipment.getStatus()) {
             case DELIVERED -> Type.SHIPMENT_DELIVERED;
             case DELIVERY_FAILED -> Type.SHIPMENT_DELIVERY_FAILED;
             case LOST -> Type.SHIPMENT_LOST;
-            default -> throw new IllegalStateException("The carrier did not report on shipment " + shipment.getId());
+            case PREPARING, SHIPPED, CANCELLED -> throw new NoCarrierReportException(shipment.getId());
         };
         return new ShipmentEvent(UUID.randomUUID(), type, shipment.getOrderId(), shipment.getCustomerEmail(),
                 shipment.getTrackingNumber(), shipment.getDeliveryProblem(), now);
