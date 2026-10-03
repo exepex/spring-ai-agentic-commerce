@@ -278,6 +278,39 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void whileTheAgentIsSwitchedOffANewIncidentGoesStraightToTheDefaultTeam() {
+        SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
+        stubNewIncidents("""
+                [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "1"},
+                  "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
+        stubClaimed("[]");
+        stubIncident("", "1");
+
+        poller.poll();
+
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withQueryParam("sysparm_input_display_value", equalTo("true"))
+                .withRequestBody(matchingJsonPath("$.assignment_group", equalTo("Customer Care")))
+                .withRequestBody(matchingJsonPath("$.work_notes", containing("switched off"))));
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withRequestBody(matchingJsonPath("$.assigned_to", equalTo(AGENT_USER))));
+    }
+
+    @Test
+    void whileTheSwitchCannotBeReadNoNewIncidentIsClaimedOrHandedOver() {
+        SERVICES.stubFor(get("/api/agent-switches").willReturn(aResponse().withStatus(503)));
+        stubNewIncidents("""
+                [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "1"},
+                  "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
+        stubClaimed("[]");
+        stubIncident("", "1");
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
+    }
+
+    @Test
     void anIncidentAPersonTookBeforeTheClaimIsLeftToThem() {
         stubNewIncidents("""
                 [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "1"},

@@ -33,6 +33,9 @@ import org.springframework.stereotype.Component;
  * or handed over, and left alone if a person took it or changed it meanwhile. That narrows the race with a person to
  * the time between that read and the update.
  *
+ * <p>While the agent is switched off, new incidents in its group go straight to the default team instead of being
+ * claimed, so they reach a person even when agent-service, which also checks the switch, is down.
+ *
  * <p>A claimed incident the agent has not finished within {@code commerce.servicenow.stale-after}, because
  * agent-service was down or its run stopped, is handed to the default team, so no incident waits for an agent that
  * is not coming.
@@ -85,11 +88,21 @@ public class IncidentPoller {
         }
     }
 
+    /**
+     * Claims each new incident in the agent's group, or, while the agent is switched off, hands it straight to the
+     * default team: nothing would work a claimed incident then, even with agent-service down. While the switch cannot
+     * be read, nothing is claimed or handed over; the incidents wait for the next poll.
+     */
     private void claimNewIncidents() {
+        boolean switchedOn = Boolean.TRUE.equals(governance.switches().get(properties.agent()));
         for (ServiceNowClient.Incident found : serviceNow.findNewForAgent()) {
             ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
             if (incident == null || incident.isAssigned() || !ServiceNowClient.STATE_NEW.equals(incident.state())
                     || !properties.agentGroup().equals(incident.assignmentGroup())) {
+                continue;
+            }
+            if (!switchedOn) {
+                handOverWhileSwitchedOff(incident);
                 continue;
             }
             Map<String, String> claim = new LinkedHashMap<>();
@@ -103,6 +116,17 @@ public class IncidentPoller {
             }
             record("claim_incident", "Claimed " + incident.number() + ": " + incident.shortDescription());
         }
+    }
+
+    private void handOverWhileSwitchedOff(ServiceNowClient.Incident incident) {
+        ServiceNowProperties.Team team = properties.teams().get(properties.defaultTeam());
+        Map<String, String> handOver = new LinkedHashMap<>();
+        handOver.put("assignment_group", team.group());
+        handOver.put("work_notes", "The " + properties.agent() + " is switched off, so this incident goes straight to "
+                + team.group() + ". Nothing was checked or changed yet.");
+        serviceNow.updateByDisplayValue(incident.sysId(), handOver);
+        cases.reportHandedToTeam(incident, team.group());
+        record("assign_to_team", "Handed " + incident.number() + " to " + team.group() + " because the agent is switched off");
     }
 
     /** Whether Kafka took the announcement. */

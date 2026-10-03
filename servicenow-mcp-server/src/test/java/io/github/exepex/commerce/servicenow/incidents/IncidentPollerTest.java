@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.kafka.core.KafkaTemplate;
 
@@ -36,6 +37,11 @@ class IncidentPollerTest {
 
     @SuppressWarnings("unchecked")
     private final KafkaTemplate<String, IncidentEvent> kafka = mock(KafkaTemplate.class);
+
+    @BeforeEach
+    void switchTheAgentOn() {
+        when(governance.switches()).thenReturn(Map.of("incident-agent", true));
+    }
 
     @Test
     void aClaimWhoseAnnouncementKafkaDidNotTakeIsGivenBack() {
