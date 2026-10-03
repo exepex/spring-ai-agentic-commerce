@@ -5,6 +5,7 @@ import io.github.exepex.commerce.servicenow.governance.GovernanceApi;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -82,8 +83,10 @@ public class IncidentPoller {
         Set<UUID> unsent = new HashSet<>();
         boolean listed = step("send the shop's cases to ServiceNow", () -> unsent.addAll(cases.sendCases()));
         step("hand over stale claims", this::handOverStaleClaims);
-        step("record the service desk's incidents with the shop", cases::recordServiceDeskIncidents);
-        step("claim new incidents", this::claimNewIncidents);
+        Map<String, UUID> recorded = new HashMap<>();
+        step("record the service desk's incidents with the shop",
+                () -> recorded.putAll(cases.recordServiceDeskIncidents()));
+        step("claim new incidents", () -> claimNewIncidents(recorded));
         step("read back the cases' incidents",
                 () -> cases.readBackIncidents(caseId -> listed && !unsent.contains(caseId)));
     }
@@ -103,8 +106,19 @@ public class IncidentPoller {
      * Claims each new incident in the agent's group, or, while the agent is switched off, hands it straight to the
      * default team: nothing would work a claimed incident then, even with agent-service down. While the switch cannot
      * be read, nothing is claimed or handed over; the incidents wait for the next poll.
+     *
+     * <p>An incident the service desk raised about an order is claimed only once the shop has it as a case, so that
+     * agents leave the order's money to whoever works it from the start. One the shop could not be told about this poll
+     * waits for the next: claimed and resolved before then, it would never be recorded, since only open incidents are.
+     * Handing it to the default team while the agent is switched off does not wait: it stays open with a person, and
+     * the shop records it once it can be told.
+     *
+     * <p>The shop must have it under the order the incident names when it is claimed: one the service desk moved to
+     * another order since it was recorded waits for the next poll, which moves the case first.
+     *
+     * @param recorded the service desk's incidents the shop has now, by number, each with its order
      */
-    private void claimNewIncidents() {
+    private void claimNewIncidents(Map<String, UUID> recorded) {
         boolean switchedOn = Boolean.TRUE.equals(governance.switches().get(properties.agent()));
         for (ServiceNowClient.Incident found : serviceNow.findNewForAgent()) {
             ServiceNowClient.Incident incident = serviceNow.findByNumber(found.number()).orElse(null);
@@ -114,6 +128,11 @@ public class IncidentPoller {
             }
             if (!switchedOn) {
                 handOverWhileSwitchedOff(incident);
+                continue;
+            }
+            if (cases.isServiceDeskIncidentAboutAnOrder(incident)
+                    && !CaseSync.isRecordedForItsOrder(incident, recorded)) {
+                LOGGER.info("{} waits until the shop has it as a case", incident.number());
                 continue;
             }
             Map<String, String> claim = new LinkedHashMap<>();

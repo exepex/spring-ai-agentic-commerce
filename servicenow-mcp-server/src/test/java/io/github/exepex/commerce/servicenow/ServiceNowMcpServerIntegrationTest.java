@@ -270,6 +270,9 @@ class ServiceNowMcpServerIntegrationTest {
                   "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
         stubClaimed("[]");
         stubIncident("", "1");
+        // The service desk raised it about an order, so the shop records it first.
+        stubServiceDeskIncidents(
+                "[" + incidentRow("INC0010001", "sys-1", "1", "Online Shop Agent", "", "", Instant.now()) + "]");
 
         poller.poll();
 
@@ -344,6 +347,57 @@ class ServiceNowMcpServerIntegrationTest {
     }
 
     @Test
+    void aServiceDeskIncidentTheShopCouldNotBeToldAboutIsNotClaimedUntilItIs() {
+        String row = incidentRow("INC0010025", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        stubServiceDeskIncidents("[" + row + "]");
+        stubNewIncidents("[" + row + "]");
+        stubClaimed("[]");
+        stubIncident("INC0010025", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        SERVICES.stubFor(post("/api/agent/cases/service-desk").willReturn(aResponse().withStatus(503)));
+
+        poller.poll();
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
+        SERVICES.stubFor(post("/api/agent/cases/service-desk").willReturn(aResponse().withStatus(200)));
+        poller.poll();
+
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withRequestBody(matchingJsonPath("$.assigned_to", equalTo(AGENT_USER))));
+    }
+
+    @Test
+    void aServiceDeskIncidentMovedToAnotherOrderSinceItWasRecordedIsNotClaimedUntilItsCaseMoves() {
+        String recordedRow = incidentRow("INC0010027", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        stubServiceDeskIncidents("[" + recordedRow + "]");
+        stubNewIncidents("[" + recordedRow + "]");
+        stubClaimed("[]");
+        // Re-read right before the claim, the service desk has corrected the order meanwhile.
+        String otherOrder = UUID.randomUUID().toString();
+        SERVICES.stubFor(get(urlPathEqualTo("/api/now/table/incident"))
+                .withQueryParam("sysparm_query", equalTo("number=INC0010027"))
+                .willReturn(okJson("{\"result\": [" + recordedRow.replace(LINKED_ORDER, otherOrder) + "]}")));
+
+        poller.poll();
+
+        SERVICES.verify(0, patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1")));
+    }
+
+    @Test
+    void whileTheAgentIsSwitchedOffAServiceDeskIncidentTheShopCouldNotBeToldAboutStillGoesToTheDefaultTeam() {
+        SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
+        String row = incidentRow("INC0010026", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        stubServiceDeskIncidents("[" + row + "]");
+        stubNewIncidents("[" + row + "]");
+        stubClaimed("[]");
+        stubIncident("INC0010026", "sys-1", "1", "Online Shop Agent", "", "", Instant.now());
+        SERVICES.stubFor(post("/api/agent/cases/service-desk").willReturn(aResponse().withStatus(503)));
+
+        poller.poll();
+
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withRequestBody(matchingJsonPath("$.assignment_group", equalTo("Customer Care"))));
+    }
+
+    @Test
     void whileTheAgentIsSwitchedOffANewIncidentGoesStraightToTheDefaultTeam() {
         SERVICES.stubFor(get("/api/agent-switches").willReturn(okJson("{\"incident-agent\": false}")));
         stubNewIncidents("""
@@ -351,6 +405,9 @@ class ServiceNowMcpServerIntegrationTest {
                   "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
         stubClaimed("[]");
         stubIncident("", "1");
+        // The service desk raised it about an order, so the shop records it first.
+        stubServiceDeskIncidents(
+                "[" + incidentRow("INC0010001", "sys-1", "1", "Online Shop Agent", "", "", Instant.now()) + "]");
 
         poller.poll();
 
