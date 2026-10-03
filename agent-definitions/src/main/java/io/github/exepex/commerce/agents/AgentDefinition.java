@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agents;
 
+import io.github.exepex.commerce.agents.constants.PromptPlaceholders;
 import java.util.List;
 
 /**
@@ -22,15 +23,11 @@ public record AgentDefinition(String id, String model, String effort, int toolCa
         List<String> commerceTools, List<String> slackTools, List<String> servicenowTools, String instructions,
         String slackInstructions) {
 
-    /** Where the Slack step goes in the instructions; {@value #SLACK_CHANNEL} inside it becomes the channel id. */
-    public static final String SLACK_STEP = "{slackStep}";
-    public static final String SLACK_CHANNEL = "{slackChannelId}";
-
     /** The system prompt, with the Slack step filled in for the given channel, or left out without one. */
     public String systemPrompt(String slackChannelId) {
-        String slackStep = slackChannelId == null || slackChannelId.isBlank() || slackInstructions.isBlank()
+        var slackStep = slackChannelId == null || slackChannelId.isBlank() || slackInstructions.isBlank()
                 ? ""
-                : slackInstructions.replace(SLACK_CHANNEL, slackChannelId);
-        return instructions.replace(SLACK_STEP, slackStep).strip();
+                : slackInstructions.replace(PromptPlaceholders.SLACK_CHANNEL, slackChannelId);
+        return instructions.replace(PromptPlaceholders.SLACK_STEP, slackStep).strip();
     }
 }

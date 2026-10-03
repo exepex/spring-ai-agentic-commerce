@@ -21,7 +21,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Shipment {
 
-    enum Status {
+    public enum Status {
         PREPARING,
         SHIPPED,
         DELIVERED,

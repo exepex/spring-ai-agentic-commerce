@@ -1,5 +1,11 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.constants.AgentIds;
+import io.github.exepex.commerce.agent.constants.AuditTexts;
+import io.github.exepex.commerce.agent.constants.CustomerReplies;
+import io.github.exepex.commerce.agent.constants.McpValues;
+import io.github.exepex.commerce.agent.constants.Prompts;
+import io.github.exepex.commerce.agent.dto.Reply;
 import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import java.time.Duration;
@@ -12,7 +18,6 @@ import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Service;
 
 /**
@@ -23,12 +28,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class ShoppingAssistant {
 
-    public record Reply(String text, List<String> proposals) {}
-
     private static final int MAX_CONVERSATIONS = 1_000;
     /** How much of each answer the audit trail shows. */
     private static final int MAX_SUMMARY_LENGTH = 160;
-    private static final String TRY_AGAIN = "Sorry, I could not answer that just now. Please try again in a moment.";
 
     private final ChatClient chatClient;
     private final McpToolboxes toolboxes;
@@ -38,8 +40,8 @@ public class ShoppingAssistant {
 
     ShoppingAssistant(ChatModel chatModel, McpToolboxes toolboxes, AgentSwitchboard switchboard,
             DecisionRecorder decisions, AgentDefinitions definitions) {
-        this.definition = definitions.get(AgentSwitchboard.SHOPPING_ASSISTANT);
-        ChatMemory memory = MessageWindowChatMemory.builder()
+        this.definition = definitions.get(AgentIds.SHOPPING_ASSISTANT);
+        var memory = MessageWindowChatMemory.builder()
                 .chatMemoryRepository(new RecentConversations(MAX_CONVERSATIONS))
                 .maxMessages(30)
                 .build();
@@ -55,33 +57,34 @@ public class ShoppingAssistant {
     public Reply chat(String conversationId, String customerEmail, String message) {
         boolean enabled;
         try {
-            enabled = switchboard.isEnabled(AgentSwitchboard.SHOPPING_ASSISTANT);
+            enabled = switchboard.isEnabled(AgentIds.SHOPPING_ASSISTANT);
         } catch (RuntimeException unreachable) {
             log.error("Could not read the shopping assistant's kill switch", unreachable);
-            return new Reply(TRY_AGAIN, List.of());
+            return new Reply(CustomerReplies.TRY_AGAIN, List.of());
         }
         if (!enabled) {
-            return new Reply("The shopping assistant is switched off right now. Please try again later.", List.of());
+            return new Reply(CustomerReplies.ASSISTANT_SWITCHED_OFF, List.of());
         }
-        ToolRun run = new ToolRun(customerEmail, definition.toolCallBudget());
-        Instant started = Instant.now();
+        var run = new ToolRun(customerEmail, definition.toolCallBudget());
+        var started = Instant.now();
         try {
-            ChatResponse response = chatClient.prompt()
-                    .system(definition.systemPrompt(null) + "\n\nThe signed-in customer is " + customerEmail + ".")
+            var response = chatClient.prompt()
+                    .system(definition.systemPrompt(null) + Prompts.SIGNED_IN_CUSTOMER.formatted(customerEmail))
                     .user(message)
                     .toolCallbacks(toolboxes.shoppingAssistantTools())
-                    .toolContext(Map.of(ToolRun.CONTEXT_KEY, run))
+                    .toolContext(Map.of(McpValues.TOOL_RUN_CONTEXT_KEY, run))
                     .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
                     .call()
                     .chatResponse();
-            String text = ClaudeReply.textOf(response);
-            decisions.record(AgentSwitchboard.SHOPPING_ASSISTANT, null,
-                    "Answered " + customerEmail + ": " + AgentTexts.abbreviate(text, MAX_SUMMARY_LENGTH, "..."),
-                    "Customer asked: " + message, response, Duration.between(started, Instant.now()));
+            var text = ClaudeReply.textOf(response);
+            decisions.record(AgentIds.SHOPPING_ASSISTANT, null,
+                    AuditTexts.ANSWERED.formatted(customerEmail,
+                            AgentTexts.abbreviate(text, MAX_SUMMARY_LENGTH, AuditTexts.ELLIPSIS)),
+                    AuditTexts.CUSTOMER_ASKED.formatted(message), response, Duration.between(started, Instant.now()));
             return new Reply(text, run.proposals());
         } catch (RuntimeException failure) {
             log.error("The shopping assistant failed to answer {}", LogValues.safe(customerEmail), failure);
-            return new Reply(TRY_AGAIN, run.proposals());
+            return new Reply(CustomerReplies.TRY_AGAIN, run.proposals());
         }
     }
 }

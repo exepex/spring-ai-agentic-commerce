@@ -1,13 +1,17 @@
 package io.github.exepex.commerce.servicenow.incidents;
 
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
-import java.time.Instant;
+import io.github.exepex.commerce.servicenow.constants.IncidentQueries;
+import io.github.exepex.commerce.servicenow.constants.Patterns;
+import io.github.exepex.commerce.servicenow.constants.ServiceNowFields;
+import io.github.exepex.commerce.servicenow.constants.TableApi;
+import io.github.exepex.commerce.servicenow.exception.IntegrationUserNotFoundException;
+import io.github.exepex.commerce.servicenow.incidents.dto.Incident;
+import io.github.exepex.commerce.servicenow.incidents.dto.Journal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.springframework.http.MediaType;
@@ -22,16 +26,10 @@ import tools.jackson.databind.JsonNode;
 @Component
 class ServiceNowClient {
 
-    static final String STATE_NEW = "1";
-    static final String STATE_IN_PROGRESS = "2";
-    static final String STATE_RESOLVED = "6";
-    /** Resolved, closed and cancelled: the incident needs nothing more. */
-    static final Set<String> STATES_FINISHED = Set.of(STATE_RESOLVED, "7", "8");
-    /** Closed and cancelled: unlike a resolved incident, it can no longer be reopened. */
-    static final Set<String> STATES_FINAL = Set.of("7", "8");
-
     private static final int PAGE_SIZE = 100;
-    private static final Pattern SYS_ID = Pattern.compile("[A-Za-z0-9-]+");
+    private static final int NEW_INCIDENTS_PER_POLL = 20;
+    private static final int CLAIMED_INCIDENTS_PER_POLL = 50;
+    private static final Pattern SYS_ID = Pattern.compile(Patterns.SYS_ID);
 
     private final ServiceNowProperties properties;
     private final RestClient restClient;
@@ -40,7 +38,7 @@ class ServiceNowClient {
     ServiceNowClient(ServiceNowProperties properties, RestClient.Builder builder) {
         this.properties = properties;
         this.restClient = builder.clone()
-                .baseUrl(properties.isConfigured() ? properties.instanceUrl() : "http://servicenow.invalid")
+                .baseUrl(properties.isConfigured() ? properties.instanceUrl() : TableApi.NO_INSTANCE)
                 .defaultHeaders(headers -> {
                     if (properties.isConfigured()) {
                         headers.setBasicAuth(properties.username(), properties.password());
@@ -50,62 +48,13 @@ class ServiceNowClient {
                 .build();
     }
 
-    /**
-     * An incident as the tools and the poller see it. {@code orderId} is the shop order it is about, taken from its
-     * Correlation ID field; empty when it names none. {@code caseId} is the shop's case it was opened for, from its
-     * Correlation display field; empty for an incident the service desk raised.
-     */
-    record Incident(String sysId, String number, String shortDescription, String description, String state,
-            String stateName, String assignmentGroup, String assignedToSysId, String assignedTo, String caller,
-            String orderId, String caseId, Instant openedAt, Instant updatedAt) {
-
-        boolean isAssigned() {
-            return assignedToSysId != null && !assignedToSysId.isBlank();
-        }
-
-        /** Resolved, closed or cancelled: the incident needs nothing more. */
-        boolean isFinished() {
-            return STATES_FINISHED.contains(state);
-        }
-
-        /** Closed or cancelled: unlike a resolved incident, it can no longer be reopened. */
-        boolean isFinal() {
-            return STATES_FINAL.contains(state);
-        }
-
-        /**
-         * Still the agent's claim: assigned to the integration user, in progress, and in the agent's group. A person who
-         * moved the incident to another group has it, even if they left it assigned to the agent.
-         */
-        boolean isClaimedBy(String integrationUserSysId, String agentGroup) {
-            return integrationUserSysId.equals(assignedToSysId) && STATE_IN_PROGRESS.equals(state)
-                    && agentGroup.equals(assignmentGroup);
-        }
-
-        /** The order the incident names now, in its Correlation ID; null when it names none. */
-        UUID linkedOrder() {
-            return TableApiRows.idOrNull(orderId);
-        }
-
-        /** The case the incident was opened for; null for an incident the service desk raised. */
-        UUID openedForCase() {
-            return TableApiRows.idOrNull(caseId);
-        }
-    }
-
-    /**
-     * An incident's work notes and comments as ServiceNow shows them: newest entry first, each starting with a line
-     * {@code <time> - <who> (<kind>)}, the time in the integration user's time zone.
-     */
-    record Journal(String workNotes, String comments) {}
-
     Optional<Incident> findByNumber(String number) {
-        return query("number=" + number, 1).stream().findFirst();
+        return query(IncidentQueries.BY_NUMBER.formatted(number), 1).stream().findFirst();
     }
 
     /** The incident opened for a shop case, if one was, so a case never gets two. */
     Optional<Incident> findByCaseId(UUID caseId) {
-        return query("correlation_display=" + caseId, 1).stream().findFirst();
+        return query(IncidentQueries.BY_CASE.formatted(caseId), 1).stream().findFirst();
     }
 
     /**
@@ -114,16 +63,16 @@ class ServiceNowClient {
      * @return the incident as created
      */
     Incident create(Map<String, String> fields) {
-        JsonNode body = restClient.post()
-                .uri(uri -> uri.path("/api/now/table/incident")
-                        .queryParam("sysparm_input_display_value", true)
-                        .queryParam("sysparm_fields", TableApiRows.INCIDENT_FIELDS)
-                        .queryParam("sysparm_display_value", "all")
+        var body = restClient.post()
+                .uri(uri -> uri.path(TableApi.INCIDENTS)
+                        .queryParam(TableApi.INPUT_DISPLAY_VALUE, true)
+                        .queryParam(TableApi.FIELDS, ServiceNowFields.INCIDENT_FIELDS)
+                        .queryParam(TableApi.DISPLAY_VALUE, TableApi.SHOW_ALL)
                         .build())
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(fields)
                 .retrieve().body(JsonNode.class);
-        return TableApiRows.incidentOf(body.path("result"));
+        return TableApiRows.incidentOf(body.path(TableApi.RESULT));
     }
 
     /** Where a person opens the incident in ServiceNow. */
@@ -140,21 +89,21 @@ class ServiceNowClient {
         if (link == null || !link.startsWith(linkPrefix())) {
             return Optional.empty();
         }
-        String sysId = link.substring(linkPrefix().length());
+        var sysId = link.substring(linkPrefix().length());
         // Only a plain id goes into the query: anything else in a link could add terms of its own.
         if (!SYS_ID.matcher(sysId).matches()) {
             return Optional.empty();
         }
-        return query("sys_id=" + sysId, 1).stream().findFirst();
+        return query(IncidentQueries.BY_SYS_ID.formatted(sysId), 1).stream().findFirst();
     }
 
     private String linkPrefix() {
-        return properties.instanceUrl().replaceAll("/+$", "") + "/incident.do?sys_id=";
+        return properties.instanceUrl().replaceAll(Patterns.TRAILING_SLASHES, "") + TableApi.INCIDENT_LINK;
     }
 
     /** New incidents in the agent's group that nobody has taken yet. */
     List<Incident> findNewForAgent() {
-        return query("assignment_group.name=" + properties.agentGroup() + "^assigned_toISEMPTY^state=" + STATE_NEW, 20);
+        return query(IncidentQueries.NEW_IN_GROUP.formatted(properties.agentGroup()), NEW_INCIDENTS_PER_POLL);
     }
 
     /**
@@ -162,12 +111,10 @@ class ServiceNowClient {
      * desk's. All of them, read a page at a time, oldest first.
      */
     List<Incident> findOpenWithCorrelationId() {
-        String openWithCorrelationId = "correlation_idISNOTEMPTY^stateNOT IN"
-                + String.join(",", new TreeSet<>(STATES_FINISHED)) + "^ORDERBYsys_created_on";
-        List<Incident> all = new ArrayList<>();
+        var all = new ArrayList<Incident>();
         List<Incident> page;
         do {
-            page = query(openWithCorrelationId, PAGE_SIZE, all.size());
+            page = query(IncidentQueries.OPEN_WITH_CORRELATION_ID, PAGE_SIZE, all.size());
             all.addAll(page);
         } while (page.size() == PAGE_SIZE);
         return all;
@@ -175,8 +122,8 @@ class ServiceNowClient {
 
     /** Incidents the agent has claimed and not finished: still in its group, assigned to it and in progress. */
     List<Incident> findClaimedByAgent() {
-        return query("assignment_group.name=" + properties.agentGroup() + "^assigned_to=" + integrationUserSysId()
-                + "^state=" + STATE_IN_PROGRESS, 50);
+        var claimed = IncidentQueries.IN_PROGRESS_IN_GROUP_WITH.formatted(properties.agentGroup(), integrationUserSysId());
+        return query(claimed, CLAIMED_INCIDENTS_PER_POLL);
     }
 
     /**
@@ -195,12 +142,12 @@ class ServiceNowClient {
     }
 
     private JsonNode journalFieldsOf(String incidentSysId) {
-        JsonNode body = restClient.get()
-                .uri(uri -> uri.path("/api/now/table/incident")
-                        .queryParam("sysparm_query", "sys_id=" + incidentSysId)
-                        .queryParam("sysparm_fields", "work_notes,comments")
-                        .queryParam("sysparm_display_value", true)
-                        .queryParam("sysparm_limit", 1)
+        var body = restClient.get()
+                .uri(uri -> uri.path(TableApi.INCIDENTS)
+                        .queryParam(TableApi.QUERY, IncidentQueries.BY_SYS_ID.formatted(incidentSysId))
+                        .queryParam(TableApi.FIELDS, ServiceNowFields.JOURNAL_FIELDS)
+                        .queryParam(TableApi.DISPLAY_VALUE, true)
+                        .queryParam(TableApi.LIMIT, 1)
                         .build())
                 .retrieve().body(JsonNode.class);
         return TableApiRows.firstRowOf(body);
@@ -218,8 +165,8 @@ class ServiceNowClient {
 
     private void patch(String sysId, Map<String, String> fields, boolean displayValues) {
         restClient.patch()
-                .uri(uri -> uri.path("/api/now/table/incident/{sysId}")
-                        .queryParam("sysparm_input_display_value", displayValues)
+                .uri(uri -> uri.path(TableApi.INCIDENT)
+                        .queryParam(TableApi.INPUT_DISPLAY_VALUE, displayValues)
                         .build(sysId))
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(fields)
@@ -230,16 +177,16 @@ class ServiceNowClient {
     /** The integration user's sys_id, looked up once: incidents the agent claims are assigned to it. */
     String integrationUserSysId() {
         if (integrationUserSysId == null) {
-            JsonNode body = restClient.get()
-                    .uri(uri -> uri.path("/api/now/table/sys_user")
-                            .queryParam("sysparm_query", "user_name=" + properties.username())
-                            .queryParam("sysparm_fields", "sys_id")
-                            .queryParam("sysparm_limit", 1)
+            var body = restClient.get()
+                    .uri(uri -> uri.path(TableApi.USERS)
+                            .queryParam(TableApi.QUERY, IncidentQueries.USER_BY_NAME.formatted(properties.username()))
+                            .queryParam(TableApi.FIELDS, ServiceNowFields.SYS_ID)
+                            .queryParam(TableApi.LIMIT, 1)
                             .build())
                     .retrieve().body(JsonNode.class);
-            String sysId = TableApiRows.firstRowOf(body).path("sys_id").asString("");
+            var sysId = TableApiRows.firstRowOf(body).path(ServiceNowFields.SYS_ID).asString("");
             if (sysId.isBlank()) {
-                throw new IllegalStateException("ServiceNow has no user " + properties.username());
+                throw new IntegrationUserNotFoundException(properties.username());
             }
             integrationUserSysId = sysId;
         }
@@ -251,13 +198,13 @@ class ServiceNowClient {
     }
 
     private List<Incident> query(String encodedQuery, int limit, int offset) {
-        JsonNode body = restClient.get()
-                .uri(uri -> uri.path("/api/now/table/incident")
-                        .queryParam("sysparm_query", encodedQuery)
-                        .queryParam("sysparm_fields", TableApiRows.INCIDENT_FIELDS)
-                        .queryParam("sysparm_display_value", "all")
-                        .queryParam("sysparm_limit", limit)
-                        .queryParam("sysparm_offset", offset)
+        var body = restClient.get()
+                .uri(uri -> uri.path(TableApi.INCIDENTS)
+                        .queryParam(TableApi.QUERY, encodedQuery)
+                        .queryParam(TableApi.FIELDS, ServiceNowFields.INCIDENT_FIELDS)
+                        .queryParam(TableApi.DISPLAY_VALUE, TableApi.SHOW_ALL)
+                        .queryParam(TableApi.LIMIT, limit)
+                        .queryParam(TableApi.OFFSET, offset)
                         .build())
                 .retrieve().body(JsonNode.class);
         return TableApiRows.incidentsOf(body);

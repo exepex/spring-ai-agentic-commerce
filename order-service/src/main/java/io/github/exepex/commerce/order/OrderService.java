@@ -1,13 +1,19 @@
 package io.github.exepex.commerce.order;
 
-import io.github.exepex.commerce.order.CatalogHttpApi.CatalogProduct;
+import io.github.exepex.commerce.order.dto.RequestedLine;
+import io.github.exepex.commerce.order.exception.MixedCurrenciesException;
+import io.github.exepex.commerce.order.exception.OrderIdTakenException;
+import io.github.exepex.commerce.order.exception.OrderNotCancellableException;
+import io.github.exepex.commerce.order.exception.OrderNotFoundException;
+import io.github.exepex.commerce.order.exception.OrderNotShippableException;
+import io.github.exepex.commerce.order.exception.OrderPaymentFailedException;
+import io.github.exepex.commerce.order.exception.PaymentDeclinedException;
+import io.github.exepex.commerce.order.exception.PaymentUnavailableException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,8 +40,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 @RequiredArgsConstructor
 public class OrderService {
 
-    public record RequestedLine(UUID productId, int quantity) {}
-
     private final CustomerOrderRepository orders;
     private final CatalogGateway catalog;
     private final PaymentGateway payments;
@@ -50,23 +54,23 @@ public class OrderService {
      *
      * @return the order: confirmed, with its payment pending, or still being placed by a concurrent request with the
      *     same id
-     * @throws OrderRejectedException when the card was declined, naming the order
+     * @throws OrderPaymentFailedException when the card was declined, naming the order
      */
     public CustomerOrder placeOrder(UUID requestedOrderId, String customerEmail, List<RequestedLine> requestedLines,
             String paymentMethod) {
         if (requestedOrderId != null) {
-            Optional<CustomerOrder> placedBefore = orders.findById(requestedOrderId);
+            var placedBefore = orders.findById(requestedOrderId);
             if (placedBefore.isPresent()) {
                 return outcomeOf(placedBefore.get(), customerEmail);
             }
         }
         CheckoutLines.rejectDuplicateProducts(requestedLines);
-        UUID orderId = requestedOrderId != null ? requestedOrderId : UUID.randomUUID();
+        var orderId = requestedOrderId != null ? requestedOrderId : UUID.randomUUID();
         CustomerOrder order;
         try {
             order = reserveAndSave(orderId, customerEmail, requestedLines, paymentMethod);
         } catch (RuntimeException failure) {
-            Optional<CustomerOrder> placedMeanwhile = orders.findById(orderId);
+            var placedMeanwhile = orders.findById(orderId);
             if (placedMeanwhile.isPresent()) {
                 // A concurrent request with the same id placed it; that request owns its stock and its payment.
                 return outcomeOf(placedMeanwhile.get(), customerEmail);
@@ -87,12 +91,12 @@ public class OrderService {
         try {
             payments.charge(order.getId(), order.getCustomerEmail(), order.getTotalAmount(), order.getCurrency(),
                     order.getPaymentMethod());
-        } catch (PaymentGateway.PaymentDeclinedException declined) {
+        } catch (PaymentDeclinedException declined) {
             return change(order, () -> {
                 order.markPaymentFailed(declined.getMessage());
                 releases.request(order.getId());
             }, () -> releases.attempt(order.getId()));
-        } catch (PaymentGateway.PaymentUnavailableException unknown) {
+        } catch (PaymentUnavailableException unknown) {
             log.warn("The payment for order {} could not be confirmed; it will be asked for again", order.getId(),
                     unknown);
             return order.getStatus() == OrderStatus.PAYMENT_PENDING ? order : change(order, order::markPaymentPending, null);
@@ -121,20 +125,20 @@ public class OrderService {
      * happens. Cancelling twice changes nothing. Refunds are a separate decision, made through the payment service.
      */
     public CustomerOrder cancelOrder(UUID orderId, String reason) {
-        CustomerOrder order = getOrder(orderId);
+        var order = getOrder(orderId);
         if (order.getStatus() == OrderStatus.CANCELLED) {
             return order;
         }
         if (!order.isCancellable()) {
-            throw OrderRejectedException.notCancellable(orderId, order.getStatus());
+            throw new OrderNotCancellableException(orderId, order.getStatus());
         }
-        CustomerOrder cancelled = change(order, () -> {
+        var cancelled = change(order, () -> {
             order.cancel(reason, Instant.now(clock));
             announce(OrderEvent.Type.ORDER_CANCELLED, order);
             releases.request(orderId);
         }, () -> releases.attempt(orderId));
         if (cancelled.getStatus() != OrderStatus.CANCELLED) {
-            throw OrderRejectedException.notCancellable(orderId, cancelled.getStatus());
+            throw new OrderNotCancellableException(orderId, cancelled.getStatus());
         }
         return cancelled;
     }
@@ -147,20 +151,20 @@ public class OrderService {
      * Shipping twice changes nothing.
      */
     public CustomerOrder shipOrder(UUID orderId) {
-        CustomerOrder order = getOrder(orderId);
+        var order = getOrder(orderId);
         if (order.hasShipped()) {
             return order;
         }
         if (!order.isShippable()) {
-            throw OrderRejectedException.notShippable(orderId, order.getStatus());
+            throw new OrderNotShippableException(orderId, order.getStatus());
         }
         catalog.dispatchOrder(orderId);
-        CustomerOrder shipped = change(order, () -> {
+        var shipped = change(order, () -> {
             order.ship();
             announce(OrderEvent.Type.ORDER_SHIPPED, order);
         }, null);
         if (!shipped.hasShipped()) {
-            throw OrderRejectedException.notShippable(orderId, shipped.getStatus());
+            throw new OrderNotShippableException(orderId, shipped.getStatus());
         }
         return shipped;
     }
@@ -170,7 +174,7 @@ public class OrderService {
      * deliver the report again: an order that already has the outcome is left as it is.
      */
     void recordCarrierOutcome(UUID orderId, OrderStatus outcome) {
-        CustomerOrder order = getOrder(orderId);
+        var order = getOrder(orderId);
         if (order.getStatus() == outcome) {
             return;
         }
@@ -187,10 +191,10 @@ public class OrderService {
     /** Checkout's answer for an order it placed now or before. */
     private static CustomerOrder outcomeOf(CustomerOrder order, String customerEmail) {
         if (!order.isPlacedBy(customerEmail)) {
-            throw OrderRejectedException.idTaken(order.getId());
+            throw new OrderIdTakenException(order.getId());
         }
         if (order.getStatus() == OrderStatus.PAYMENT_FAILED) {
-            throw OrderRejectedException.paymentDeclined(order.getId(), order.getPaymentFailure());
+            throw new OrderPaymentFailedException(order.getId(), order.getPaymentFailure());
         }
         return order;
     }
@@ -218,16 +222,16 @@ public class OrderService {
     /** Reserves every line in the catalog and saves the order as placed. On failure the caller releases the stock. */
     private CustomerOrder reserveAndSave(UUID orderId, String customerEmail, List<RequestedLine> requestedLines,
             String paymentMethod) {
-        List<OrderLine> lines = new ArrayList<>();
-        Set<String> currencies = new HashSet<>();
-        for (RequestedLine requested : requestedLines) {
-            CatalogProduct product = catalog.getProduct(requested.productId());
+        var lines = new ArrayList<OrderLine>();
+        var currencies = new HashSet<String>();
+        for (var requested : requestedLines) {
+            var product = catalog.getProduct(requested.productId());
             catalog.reserveStock(product.id(), orderId, requested.quantity());
             lines.add(CheckoutLines.orderLineOf(product, requested.quantity()));
             currencies.add(product.currency());
         }
         if (currencies.size() > 1) {
-            throw OrderRejectedException.mixedCurrencies();
+            throw new MixedCurrenciesException();
         }
         return orders.save(CustomerOrder.place(orderId, customerEmail, currencies.iterator().next(), lines,
                 paymentMethod, Instant.now(clock)));

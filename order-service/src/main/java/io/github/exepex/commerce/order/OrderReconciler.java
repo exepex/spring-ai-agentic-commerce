@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.order;
 
+import io.github.exepex.commerce.order.constants.ConfigKeys;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -25,15 +26,16 @@ class OrderReconciler {
     private final OrderService orderService;
     private final StockReleases releases;
 
-    @Value("${commerce.reconciliation.settle-after}")
+    @Value(ConfigKeys.RECONCILIATION_SETTLE_AFTER)
     private final Duration settleAfter;
 
     private final Clock clock;
 
-    @Scheduled(fixedDelayString = "${commerce.reconciliation.interval}", initialDelayString = "${commerce.reconciliation.interval}")
+    @Scheduled(fixedDelayString = ConfigKeys.RECONCILIATION_INTERVAL,
+            initialDelayString = ConfigKeys.RECONCILIATION_INTERVAL)
     void reconcile() {
-        Instant stalledBefore = Instant.now(clock).minus(settleAfter);
-        for (CustomerOrder order : orders.findByStatusInAndCreatedAtBefore(
+        var stalledBefore = Instant.now(clock).minus(settleAfter);
+        for (var order : orders.findByStatusInAndCreatedAtBefore(
                 List.of(OrderStatus.PLACED, OrderStatus.PAYMENT_PENDING), stalledBefore)) {
             try {
                 orderService.settlePayment(order);

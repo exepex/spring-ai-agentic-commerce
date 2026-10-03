@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.payment;
 
+import io.github.exepex.commerce.payment.constants.PaymentValues;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -12,7 +13,7 @@ public record RefundFailedEvent(UUID eventId, String type, UUID orderId, String 
         String currency, Instant occurredAt) {
 
     static RefundFailedEvent of(Payment payment, Refund refund, Instant now) {
-        return new RefundFailedEvent(UUID.randomUUID(), "REFUND_FAILED", payment.getOrderId(), refund.getIdempotencyKey(),
+        return new RefundFailedEvent(UUID.randomUUID(), PaymentValues.REFUND_FAILED_EVENT, payment.getOrderId(), refund.getIdempotencyKey(),
                 refund.getAmount(), payment.getCurrency(), now);
     }
 }

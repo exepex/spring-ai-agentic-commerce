@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.constants.ToolNames;
+import io.github.exepex.commerce.agent.constants.ToolParameters;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -14,8 +16,6 @@ import java.util.stream.Collectors;
  * never sees any of it.
  */
 public final class ToolRun {
-
-    public static final String CONTEXT_KEY = "commerce.toolRun";
 
     /** One successful tool call: the tool, the arguments it was called with, and what it returned. */
     public record ToolResult(String tool, String arguments, String result) {}
@@ -82,7 +82,7 @@ public final class ToolRun {
      * delivered again; null for a run that is not about one piece of work.
      */
     String notificationKeyFor(String orderId) {
-        return workId == null ? null : "notify-" + normalized(orderId) + "-" + workId;
+        return workId == null ? null : ToolParameters.NOTIFICATION_KEY.formatted(normalized(orderId), workId);
     }
 
     boolean takeCall() {
@@ -98,6 +98,9 @@ public final class ToolRun {
     }
 
     public synchronized List<String> proposals() {
-        return succeeded.stream().filter(call -> "propose_order".equals(call.tool())).map(ToolResult::result).toList();
+        return succeeded.stream()
+                .filter(call -> ToolNames.PROPOSE_ORDER.equals(call.tool()))
+                .map(ToolResult::result)
+                .toList();
     }
 }

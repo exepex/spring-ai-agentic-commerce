@@ -1,9 +1,10 @@
 package io.github.exepex.commerce.order;
 
-import io.github.exepex.commerce.order.CatalogHttpApi.CatalogProduct;
+import io.github.exepex.commerce.order.dto.CatalogProduct;
+import io.github.exepex.commerce.order.dto.RequestedLine;
+import io.github.exepex.commerce.order.exception.DuplicateProductException;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -13,11 +14,11 @@ import lombok.NoArgsConstructor;
 final class CheckoutLines {
 
     /** Each product goes on one line only, so it is reserved and charged once. */
-    static void rejectDuplicateProducts(List<OrderService.RequestedLine> requestedLines) {
-        Set<UUID> seenProductIds = new HashSet<>();
-        for (OrderService.RequestedLine requested : requestedLines) {
+    static void rejectDuplicateProducts(List<RequestedLine> requestedLines) {
+        var seenProductIds = new HashSet<UUID>();
+        for (var requested : requestedLines) {
             if (!seenProductIds.add(requested.productId())) {
-                throw OrderRejectedException.duplicateProduct(requested.productId());
+                throw new DuplicateProductException(requested.productId());
             }
         }
     }

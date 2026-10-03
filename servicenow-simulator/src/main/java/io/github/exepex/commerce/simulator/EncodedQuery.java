@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.simulator;
 
+import io.github.exepex.commerce.simulator.constants.QuerySyntax;
+import io.github.exepex.commerce.simulator.exception.InvalidEncodedQueryException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -22,17 +24,18 @@ record EncodedQuery(List<Term> terms, String orderBy, boolean descending) {
     /** One term: the field it reads, and which of that field's stored values it accepts. */
     record Term(String field, Predicate<String> accepts) {}
 
-    /** @throws IllegalArgumentException for a term the simulator does not understand */
+    /** @throws InvalidEncodedQueryException for a term the simulator does not understand */
     static EncodedQuery parse(String encodedQuery) {
-        List<Term> terms = new ArrayList<>();
+        var terms = new ArrayList<Term>();
         String orderBy = null;
-        boolean descending = false;
-        for (String term : encodedQuery == null || encodedQuery.isBlank() ? new String[0] : encodedQuery.split("\\^")) {
-            if (term.startsWith("ORDERBYDESC")) {
-                orderBy = term.substring("ORDERBYDESC".length());
+        var descending = false;
+        for (var term : encodedQuery == null || encodedQuery.isBlank() ? new String[0]
+                : encodedQuery.split(QuerySyntax.TERM_SEPARATOR)) {
+            if (term.startsWith(QuerySyntax.ORDER_BY_DESCENDING)) {
+                orderBy = term.substring(QuerySyntax.ORDER_BY_DESCENDING.length());
                 descending = true;
-            } else if (term.startsWith("ORDERBY")) {
-                orderBy = term.substring("ORDERBY".length());
+            } else if (term.startsWith(QuerySyntax.ORDER_BY)) {
+                orderBy = term.substring(QuerySyntax.ORDER_BY.length());
             } else {
                 terms.add(termOf(term));
             }
@@ -58,22 +61,24 @@ record EncodedQuery(List<Term> terms, String orderBy, boolean descending) {
     }
 
     private static Term termOf(String term) {
-        if (term.endsWith("ISNOTEMPTY")) {
-            return new Term(term.substring(0, term.length() - "ISNOTEMPTY".length()), value -> !value.isEmpty());
+        if (term.endsWith(QuerySyntax.IS_NOT_EMPTY)) {
+            return new Term(term.substring(0, term.length() - QuerySyntax.IS_NOT_EMPTY.length()),
+                    value -> !value.isEmpty());
         }
-        if (term.endsWith("ISEMPTY")) {
-            return new Term(term.substring(0, term.length() - "ISEMPTY".length()), String::isEmpty);
+        if (term.endsWith(QuerySyntax.IS_EMPTY)) {
+            return new Term(term.substring(0, term.length() - QuerySyntax.IS_EMPTY.length()), String::isEmpty);
         }
-        int notIn = term.indexOf("NOT IN");
+        var notIn = term.indexOf(QuerySyntax.NOT_IN);
         if (notIn > 0) {
-            List<String> excluded = Arrays.asList(term.substring(notIn + "NOT IN".length()).split(","));
+            var excluded = Arrays.asList(term.substring(notIn + QuerySyntax.NOT_IN.length())
+                    .split(QuerySyntax.LIST_SEPARATOR));
             return new Term(term.substring(0, notIn), value -> !excluded.contains(value));
         }
-        int equals = term.indexOf('=');
+        var equals = term.indexOf('=');
         if (equals < 0) {
-            throw new IllegalArgumentException("The simulator does not understand the query term '" + term + "'");
+            throw new InvalidEncodedQueryException(term);
         }
-        String expected = term.substring(equals + 1);
+        var expected = term.substring(equals + 1);
         return new Term(term.substring(0, equals), expected::equals);
     }
 }

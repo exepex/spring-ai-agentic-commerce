@@ -1,12 +1,10 @@
 package io.github.exepex.commerce.order;
 
-import io.github.exepex.commerce.order.OrderViews.OrderView;
+import io.github.exepex.commerce.order.constants.ApiPaths;
+import io.github.exepex.commerce.order.dto.CancelOrderRequest;
+import io.github.exepex.commerce.order.dto.OrderView;
+import io.github.exepex.commerce.order.dto.PlaceOrderRequest;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
 import java.net.URI;
 import java.util.List;
 import java.util.UUID;
@@ -22,29 +20,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/orders")
+@RequestMapping(ApiPaths.ORDERS)
 @RequiredArgsConstructor
 class OrderController {
-
-    record LineRequest(@NotNull UUID productId, @Positive int quantity) {}
-
-    /**
-     * {@code paymentMethod} is a Stripe test payment method; it defaults to the test Visa card. {@code orderId} is
-     * optional: with it, placing the order is idempotent.
-     */
-    record PlaceOrderRequest(UUID orderId, @NotBlank @Email String customerEmail, @NotEmpty List<@Valid LineRequest> lines,
-            String paymentMethod) {
-
-        String paymentMethodOrDefault() {
-            return paymentMethod == null || paymentMethod.isBlank() ? "pm_card_visa" : paymentMethod;
-        }
-
-        List<OrderService.RequestedLine> requestedLines() {
-            return lines.stream().map(line -> new OrderService.RequestedLine(line.productId(), line.quantity())).toList();
-        }
-    }
-
-    record CancelOrderRequest(@NotBlank String reason) {}
 
     private final OrderService orderService;
 
@@ -54,35 +32,35 @@ class OrderController {
      */
     @PostMapping
     ResponseEntity<OrderView> placeOrder(@Valid @RequestBody PlaceOrderRequest request) {
-        CustomerOrder order = orderService.placeOrder(request.orderId(), request.customerEmail(),
-                request.requestedLines(), request.paymentMethodOrDefault());
-        HttpStatus status = order.getStatus() == OrderStatus.CONFIRMED ? HttpStatus.CREATED : HttpStatus.ACCEPTED;
-        return ResponseEntity.status(status).location(URI.create("/api/orders/" + order.getId()))
-                .body(OrderViews.toView(order));
+        var order = orderService.placeOrder(request.orderId(), request.customerEmail(),
+                OrderMapper.requestedLinesOf(request), OrderMapper.paymentMethodOf(request));
+        var status = order.getStatus() == OrderStatus.CONFIRMED ? HttpStatus.CREATED : HttpStatus.ACCEPTED;
+        return ResponseEntity.status(status).location(URI.create(ApiPaths.ORDER_LOCATION.formatted(order.getId())))
+                .body(OrderMapper.toView(order));
     }
 
-    @GetMapping("/{orderId}")
+    @GetMapping(ApiPaths.ORDER)
     OrderView getOrder(@PathVariable UUID orderId) {
-        return OrderViews.toView(orderService.getOrder(orderId));
+        return OrderMapper.toView(orderService.getOrder(orderId));
     }
 
     /** A customer's orders when {@code customerEmail} is given, otherwise the 100 most recent orders. */
     @GetMapping
     List<OrderView> findOrders(@RequestParam(required = false) String customerEmail) {
-        List<CustomerOrder> found = customerEmail == null
+        var found = customerEmail == null
                 ? orderService.findRecentOrders()
                 : orderService.findOrdersOf(customerEmail);
-        return found.stream().map(OrderViews::toView).toList();
+        return found.stream().map(OrderMapper::toView).toList();
     }
 
     /** Ships the order from the warehouse. Shipping twice changes nothing; a cancelled order is refused. */
-    @PostMapping("/{orderId}/dispatch")
+    @PostMapping(ApiPaths.ORDER_DISPATCH)
     OrderView shipOrder(@PathVariable UUID orderId) {
-        return OrderViews.toView(orderService.shipOrder(orderId));
+        return OrderMapper.toView(orderService.shipOrder(orderId));
     }
 
-    @PostMapping("/{orderId}/cancellation")
+    @PostMapping(ApiPaths.ORDER_CANCELLATION)
     OrderView cancelOrder(@PathVariable UUID orderId, @Valid @RequestBody CancelOrderRequest request) {
-        return OrderViews.toView(orderService.cancelOrder(orderId, request.reason()));
+        return OrderMapper.toView(orderService.cancelOrder(orderId, request.reason()));
     }
 }

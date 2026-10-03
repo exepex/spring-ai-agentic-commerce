@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.constants.LogSafety;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 
@@ -11,6 +12,6 @@ import lombok.NoArgsConstructor;
 public final class LogValues {
 
     public static String safe(String value) {
-        return value == null ? null : value.replaceAll("[\\r\\n\\t]", "_");
+        return value == null ? null : value.replaceAll(LogSafety.LINE_BREAKS, LogSafety.REPLACEMENT);
     }
 }

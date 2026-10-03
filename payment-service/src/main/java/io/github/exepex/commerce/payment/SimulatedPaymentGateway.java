@@ -1,5 +1,7 @@
 package io.github.exepex.commerce.payment;
 
+import io.github.exepex.commerce.payment.constants.ErrorMessages;
+import io.github.exepex.commerce.payment.constants.PaymentValues;
 import java.math.BigDecimal;
 import java.util.Map;
 import java.util.Set;
@@ -14,9 +16,6 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class SimulatedPaymentGateway implements PaymentGateway {
 
-    static final String DECLINED_CARD = "pm_card_chargeDeclined";
-    static final String REFUND_FAILS_CARD = "pm_card_refundFail";
-
     private final Map<String, String> referencesByIdempotencyKey = new ConcurrentHashMap<>();
     private final Set<String> failingRefundReferences = ConcurrentHashMap.newKeySet();
     private final Set<String> chargesWhoseRefundsFail = ConcurrentHashMap.newKeySet();
@@ -24,24 +23,26 @@ final class SimulatedPaymentGateway implements PaymentGateway {
 
     @Override
     public String name() {
-        return "simulated";
+        return PaymentValues.SIMULATED;
     }
 
     @Override
     public ChargeResult charge(BigDecimal amount, String currency, String paymentMethod, String description,
             String idempotencyKey) {
-        String reference = referencesByIdempotencyKey.computeIfAbsent(idempotencyKey, key -> "sim_pi_" + UUID.randomUUID());
-        if (REFUND_FAILS_CARD.equals(paymentMethod)) {
+        var reference = referencesByIdempotencyKey.computeIfAbsent(idempotencyKey,
+                key -> PaymentValues.SIMULATED_CHARGE_PREFIX + UUID.randomUUID());
+        if (PaymentValues.REFUND_FAILS_CARD.equals(paymentMethod)) {
             chargesWhoseRefundsFail.add(reference);
         }
-        return DECLINED_CARD.equals(paymentMethod)
-                ? ChargeResult.declined(reference, "Your card was declined.")
+        return PaymentValues.DECLINED_CARD.equals(paymentMethod)
+                ? ChargeResult.declined(reference, ErrorMessages.CARD_DECLINED)
                 : ChargeResult.succeeded(reference);
     }
 
     @Override
     public RefundResult refund(String chargeReference, BigDecimal amount, String idempotencyKey) {
-        String reference = referencesByIdempotencyKey.computeIfAbsent(idempotencyKey, key -> "sim_re_" + UUID.randomUUID());
+        var reference = referencesByIdempotencyKey.computeIfAbsent(idempotencyKey,
+                key -> PaymentValues.SIMULATED_REFUND_PREFIX + UUID.randomUUID());
         if (chargesWhoseRefundsFail.contains(chargeReference)) {
             failingRefundReferences.add(reference);
         }

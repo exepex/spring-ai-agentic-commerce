@@ -1,5 +1,9 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.constants.ConfigKeys;
+import io.github.exepex.commerce.agent.dto.Agents;
+import io.github.exepex.commerce.agent.dto.ServiceNow;
+import io.github.exepex.commerce.agent.dto.Slack;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -10,46 +14,5 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param slack the Slack MCP server and the one channel agents may post in
  * @param servicenow the ServiceNow MCP server
  */
-@ConfigurationProperties("commerce")
-public record AgentProperties(Agents agents, Slack slack, ServiceNow servicenow) {
-
-    /**
-     * @param mcpUrl the commerce MCP server
-     * @param shoppingAssistant the shopping assistant's credentials
-     * @param incidentAgent the incident agent's credentials
-     */
-    public record Agents(String mcpUrl, Agent shoppingAssistant, Agent incidentAgent) {
-
-        /** The bearer token the given agent presents to the MCP servers. */
-        public String tokenOf(String agentId) {
-            return switch (agentId) {
-                case AgentSwitchboard.SHOPPING_ASSISTANT -> shoppingAssistant.token();
-                case AgentSwitchboard.INCIDENT_AGENT -> incidentAgent.token();
-                default -> throw new IllegalArgumentException("Unknown agent " + agentId);
-            };
-        }
-    }
-
-    /** @param token the bearer token the agent presents to the MCP server */
-    public record Agent(String token) {}
-
-    /**
-     * @param mcpUrl the Slack MCP server; empty to run without Slack
-     * @param apiKey the bearer token the Slack MCP server expects
-     * @param channelId the channel agents post in
-     */
-    public record Slack(String mcpUrl, String apiKey, String channelId) {
-
-        public boolean isConfigured() {
-            return mcpUrl != null && !mcpUrl.isBlank() && channelId != null && !channelId.isBlank();
-        }
-    }
-
-    /** @param mcpUrl the ServiceNow MCP server; empty to run without ServiceNow */
-    public record ServiceNow(String mcpUrl) {
-
-        public boolean isConfigured() {
-            return mcpUrl != null && !mcpUrl.isBlank();
-        }
-    }
-}
+@ConfigurationProperties(ConfigKeys.COMMERCE_PREFIX)
+public record AgentProperties(Agents agents, Slack slack, ServiceNow servicenow) {}

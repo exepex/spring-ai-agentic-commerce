@@ -2,6 +2,7 @@ package io.github.exepex.commerce.agent;
 
 import com.anthropic.models.messages.Model;
 import com.anthropic.models.messages.OutputConfig;
+import io.github.exepex.commerce.agent.constants.ClaudeSettings;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -13,12 +14,10 @@ import org.springframework.ai.anthropic.AnthropicChatOptions;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class ClaudeOptions {
 
-    private static final int MAX_TOKENS = 16_000;
-
     static AnthropicChatOptions.Builder forAgent(String model, String effort) {
         return AnthropicChatOptions.builder()
                 .model(Model.of(model))
-                .maxTokens(MAX_TOKENS)
+                .maxTokens(ClaudeSettings.MAX_TOKENS)
                 .thinkingAdaptive()
                 .effort(OutputConfig.Effort.of(effort));
     }

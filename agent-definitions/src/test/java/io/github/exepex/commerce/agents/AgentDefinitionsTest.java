@@ -3,6 +3,8 @@ package io.github.exepex.commerce.agents;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.exepex.commerce.agents.exception.InvalidAgentDefinitionException;
+import io.github.exepex.commerce.agents.exception.MissingAgentDefinitionException;
 import org.junit.jupiter.api.Test;
 
 class AgentDefinitionsTest {
@@ -14,7 +16,7 @@ class AgentDefinitionsTest {
         assertThat(definitions.all()).extracting(AgentDefinition::id)
                 .containsExactlyInAnyOrder("shopping-assistant", "incident-agent");
 
-        AgentDefinition assistant = definitions.get("shopping-assistant");
+        var assistant = definitions.get("shopping-assistant");
         assertThat(assistant.customerScoped()).isTrue();
         assertThat(assistant.toolCallBudget()).isEqualTo(12);
         assertThat(assistant.commerceTools()).contains("propose_order").doesNotContain("notify_customer");
@@ -24,7 +26,7 @@ class AgentDefinitionsTest {
 
     @Test
     void theIncidentAgentWorksServiceNowIncidentsWithShopTools() {
-        AgentDefinition agent = definitions.get("incident-agent");
+        var agent = definitions.get("incident-agent");
 
         assertThat(agent.customerScoped()).isFalse();
         assertThat(agent.servicenowTools()).contains("get_incident", "assign_to_team", "resolve_incident");
@@ -33,7 +35,7 @@ class AgentDefinitionsTest {
 
     @Test
     void addsTheSlackStepOnlyWhenAChannelIsConfigured() {
-        AgentDefinition agent = definitions.get("incident-agent");
+        var agent = definitions.get("incident-agent");
 
         assertThat(agent.systemPrompt("C123")).contains("in channel C123").doesNotContain("{slack");
         assertThat(agent.systemPrompt(null)).doesNotContain("conversations_add_message").doesNotContain("{slack");
@@ -47,12 +49,21 @@ class AgentDefinitionsTest {
                 model: claude-opus-5-5
                 ---
                 Do things.
-                """)).hasMessageContaining("broken.md is missing 'effort'");
+                """)).isInstanceOf(InvalidAgentDefinitionException.class)
+                .hasMessageContaining("broken.md is missing 'effort'");
     }
 
     @Test
     void refusesAFileWithoutAHeader() {
         assertThatThrownBy(() -> AgentDefinitions.parse("plain.md", "Just instructions."))
-                .hasMessageContaining("must start with a YAML header");
+                .isInstanceOf(InvalidAgentDefinitionException.class)
+                .hasMessage("plain.md must start with a YAML header between --- lines");
+    }
+
+    @Test
+    void refusesAnAgentThatIsNotDefined() {
+        assertThatThrownBy(() -> definitions.get("nobody"))
+                .isInstanceOf(MissingAgentDefinitionException.class)
+                .hasMessage("No agent is defined with id nobody");
     }
 }

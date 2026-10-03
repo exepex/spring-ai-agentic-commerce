@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.dto.Change;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -14,9 +15,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class AgentSwitchboard {
 
-    public static final String SHOPPING_ASSISTANT = "shopping-assistant";
-    public static final String INCIDENT_AGENT = "incident-agent";
-
     private final AgentSwitchesApi switches;
 
     /** Read before every run. Throws if the MCP server cannot be reached; callers decide what that means. */
@@ -29,6 +27,6 @@ public class AgentSwitchboard {
     }
 
     public void set(String agentId, boolean on, String by) {
-        switches.set(agentId, new AgentSwitchesApi.Change(on, by));
+        switches.set(agentId, new Change(on, by));
     }
 }

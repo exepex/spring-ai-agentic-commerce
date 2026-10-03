@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.shipping;
 
+import io.github.exepex.commerce.shipping.constants.ConfigKeys;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -22,7 +23,7 @@ class OrderEventListener {
     private final ShipmentRepository shipments;
     private final Clock clock;
 
-    @KafkaListener(topics = "${commerce.topics.order-events}")
+    @KafkaListener(topics = ConfigKeys.ORDER_EVENTS_TOPIC)
     @Transactional
     void onOrderEvent(OrderEvent event) {
         switch (event.type()) {
@@ -37,7 +38,7 @@ class OrderEventListener {
     /** The order's shipment, created if it does not exist yet. */
     private Shipment shipmentFor(OrderEvent event) {
         return shipments.findByOrderId(event.orderId()).orElseGet(() -> {
-            LocalDate estimatedDelivery = LocalDate.ofInstant(Instant.now(clock), ZoneOffset.UTC).plusDays(DELIVERY_DAYS);
+            var estimatedDelivery = LocalDate.ofInstant(Instant.now(clock), ZoneOffset.UTC).plusDays(DELIVERY_DAYS);
             return shipments.save(new Shipment(event.orderId(), event.customerEmail(), TrackingNumbers.next(),
                     estimatedDelivery, Instant.now(clock)));
         });

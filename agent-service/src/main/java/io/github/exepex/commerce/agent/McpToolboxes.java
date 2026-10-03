@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.agent;
 
-import io.github.exepex.commerce.agents.AgentDefinition;
+import io.github.exepex.commerce.agent.constants.AgentIds;
+import io.github.exepex.commerce.agent.constants.McpValues;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
@@ -30,8 +31,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 class McpToolboxes {
 
-    private static final String SLACK = "slack";
-    private static final String SERVICENOW = "servicenow";
     /** The commerce MCP server enforces the kill switch on every call itself. */
     private static final BooleanSupplier ENFORCED_BY_THE_SERVER = () -> true;
 
@@ -42,27 +41,26 @@ class McpToolboxes {
 
     /** The shopping assistant's tools; {@code customerEmail} is always the signed-in customer's. */
     List<ToolCallback> shoppingAssistantTools() {
-        AgentDefinition agent = definitions.get(AgentSwitchboard.SHOPPING_ASSISTANT);
-        return toolsFrom(AgentSwitchboard.SHOPPING_ASSISTANT,
-                () -> commerceClient(AgentSwitchboard.SHOPPING_ASSISTANT), agent.commerceTools(), agent.customerScoped(),
-                ENFORCED_BY_THE_SERVER);
+        var agent = definitions.get(AgentIds.SHOPPING_ASSISTANT);
+        return toolsFrom(AgentIds.SHOPPING_ASSISTANT, () -> commerceClient(AgentIds.SHOPPING_ASSISTANT),
+                agent.commerceTools(), agent.customerScoped(), ENFORCED_BY_THE_SERVER);
     }
 
     /** The incident agent's tools: the shop's, ServiceNow's and, when configured, Slack's. */
     List<ToolCallback> incidentAgentTools() {
-        AgentDefinition agent = definitions.get(AgentSwitchboard.INCIDENT_AGENT);
-        List<ToolCallback> tools = new ArrayList<>(toolsFrom(AgentSwitchboard.INCIDENT_AGENT,
-                () -> commerceClient(AgentSwitchboard.INCIDENT_AGENT), agent.commerceTools(), agent.customerScoped(),
+        var agent = definitions.get(AgentIds.INCIDENT_AGENT);
+        var tools = new ArrayList<ToolCallback>(toolsFrom(AgentIds.INCIDENT_AGENT,
+                () -> commerceClient(AgentIds.INCIDENT_AGENT), agent.commerceTools(), agent.customerScoped(),
                 ENFORCED_BY_THE_SERVER));
-        tools.addAll(toolsFrom(SERVICENOW, () -> servicenowClient(AgentSwitchboard.INCIDENT_AGENT), agent.servicenowTools(),
-                false, ENFORCED_BY_THE_SERVER));
+        tools.addAll(toolsFrom(McpValues.SERVICENOW, () -> servicenowClient(AgentIds.INCIDENT_AGENT),
+                agent.servicenowTools(), false, ENFORCED_BY_THE_SERVER));
         if (properties.slack().isConfigured() && !agent.slackTools().isEmpty()) {
             try {
-                tools.addAll(toolsFrom(SLACK, this::slackClient, agent.slackTools(), false,
-                        () -> isSwitchedOn(AgentSwitchboard.INCIDENT_AGENT)));
+                tools.addAll(toolsFrom(McpValues.SLACK, this::slackClient, agent.slackTools(), false,
+                        () -> isSwitchedOn(AgentIds.INCIDENT_AGENT)));
             } catch (RuntimeException slackDown) {
                 log.warn("Slack MCP server unavailable; the agent runs without Slack", slackDown);
-                clients.remove(SLACK);
+                clients.remove(McpValues.SLACK);
             }
         }
         return tools;
@@ -70,13 +68,13 @@ class McpToolboxes {
 
     /** Calls a ServiceNow tool directly as the incident agent, without a model: to hand an incident to a team. */
     McpSchema.CallToolResult callAsIncidentAgent(String tool, Map<String, Object> arguments) {
-        return onLiveConnection(SERVICENOW, () -> servicenowClient(AgentSwitchboard.INCIDENT_AGENT),
+        return onLiveConnection(McpValues.SERVICENOW, () -> servicenowClient(AgentIds.INCIDENT_AGENT),
                 client -> client.callTool(new McpSchema.CallToolRequest(tool, arguments)));
     }
 
     private List<ToolCallback> toolsFrom(String connection, Supplier<McpSyncClient> client, List<String> allowedTools,
             boolean injectsCustomer, BooleanSupplier agentSwitchedOn) {
-        ToolCallback[] mcpTools = onLiveConnection(connection, client,
+        var mcpTools = onLiveConnection(connection, client,
                 live -> McpClients.allowedTools(live, allowedTools));
         return Arrays.stream(mcpTools)
                 .<ToolCallback>map(mcpTool -> new AgentToolCallback(mcpTool, injectsCustomer, agentSwitchedOn))
@@ -103,7 +101,7 @@ class McpToolboxes {
             return request.apply(client.get());
         } catch (RuntimeException connectionLost) {
             log.info("MCP request on {} failed ({}); reconnecting once", connection, connectionLost.getMessage());
-            McpSyncClient lost = clients.remove(connection);
+            var lost = clients.remove(connection);
             if (lost != null) {
                 lost.close();
             }
@@ -116,11 +114,11 @@ class McpToolboxes {
     }
 
     private McpSyncClient servicenowClient(String agentId) {
-        return connect(SERVICENOW, properties.servicenow().mcpUrl(), properties.agents().tokenOf(agentId));
+        return connect(McpValues.SERVICENOW, properties.servicenow().mcpUrl(), properties.agents().tokenOf(agentId));
     }
 
     private McpSyncClient slackClient() {
-        return connect(SLACK, properties.slack().mcpUrl(), properties.slack().apiKey());
+        return connect(McpValues.SLACK, properties.slack().mcpUrl(), properties.slack().apiKey());
     }
 
     private McpSyncClient connect(String name, String url, String bearerToken) {

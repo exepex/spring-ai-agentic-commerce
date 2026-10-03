@@ -24,9 +24,9 @@ final class ServiceNow {
     private final String agentGroup;
 
     ServiceNow() {
-        String url = setting("evals.servicenow.url", "AGENTIC_COMMERCE_SERVICENOW_INSTANCE_URL", "http://localhost:8088");
-        String username = setting("evals.servicenow.username", "AGENTIC_COMMERCE_SERVICENOW_USERNAME", "trailhead.agent");
-        String password = setting("evals.servicenow.password", "AGENTIC_COMMERCE_SERVICENOW_PASSWORD", "simulator");
+        var url = setting("evals.servicenow.url", "AGENTIC_COMMERCE_SERVICENOW_INSTANCE_URL", "http://localhost:8088");
+        var username = setting("evals.servicenow.username", "AGENTIC_COMMERCE_SERVICENOW_USERNAME", "trailhead.agent");
+        var password = setting("evals.servicenow.password", "AGENTIC_COMMERCE_SERVICENOW_PASSWORD", "simulator");
         this.agentGroup = setting("evals.servicenow.agent-group", "AGENTIC_COMMERCE_SERVICENOW_AGENT_GROUP",
                 "Online Shop Agent");
         this.api = RestClient.builder().baseUrl(url)
@@ -65,12 +65,12 @@ final class ServiceNow {
      * by the integration user.
      */
     List<String> workNotesOf(String number) {
-        String shown = api.get().uri("/api/now/table/incident?sysparm_query=number={number}"
+        var shown = api.get().uri("/api/now/table/incident?sysparm_query=number={number}"
                         + "&sysparm_fields=work_notes&sysparm_display_value=true", number)
                 .retrieve().body(JsonNode.class).path("result").path(0).path("work_notes").asString("");
-        List<String> notes = new ArrayList<>();
+        var notes = new ArrayList<String>();
         StringBuilder note = null;
-        for (String line : shown.split("\n", -1)) {
+        for (var line : shown.split("\n", -1)) {
             if (JOURNAL_HEADER.matcher(line).matches()) {
                 if (note != null) {
                     notes.add(note.toString().strip());
@@ -103,7 +103,7 @@ final class ServiceNow {
 
     /** An instance that stops answering fails the scenario instead of blocking it forever. */
     private static JdkClientHttpRequestFactory withTimeouts() {
-        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(HttpClient.newBuilder()
+        var requestFactory = new JdkClientHttpRequestFactory(HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build());
         requestFactory.setReadTimeout(Duration.ofSeconds(30));
@@ -111,7 +111,7 @@ final class ServiceNow {
     }
 
     private static String setting(String property, String environmentVariable, String fallback) {
-        String value = System.getProperty(property);
+        var value = System.getProperty(property);
         if (value == null || value.isBlank()) {
             value = System.getenv(environmentVariable);
         }

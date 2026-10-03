@@ -2,6 +2,11 @@ package io.github.exepex.commerce.mcp.governance;
 
 import io.github.exepex.commerce.mcp.cases.CaseService;
 import io.github.exepex.commerce.mcp.cases.CaseType;
+import io.github.exepex.commerce.mcp.constants.Actors;
+import io.github.exepex.commerce.mcp.constants.AuditSummaries;
+import io.github.exepex.commerce.mcp.constants.ConfigKeys;
+import io.github.exepex.commerce.mcp.constants.EventFields;
+import io.github.exepex.commerce.mcp.constants.EventTypes;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
@@ -26,66 +31,67 @@ class SystemEventRecorder {
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
-    @KafkaListener(topics = "${commerce.topics.order-events}")
+    @KafkaListener(topics = ConfigKeys.ORDER_EVENTS_TOPIC)
     void onOrderEvent(String json) {
-        JsonNode event = jsonMapper.readTree(json);
-        String type = event.path("type").asString();
-        String summary = switch (type) {
-            case "ORDER_CONFIRMED" -> "Order confirmed and paid; shipping notified";
-            case "ORDER_CANCELLED" -> "Order cancelled; stock released and shipment cancelled";
-            case "ORDER_SHIPPED" -> "Order shipped: its stock left the warehouse and the parcel is with the carrier";
-            default -> "Order event " + type;
+        var event = jsonMapper.readTree(json);
+        var type = event.path(EventFields.TYPE).asString();
+        var summary = switch (type) {
+            case EventTypes.ORDER_CONFIRMED -> AuditSummaries.ORDER_CONFIRMED;
+            case EventTypes.ORDER_CANCELLED -> AuditSummaries.ORDER_CANCELLED;
+            case EventTypes.ORDER_SHIPPED -> AuditSummaries.ORDER_SHIPPED;
+            default -> AuditSummaries.OTHER_ORDER_EVENT.formatted(type);
         };
-        audit.recordSystemEvent(eventId(event), occurredAt(event), UUID.fromString(event.path("orderId").asString()),
-                "order-service", type, summary, null);
+        audit.recordSystemEvent(eventId(event), occurredAt(event),
+                UUID.fromString(event.path(EventFields.ORDER_ID).asString()), Actors.ORDER_SERVICE, type, summary, null);
     }
 
-    @KafkaListener(topics = "${commerce.topics.shipment-events}")
+    @KafkaListener(topics = ConfigKeys.SHIPMENT_EVENTS_TOPIC)
     void onShipmentEvent(String json) {
-        JsonNode event = jsonMapper.readTree(json);
-        String type = event.path("type").asString();
-        String parcel = "Parcel " + event.path("trackingNumber").asString();
-        String problem = event.path("deliveryProblem").asString("");
-        String summary = switch (type) {
-            case "SHIPMENT_DELIVERED" -> parcel + " delivered to the customer";
-            case "SHIPMENT_DELIVERY_FAILED" -> parcel + " could not be delivered: " + problem;
-            case "SHIPMENT_LOST" -> parcel + " lost by the carrier: " + problem;
-            default -> "Shipment event " + type;
+        var event = jsonMapper.readTree(json);
+        var type = event.path(EventFields.TYPE).asString();
+        var parcel = AuditSummaries.PARCEL.formatted(event.path(EventFields.TRACKING_NUMBER).asString());
+        var problem = event.path(EventFields.DELIVERY_PROBLEM).asString(EventFields.ABSENT);
+        var summary = switch (type) {
+            case EventTypes.SHIPMENT_DELIVERED -> AuditSummaries.PARCEL_DELIVERED.formatted(parcel);
+            case EventTypes.SHIPMENT_DELIVERY_FAILED -> AuditSummaries.PARCEL_NOT_DELIVERED.formatted(parcel, problem);
+            case EventTypes.SHIPMENT_LOST -> AuditSummaries.PARCEL_LOST.formatted(parcel, problem);
+            default -> AuditSummaries.OTHER_SHIPMENT_EVENT.formatted(type);
         };
-        UUID orderId = UUID.fromString(event.path("orderId").asString());
-        audit.recordSystemEvent(eventId(event), occurredAt(event), orderId, "shipping-service", type, summary, null);
-        CaseType caseType = switch (type) {
-            case "SHIPMENT_DELIVERY_FAILED" -> CaseType.DELIVERY_FAILED;
-            case "SHIPMENT_LOST" -> CaseType.PARCEL_LOST;
+        var orderId = UUID.fromString(event.path(EventFields.ORDER_ID).asString());
+        audit.recordSystemEvent(eventId(event), occurredAt(event), orderId, Actors.SHIPPING_SERVICE, type, summary,
+                null);
+        var caseType = switch (type) {
+            case EventTypes.SHIPMENT_DELIVERY_FAILED -> CaseType.DELIVERY_FAILED;
+            case EventTypes.SHIPMENT_LOST -> CaseType.PARCEL_LOST;
             default -> null;
         };
         if (caseType != null) {
-            cases.raiseFor(eventId(event), caseType, orderId, summary + ". The customer did not receive order "
-                    + orderId + ".", "shipping-service");
+            cases.raiseFor(eventId(event), caseType, orderId,
+                    AuditSummaries.PARCEL_NOT_RECEIVED.formatted(summary, orderId), Actors.SHIPPING_SERVICE);
         }
     }
 
-    @KafkaListener(topics = "${commerce.topics.stock-out}")
+    @KafkaListener(topics = ConfigKeys.STOCK_OUT_TOPIC)
     void onStockOut(String json) {
-        JsonNode event = jsonMapper.readTree(json);
-        String summary = "Stock-out on " + event.path("sku").asString() + ": " + event.path("onHand").asInt()
-                + " on hand for " + event.path("reserved").asInt() + " reserved (" + event.path("reason").asString()
-                + "). This order can no longer be fulfilled as placed.";
-        for (JsonNode affected : event.path("affectedOrderIds")) {
-            UUID orderId = UUID.fromString(affected.asString());
-            audit.recordSystemEvent(eventId(event), occurredAt(event), orderId, "catalog-service", "STOCK_OUT", summary,
-                    json);
-            cases.raiseFor(eventId(event), CaseType.STOCK_OUT, orderId, summary, "catalog-service");
+        var event = jsonMapper.readTree(json);
+        var summary = AuditSummaries.STOCK_OUT.formatted(event.path(EventFields.SKU).asString(),
+                event.path(EventFields.ON_HAND).asInt(), event.path(EventFields.RESERVED).asInt(),
+                event.path(EventFields.REASON).asString());
+        for (var affected : event.path(EventFields.AFFECTED_ORDER_IDS)) {
+            var orderId = UUID.fromString(affected.asString());
+            audit.recordSystemEvent(eventId(event), occurredAt(event), orderId, Actors.CATALOG_SERVICE,
+                    EventTypes.STOCK_OUT, summary, json);
+            cases.raiseFor(eventId(event), CaseType.STOCK_OUT, orderId, summary, Actors.CATALOG_SERVICE);
         }
     }
 
     private static UUID eventId(JsonNode event) {
-        return UUID.fromString(event.path("eventId").asString());
+        return UUID.fromString(event.path(EventFields.EVENT_ID).asString());
     }
 
     /** When the service says it happened: a consumer that catches up late must not reorder the timeline. */
     private Instant occurredAt(JsonNode event) {
-        String occurredAt = event.path("occurredAt").asString("");
+        var occurredAt = event.path(EventFields.OCCURRED_AT).asString(EventFields.ABSENT);
         return occurredAt.isEmpty() ? Instant.now(clock) : Instant.parse(occurredAt);
     }
 }

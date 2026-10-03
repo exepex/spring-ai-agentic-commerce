@@ -1,11 +1,13 @@
 package io.github.exepex.commerce.agent;
 
-import io.github.exepex.commerce.agent.AgentViews.AgentsView;
+import io.github.exepex.commerce.agent.constants.ApiPaths;
+import io.github.exepex.commerce.agent.constants.ConfigKeys;
+import io.github.exepex.commerce.agent.dto.AgentsView;
+import io.github.exepex.commerce.agent.dto.ChatRequest;
+import io.github.exepex.commerce.agent.dto.Reply;
+import io.github.exepex.commerce.agent.dto.Switch;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Size;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.env.Environment;
@@ -20,11 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 class AgentController {
 
-    record ChatRequest(@NotBlank String conversationId, @NotBlank @Email String customerEmail, @NotBlank String message) {}
-
-    /** {@code by} is the person switching, for the audit trail. */
-    record Switch(boolean enabled, @NotBlank @Size(max = 100) String by) {}
-
     private final ShoppingAssistant assistant;
     private final AgentSwitchboard switchboard;
     private final AgentProperties properties;
@@ -37,21 +34,21 @@ class AgentController {
         this.switchboard = switchboard;
         this.properties = properties;
         this.definitions = definitions;
-        this.modelConfigured = !environment.getProperty("spring.ai.anthropic.api-key", "").isBlank();
+        this.modelConfigured = !environment.getProperty(ConfigKeys.ANTHROPIC_API_KEY, "").isBlank();
     }
 
-    @PostMapping("/api/assistant/chat")
-    ShoppingAssistant.Reply chat(@Valid @RequestBody ChatRequest request) {
+    @PostMapping(ApiPaths.ASSISTANT_CHAT)
+    Reply chat(@Valid @RequestBody ChatRequest request) {
         return assistant.chat(request.conversationId(), request.customerEmail(), request.message());
     }
 
     /** An agent's {@code enabled} is {@code null} when the MCP server, which keeps the switches, cannot be reached. */
-    @GetMapping("/api/agents")
+    @GetMapping(ApiPaths.AGENTS)
     AgentsView agents() {
-        return AgentViews.toView(modelConfigured, properties, definitions.all(), switchesOrNone());
+        return AgentMapper.toView(modelConfigured, properties, definitions.all(), switchesOrNone());
     }
 
-    @PutMapping("/api/agents/{agentId}")
+    @PutMapping(ApiPaths.AGENT)
     AgentsView setEnabled(@PathVariable String agentId, @Valid @RequestBody Switch request) {
         switchboard.set(agentId, request.enabled(), request.by());
         return agents();

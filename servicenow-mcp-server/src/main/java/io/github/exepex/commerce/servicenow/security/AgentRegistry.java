@@ -1,8 +1,9 @@
 package io.github.exepex.commerce.servicenow.security;
 
-import io.github.exepex.commerce.agents.AgentDefinition;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.github.exepex.commerce.servicenow.AgentTokens;
+import io.github.exepex.commerce.servicenow.dto.Agent;
+import io.github.exepex.commerce.servicenow.exception.MissingAgentTokenException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Map;
@@ -16,21 +17,21 @@ import org.springframework.stereotype.Component;
 @Component
 public class AgentRegistry {
 
-    private final Map<String, AgentTokens.Agent> tokens;
+    private final Map<String, Agent> tokens;
     private final AgentDefinitions definitions;
 
     AgentRegistry(AgentTokens agentTokens, AgentDefinitions definitions) {
         this.tokens = Map.copyOf(agentTokens.agents());
         this.definitions = definitions;
-        for (AgentDefinition definition : definitions.all()) {
+        for (var definition : definitions.all()) {
             if (!definition.servicenowTools().isEmpty() && !tokens.containsKey(definition.id())) {
-                throw new IllegalStateException("No token is configured for agent " + definition.id());
+                throw new MissingAgentTokenException(definition.id());
             }
         }
     }
 
     Optional<String> agentWithToken(String token) {
-        byte[] presented = token.getBytes(StandardCharsets.UTF_8);
+        var presented = token.getBytes(StandardCharsets.UTF_8);
         return tokens.entrySet().stream()
                 .filter(agent -> MessageDigest.isEqual(agent.getValue().token().getBytes(StandardCharsets.UTF_8), presented))
                 .map(Map.Entry::getKey)

@@ -6,12 +6,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-import tools.jackson.databind.JsonNode;
 
 /**
  * The incident workflows end to end, with a real model: what happens to a parcel after it ships, and an incident the
@@ -31,10 +29,10 @@ class IncidentScenarioEvals {
 
     @Test
     void aFailedDeliveryGoesToFulfilmentWhoCloseItInServiceNow() {
-        String orderId = shippedHeadlampOrder();
+        var orderId = shippedHeadlampOrder();
         demo.reportFromCarrier(orderId, "DELIVERY_FAILED", "Nobody home, parcel returned to the depot");
 
-        JsonNode supportCase = demo.awaitCaseFinished(orderId);
+        var supportCase = demo.awaitCaseFinished(orderId);
 
         assertThat(supportCase.path("type").asString()).isEqualTo("DELIVERY_FAILED");
         assertThat(supportCase.path("status").asString()).isEqualTo("WITH_TEAM");
@@ -47,15 +45,15 @@ class IncidentScenarioEvals {
 
     @Test
     void aLostParcelIsRefundedOnceExplainedDocumentedAndResolved() {
-        String orderId = shippedHeadlampOrder();
+        var orderId = shippedHeadlampOrder();
         demo.reportFromCarrier(orderId, "LOST", "The carrier lost the parcel in transit");
 
-        JsonNode supportCase = demo.awaitCaseFinished(orderId);
+        var supportCase = demo.awaitCaseFinished(orderId);
 
         assertThat(supportCase.path("type").asString()).isEqualTo("PARCEL_LOST");
         assertThat(supportCase.path("status").asString()).isEqualTo("RESOLVED");
         assertThat(count(demo.timeline(orderId), INCIDENT_AGENT, "issue_refund", "SUCCEEDED")).isEqualTo(1);
-        JsonNode payment = demo.payment(orderId);
+        var payment = demo.payment(orderId);
         assertThat(payment.path("refundedAmount").decimalValue()).isEqualByComparingTo(payment.path("amount").decimalValue());
         assertThat(demo.notifications(orderId)).hasSize(1);
         assertThat(serviceNow.workNotesOf(supportCase.path("incidentNumber").asString()))
@@ -65,15 +63,15 @@ class IncidentScenarioEvals {
 
     @Test
     void anIncidentTheServiceDeskRaisesAboutADeliveredOrderEndsResolvedOrWithATeam() {
-        String orderId = shippedHeadlampOrder();
+        var orderId = shippedHeadlampOrder();
         demo.reportFromCarrier(orderId, "DELIVERED", "");
 
-        String number = serviceNow.raiseIncident("Order arrived broken, the customer wants their money back",
+        var number = serviceNow.raiseIncident("Order arrived broken, the customer wants their money back",
                 "The customer sent photos of the cracked lens and asks for a refund.", orderId);
 
         // A group that cannot be read is blank, not a hand-off: only a named group other than the agent's counts.
         await().atMost(AGENT_TIMEOUT).pollInterval(Duration.ofSeconds(5)).until(() -> {
-            String group = serviceNow.assignmentGroupOf(number);
+            var group = serviceNow.assignmentGroupOf(number);
             return FINISHED_STATES.contains(serviceNow.stateOf(number))
                     || !group.isBlank() && !serviceNow.agentGroup().equals(group);
         });
@@ -82,7 +80,7 @@ class IncidentScenarioEvals {
                     assertThat(supportCase.path("type").asString()).isEqualTo("SERVICE_DESK");
                     assertThat(supportCase.path("incidentNumber").asString()).isEqualTo(number);
                 });
-        List<JsonNode> refunds = demo.refundRequests(orderId);
+        var refunds = demo.refundRequests(orderId);
         assertThat(refunds).hasSizeLessThanOrEqualTo(1);
         if (FINISHED_STATES.contains(serviceNow.stateOf(number))) {
             // The headlamp is below the refund approval limit, so the refund is paid at once.
@@ -99,7 +97,7 @@ class IncidentScenarioEvals {
      * leaves the stock, and an order that did not ship keeps its unit reserved.
      */
     private String shippedHeadlampOrder() {
-        String orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
+        var orderId = demo.placeOrder(Demo.newCustomer(), Demo.HEADLAMP);
         try {
             demo.ship(orderId);
         } finally {

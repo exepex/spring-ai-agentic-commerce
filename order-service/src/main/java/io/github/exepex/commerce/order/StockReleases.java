@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.order;
 
+import io.github.exepex.commerce.order.exception.DependencyUnavailableException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;

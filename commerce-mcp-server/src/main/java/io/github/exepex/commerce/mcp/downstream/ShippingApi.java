@@ -1,18 +1,15 @@
 package io.github.exepex.commerce.mcp.downstream;
 
-import java.time.Instant;
-import java.time.LocalDate;
+import io.github.exepex.commerce.mcp.constants.DownstreamApis;
+import io.github.exepex.commerce.mcp.downstream.dto.Shipment;
 import java.util.UUID;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.service.annotation.GetExchange;
 import org.springframework.web.service.annotation.HttpExchange;
 
-@HttpExchange("/api/shipments")
+@HttpExchange(DownstreamApis.SHIPMENTS)
 public interface ShippingApi {
 
-    record Shipment(UUID id, UUID orderId, String trackingNumber, String status, LocalDate estimatedDelivery,
-            Instant createdAt, Instant shippedAt, Instant deliveredAt, String deliveryProblem, Instant cancelledAt) {}
-
-    @GetExchange("/{orderId}")
+    @GetExchange(DownstreamApis.BY_ORDER_ID)
     Shipment getShipment(@PathVariable UUID orderId);
 }

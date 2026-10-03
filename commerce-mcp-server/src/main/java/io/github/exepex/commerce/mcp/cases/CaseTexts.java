@@ -1,9 +1,10 @@
 package io.github.exepex.commerce.mcp.cases;
 
-import io.github.exepex.commerce.mcp.governance.GovernanceException;
+import io.github.exepex.commerce.mcp.constants.CaseWording;
+import io.github.exepex.commerce.mcp.exception.PendingIncidentStateException;
+import io.github.exepex.commerce.mcp.exception.ProblemNotDescribedException;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
-import org.springframework.http.HttpStatus;
 
 /** How cases are worded: in ServiceNow, on the order's timeline, and to an agent that must leave the order alone. */
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
@@ -14,41 +15,48 @@ final class CaseTexts {
     /** Fits ServiceNow's description and work note, however long the details. */
     static String fit(String details) {
         if (details == null || details.isBlank()) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "Say what the problem is");
+            throw new ProblemNotDescribedException();
         }
-        return details.length() <= MAX_TEXT_LENGTH ? details : details.substring(0, MAX_TEXT_LENGTH - 1) + "…";
+        return details.length() <= MAX_TEXT_LENGTH
+                ? details
+                : details.substring(0, MAX_TEXT_LENGTH - 1) + CaseWording.TRUNCATED;
     }
 
     /** The case's incident in brackets, or nothing while it has none. */
     static String incidentOf(SupportCase supportCase) {
-        return supportCase.getIncidentNumber() == null ? "" : " (" + supportCase.getIncidentNumber() + ")";
+        return supportCase.getIncidentNumber() == null
+                ? CaseWording.NO_INCIDENT
+                : CaseWording.INCIDENT.formatted(supportCase.getIncidentNumber());
     }
 
     /** Who has the order's open case, for an agent that may not pay on the order while they do. */
     static String holderOf(SupportCase supportCase) {
         return supportCase.getStatus() == SupportCase.Status.WITH_TEAM
-                ? "with the " + supportCase.getAssignmentGroup() + " team in ServiceNow" + incidentOf(supportCase)
-                : "an open " + supportCase.getType() + " case" + incidentOf(supportCase) + " that the support team handles";
+                ? CaseWording.WITH_TEAM_HOLDER.formatted(supportCase.getAssignmentGroup(), incidentOf(supportCase))
+                : CaseWording.SUPPORT_TEAM_HOLDER.formatted(supportCase.getType(), incidentOf(supportCase));
     }
 
-    /** Who has the case's incident now, for the order's timeline. */
+    /**
+     * Who has the case's incident now, for the order's timeline. An incident in ServiceNow is never pending, which
+     * {@link CaseService#followIncident} refuses before it gets here.
+     */
     static String followed(String incidentNumber, boolean reopened, SupportCase.Status status,
             String assignmentGroup) {
-        String incident = incidentNumber + (reopened ? " was reopened and" : "");
+        var incident = incidentNumber + (reopened ? CaseWording.REOPENED_AND : CaseWording.NOT_REOPENED);
         return switch (status) {
-            case WITH_AGENT -> incident + " is with the incident agent";
-            case WITH_TEAM -> incident + " is assigned to " + assignmentGroup;
-            case RESOLVED -> incident + " is resolved";
-            case PENDING -> throw new IllegalStateException();
+            case WITH_AGENT -> CaseWording.WITH_AGENT.formatted(incident);
+            case WITH_TEAM -> CaseWording.ASSIGNED.formatted(incident, assignmentGroup);
+            case RESOLVED -> CaseWording.RESOLVED.formatted(incident);
+            case PENDING -> throw new PendingIncidentStateException();
         };
     }
 
     /** A resolved incident blocks nobody, so only an open one tells agents to leave the order's money alone. */
     static String describeServiceDeskIncident(String number, SupportCase.Status status, boolean wasResolved) {
         if (status == SupportCase.Status.RESOLVED) {
-            return number + " is now about this order and is resolved";
+            return CaseWording.SERVICE_DESK_RESOLVED.formatted(number);
         }
-        String change = wasResolved ? " was reopened" : " is now about this order";
-        return number + change + "; agents leave its money to whoever works it";
+        var change = wasResolved ? CaseWording.SERVICE_DESK_REOPENED : CaseWording.SERVICE_DESK_NOW_ABOUT_ORDER;
+        return CaseWording.SERVICE_DESK_OPEN.formatted(number, change);
     }
 }

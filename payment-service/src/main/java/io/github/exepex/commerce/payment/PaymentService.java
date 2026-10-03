@@ -1,5 +1,11 @@
 package io.github.exepex.commerce.payment;
 
+import io.github.exepex.commerce.payment.constants.PaymentValues;
+import io.github.exepex.commerce.payment.exception.ChargeConflictException;
+import io.github.exepex.commerce.payment.exception.IdempotencyKeyReusedException;
+import io.github.exepex.commerce.payment.exception.PaymentNotFoundException;
+import io.github.exepex.commerce.payment.exception.RefundExceedsPaymentException;
+import io.github.exepex.commerce.payment.exception.RefundNotCompletedException;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
@@ -23,20 +29,21 @@ public class PaymentService {
         return payments.findByOrderId(orderId)
                 .map(earlier -> {
                     if (!earlier.isSameChargeAs(customerEmail, amount, currency)) {
-                        throw PaymentProblems.chargeConflicts(orderId);
+                        throw new ChargeConflictException(orderId);
                     }
                     return earlier;
                 })
                 .orElseGet(() -> {
-                    PaymentGateway.ChargeResult charge = gateway.charge(amount, currency, paymentMethod,
-                            "Order " + orderId, "charge-" + orderId);
+                    var charge = gateway.charge(amount, currency, paymentMethod,
+                            PaymentValues.CHARGE_DESCRIPTION.formatted(orderId),
+                            PaymentValues.CHARGE_IDEMPOTENCY_KEY.formatted(orderId));
                     return payments.save(new Payment(orderId, customerEmail, amount, currency, gateway.name(), charge,
                             Instant.now(clock)));
                 });
     }
 
     public Payment getPayment(UUID orderId) {
-        return payments.findByOrderId(orderId).orElseThrow(() -> PaymentProblems.paymentNotFound(orderId));
+        return payments.findByOrderId(orderId).orElseThrow(() -> new PaymentNotFoundException(orderId));
     }
 
     public List<Refund> refundsOf(Payment payment) {
@@ -51,26 +58,26 @@ public class PaymentService {
      */
     @Transactional
     public Refund refund(UUID orderId, BigDecimal amount, String reason, String idempotencyKey) {
-        Payment payment = payments.findByOrderIdForUpdate(orderId)
-                .orElseThrow(() -> PaymentProblems.paymentNotFound(orderId));
+        var payment = payments.findByOrderIdForUpdate(orderId)
+                .orElseThrow(() -> new PaymentNotFoundException(orderId));
         var earlier = refunds.findByIdempotencyKey(idempotencyKey);
         if (earlier.isPresent()) {
             return repeated(earlier.get(), payment, amount, idempotencyKey);
         }
         if (amount.compareTo(payment.refundable()) > 0) {
-            throw PaymentProblems.refundExceedsPayment(amount, payment.refundable());
+            throw new RefundExceedsPaymentException(amount, payment.refundable());
         }
-        PaymentGateway.RefundResult result = gateway.refund(payment.getProviderReference(), amount, idempotencyKey);
+        var result = gateway.refund(payment.getProviderReference(), amount, idempotencyKey);
         payment.recordRefund(amount);
         return refunds.save(new Refund(payment.getId(), amount, reason, idempotencyKey, result, Instant.now(clock)));
     }
 
     private static Refund repeated(Refund refund, Payment payment, BigDecimal amount, String idempotencyKey) {
         if (!refund.isSameRefundAs(payment.getId(), amount)) {
-            throw PaymentProblems.idempotencyKeyReused(idempotencyKey);
+            throw new IdempotencyKeyReusedException(idempotencyKey);
         }
         if (refund.getStatus() == PaymentGateway.RefundStatus.FAILED) {
-            throw PaymentProblems.refundNotCompleted("failed");
+            throw new RefundNotCompletedException(PaymentValues.STRIPE_FAILED);
         }
         return refund;
     }

@@ -1,5 +1,8 @@
 package io.github.exepex.commerce.servicenow;
 
+import io.github.exepex.commerce.servicenow.constants.ConfigKeys;
+import io.github.exepex.commerce.servicenow.dto.Team;
+import io.github.exepex.commerce.servicenow.exception.UnknownDefaultTeamException;
 import java.time.Duration;
 import java.util.Map;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -17,19 +20,13 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param defaultTeam the team that gets an incident nobody else should: when the agent cannot finish it
  * @param teams the teams the agent can hand an incident to, by key
  */
-@ConfigurationProperties("commerce.servicenow")
+@ConfigurationProperties(ConfigKeys.SERVICENOW_PREFIX)
 public record ServiceNowProperties(String instanceUrl, String username, String password, String agent, String agentGroup,
         Duration staleAfter, String closeCode, String defaultTeam, Map<String, Team> teams) {
 
-    /**
-     * @param group the ServiceNow assignment group's name
-     * @param handles what the team handles, in words the agent uses to choose it
-     */
-    public record Team(String group, String handles) {}
-
     public ServiceNowProperties {
         if (teams == null || !teams.containsKey(defaultTeam)) {
-            throw new IllegalStateException("commerce.servicenow.default-team must name one of the configured teams");
+            throw new UnknownDefaultTeamException();
         }
         teams = Map.copyOf(teams);
     }

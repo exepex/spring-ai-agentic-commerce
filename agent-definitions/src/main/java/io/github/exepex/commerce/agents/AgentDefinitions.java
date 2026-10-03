@@ -1,7 +1,12 @@
 package io.github.exepex.commerce.agents;
 
+import io.github.exepex.commerce.agents.constants.DefinitionKeys;
+import io.github.exepex.commerce.agents.constants.ErrorMessages;
+import io.github.exepex.commerce.agents.exception.DuplicateAgentDefinitionException;
+import io.github.exepex.commerce.agents.exception.InvalidAgentDefinitionException;
+import io.github.exepex.commerce.agents.exception.MissingAgentDefinitionException;
+import io.github.exepex.commerce.agents.exception.UnreadableAgentDefinitionsException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -9,7 +14,6 @@ import java.util.List;
 import java.util.Map;
 import lombok.AccessLevel;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.yaml.snakeyaml.Yaml;
 
@@ -21,32 +25,30 @@ import org.yaml.snakeyaml.Yaml;
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public final class AgentDefinitions {
 
-    private static final String LOCATION = "classpath*:agents/*.md";
-
     private final Map<String, AgentDefinition> byId;
 
     public static AgentDefinitions load() {
-        Map<String, AgentDefinition> byId = new LinkedHashMap<>();
+        var byId = new LinkedHashMap<String, AgentDefinition>();
         try {
-            for (Resource file : new PathMatchingResourcePatternResolver().getResources(LOCATION)) {
-                try (InputStream content = file.getInputStream()) {
-                    AgentDefinition definition = parse(file.getFilename(),
+            for (var file : new PathMatchingResourcePatternResolver().getResources(DefinitionKeys.LOCATION)) {
+                try (var content = file.getInputStream()) {
+                    var definition = parse(file.getFilename(),
                             new String(content.readAllBytes(), StandardCharsets.UTF_8));
                     if (byId.put(definition.id(), definition) != null) {
-                        throw new IllegalStateException("Agent " + definition.id() + " is defined twice");
+                        throw new DuplicateAgentDefinitionException(definition.id());
                     }
                 }
             }
         } catch (IOException unreadable) {
-            throw new IllegalStateException("Could not read the agent definitions", unreadable);
+            throw new UnreadableAgentDefinitionsException(unreadable);
         }
         return new AgentDefinitions(Collections.unmodifiableMap(byId));
     }
 
     public AgentDefinition get(String agentId) {
-        AgentDefinition definition = byId.get(agentId);
+        var definition = byId.get(agentId);
         if (definition == null) {
-            throw new IllegalArgumentException("No agent is defined with id " + agentId);
+            throw new MissingAgentDefinitionException(agentId);
         }
         return definition;
     }
@@ -56,40 +58,44 @@ public final class AgentDefinitions {
     }
 
     static AgentDefinition parse(String fileName, String text) {
-        String[] parts = text.replace("\r\n", "\n").split("(?m)^---\\s*$", 3);
+        var parts = text.replace(DefinitionKeys.WINDOWS_LINE_BREAK, DefinitionKeys.LINE_BREAK)
+                .split(DefinitionKeys.HEADER_SEPARATOR, 3);
         if (parts.length < 3 || !parts[0].isBlank()) {
-            throw new IllegalStateException(fileName + " must start with a YAML header between --- lines");
+            throw new InvalidAgentDefinitionException(fileName, ErrorMessages.NO_HEADER);
         }
         Map<String, Object> header = new Yaml().load(parts[1]);
-        String id = text(fileName, header, "id");
-        String model = text(fileName, header, "model");
-        String effort = text(fileName, header, "effort");
-        int toolCallBudget = (Integer) required(fileName, header, "tool-call-budget");
-        boolean customerScoped = (Boolean) required(fileName, header, "customer-scoped");
-        Map<String, Object> tools = map(fileName, header, "tools");
+        var id = text(fileName, header, DefinitionKeys.ID);
+        var model = text(fileName, header, DefinitionKeys.MODEL);
+        var effort = text(fileName, header, DefinitionKeys.EFFORT);
+        var toolCallBudget = (Integer) required(fileName, header, DefinitionKeys.TOOL_CALL_BUDGET);
+        var customerScoped = (Boolean) required(fileName, header, DefinitionKeys.CUSTOMER_SCOPED);
+        var tools = map(fileName, header, DefinitionKeys.TOOLS);
         return new AgentDefinition(id, model, effort, toolCallBudget, customerScoped,
-                list(fileName, tools, "commerce"),
-                tools.containsKey("slack") ? list(fileName, tools, "slack") : List.of(),
-                tools.containsKey("servicenow") ? list(fileName, tools, "servicenow") : List.of(),
-                requireText(fileName, "the instructions", parts[2]),
-                header.containsKey("slack-step") ? text(fileName, header, "slack-step") : "");
+                list(fileName, tools, DefinitionKeys.COMMERCE_TOOLS),
+                tools.containsKey(DefinitionKeys.SLACK_TOOLS)
+                        ? list(fileName, tools, DefinitionKeys.SLACK_TOOLS) : List.of(),
+                tools.containsKey(DefinitionKeys.SERVICENOW_TOOLS)
+                        ? list(fileName, tools, DefinitionKeys.SERVICENOW_TOOLS) : List.of(),
+                requireText(fileName, ErrorMessages.INSTRUCTIONS, parts[2]),
+                header.containsKey(DefinitionKeys.SLACK_STEP) ? text(fileName, header, DefinitionKeys.SLACK_STEP) : "");
     }
 
     private static Object required(String fileName, Map<String, Object> values, String key) {
-        Object value = values == null ? null : values.get(key);
+        var value = values == null ? null : values.get(key);
         if (value == null) {
-            throw new IllegalStateException(fileName + " is missing '" + key + "'");
+            throw new InvalidAgentDefinitionException(fileName, ErrorMessages.MISSING_SETTING.formatted(key));
         }
         return value;
     }
 
     private static String text(String fileName, Map<String, Object> values, String key) {
-        return requireText(fileName, "'" + key + "'", String.valueOf(required(fileName, values, key)));
+        return requireText(fileName, ErrorMessages.SETTING.formatted(key),
+                String.valueOf(required(fileName, values, key)));
     }
 
     private static String requireText(String fileName, String what, String value) {
         if (value.isBlank()) {
-            throw new IllegalStateException(fileName + " has an empty " + what);
+            throw new InvalidAgentDefinitionException(fileName, ErrorMessages.EMPTY_SETTING.formatted(what));
         }
         return value.strip();
     }
@@ -101,9 +107,9 @@ public final class AgentDefinitions {
 
     @SuppressWarnings("unchecked")
     private static List<String> list(String fileName, Map<String, Object> values, String key) {
-        List<String> list = (List<String>) required(fileName, values, key);
+        var list = (List<String>) required(fileName, values, key);
         if (list.isEmpty()) {
-            throw new IllegalStateException(fileName + " lists no '" + key + "' tools");
+            throw new InvalidAgentDefinitionException(fileName, ErrorMessages.NO_TOOLS.formatted(key));
         }
         return List.copyOf(list);
     }

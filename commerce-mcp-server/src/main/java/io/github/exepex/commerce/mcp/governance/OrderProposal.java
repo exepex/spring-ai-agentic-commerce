@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.mcp.governance;
 
+import io.github.exepex.commerce.mcp.governance.dto.ProposedLine;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -40,7 +41,7 @@ public class OrderProposal {
     @Column(name = "customer_email")
     private String customerEmail;
 
-    /** JSON array of {@link ProposalService.ProposedLine}. */
+    /** JSON array of {@link ProposedLine}. */
     private String lines;
 
     private BigDecimal total;

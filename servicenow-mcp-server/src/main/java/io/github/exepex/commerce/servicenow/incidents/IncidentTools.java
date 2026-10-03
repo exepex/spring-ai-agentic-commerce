@@ -1,11 +1,25 @@
 package io.github.exepex.commerce.servicenow.incidents;
 
 import io.github.exepex.commerce.servicenow.ServiceNowProperties;
+import io.github.exepex.commerce.servicenow.constants.AuditValues;
+import io.github.exepex.commerce.servicenow.constants.IncidentStates;
+import io.github.exepex.commerce.servicenow.constants.Patterns;
+import io.github.exepex.commerce.servicenow.constants.ServiceNowFields;
+import io.github.exepex.commerce.servicenow.constants.ToolDescriptions;
+import io.github.exepex.commerce.servicenow.constants.ToolNames;
+import io.github.exepex.commerce.servicenow.constants.ToolResults;
+import io.github.exepex.commerce.servicenow.exception.EmptyNoteException;
+import io.github.exepex.commerce.servicenow.exception.IncidentNotFoundException;
+import io.github.exepex.commerce.servicenow.exception.IncidentNotOwnedException;
+import io.github.exepex.commerce.servicenow.exception.InvalidIncidentNumberException;
+import io.github.exepex.commerce.servicenow.exception.NoteTooLongException;
+import io.github.exepex.commerce.servicenow.exception.ServiceNowNotConfiguredException;
+import io.github.exepex.commerce.servicenow.exception.UnknownTeamException;
 import io.github.exepex.commerce.servicenow.governance.ToolGuard;
-import io.github.exepex.commerce.servicenow.governance.ToolRefusedException;
-import io.github.exepex.commerce.servicenow.incidents.IncidentViews.Acknowledgement;
-import io.github.exepex.commerce.servicenow.incidents.IncidentViews.IncidentView;
-import io.github.exepex.commerce.servicenow.incidents.IncidentViews.TeamView;
+import io.github.exepex.commerce.servicenow.incidents.dto.Acknowledgement;
+import io.github.exepex.commerce.servicenow.incidents.dto.Incident;
+import io.github.exepex.commerce.servicenow.incidents.dto.IncidentView;
+import io.github.exepex.commerce.servicenow.incidents.dto.TeamView;
 import io.modelcontextprotocol.common.McpTransportContext;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,7 +39,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 class IncidentTools {
 
-    private static final Pattern INCIDENT_NUMBER = Pattern.compile("INC\\d{7,}");
+    private static final Pattern INCIDENT_NUMBER = Pattern.compile(Patterns.INCIDENT_NUMBER);
     private static final int MAX_NOTE_LENGTH = 4000;
 
     private final ToolGuard guard;
@@ -33,109 +47,95 @@ class IncidentTools {
     private final CaseSync cases;
     private final ServiceNowProperties properties;
 
-    @McpTool(name = "get_incident", description = """
-            Read an incident you are working: what was reported, by whom and when, its state and assignment, the \
-            order it is linked to (empty when none), and its work notes and comments as ServiceNow shows them, newest \
-            first. Each note starts with a line "<time> - <who> (<kind>)"; those times are in the ServiceNow user's \
-            time zone, not UTC like openedAt.""")
+    @McpTool(name = ToolNames.GET_INCIDENT, description = ToolDescriptions.GET_INCIDENT)
     IncidentView getIncident(McpTransportContext context,
-            @McpToolParam(description = "The incident number, such as INC0010001") String number) {
-        return guard.run(context, "get_incident", "Read incident " + number, agentId -> {
-            ServiceNowClient.Incident incident = owned(number);
-            return IncidentViews.toView(incident, serviceNow.journalOf(incident.sysId()));
+            @McpToolParam(description = ToolDescriptions.INCIDENT_NUMBER_EXAMPLE) String number) {
+        return guard.run(context, ToolNames.GET_INCIDENT, AuditValues.READ_INCIDENT.formatted(number), agentId -> {
+            var incident = owned(number);
+            return IncidentMapper.toView(incident, serviceNow.journalOf(incident.sysId()));
         });
     }
 
-    @McpTool(name = "add_work_note", description = """
-            Add a work note to an incident you are working: what you checked, what you did and why. Work notes are \
-            for the support teams, not the customer.""")
+    @McpTool(name = ToolNames.ADD_WORK_NOTE, description = ToolDescriptions.ADD_WORK_NOTE)
     Acknowledgement addWorkNote(McpTransportContext context,
-            @McpToolParam(description = "The incident number") String number,
-            @McpToolParam(description = "The note") String note) {
-        return guard.run(context, "add_work_note", "Added a work note to " + number, agentId -> {
-            ServiceNowClient.Incident incident = owned(number);
-            serviceNow.update(incident.sysId(), Map.of("work_notes", requireNote(note)));
-            return new Acknowledgement(number, "The work note was added");
+            @McpToolParam(description = ToolDescriptions.INCIDENT_NUMBER) String number,
+            @McpToolParam(description = ToolDescriptions.NOTE) String note) {
+        return guard.run(context, ToolNames.ADD_WORK_NOTE, AuditValues.ADDED_WORK_NOTE.formatted(number), agentId -> {
+            var incident = owned(number);
+            serviceNow.update(incident.sysId(), Map.of(ServiceNowFields.WORK_NOTES, requireNote(note)));
+            return new Acknowledgement(number, ToolResults.WORK_NOTE_ADDED);
         });
     }
 
-    @McpTool(name = "list_teams", description = "List the teams an incident can be handed to, and what each one handles.")
+    @McpTool(name = ToolNames.LIST_TEAMS, description = ToolDescriptions.LIST_TEAMS)
     List<TeamView> listTeams(McpTransportContext context) {
-        return guard.run(context, "list_teams", "Listed the teams",
-                agentId -> IncidentViews.toViews(properties.teams()));
+        return guard.run(context, ToolNames.LIST_TEAMS, AuditValues.LISTED_TEAMS,
+                agentId -> IncidentMapper.toViews(properties.teams()));
     }
 
-    @McpTool(name = ToolGuard.HAND_TO_TEAM, description = """
-            Hand an incident you are working to the team whose work it is, when you cannot or should not finish it \
-            yourself. The note must say what you found, what you already did, and what the team needs to decide or \
-            do. The team is notified by ServiceNow; the incident is no longer yours afterwards.""")
+    @McpTool(name = ToolNames.ASSIGN_TO_TEAM, description = ToolDescriptions.ASSIGN_TO_TEAM)
     Acknowledgement assignToTeam(McpTransportContext context,
-            @McpToolParam(description = "The incident number") String number,
-            @McpToolParam(description = "The team, as listed by list_teams; the default team when left out",
-                    required = false) String team,
-            @McpToolParam(description = "What you found, what you did, and what the team needs to do") String note) {
-        return guard.run(context, ToolGuard.HAND_TO_TEAM, "Assigned " + number + " to team " + team, agentId -> {
-            String teamKey = team == null || team.isBlank() ? properties.defaultTeam() : team;
-            ServiceNowProperties.Team target = properties.teams().get(teamKey);
-            if (target == null) {
-                throw new ToolRefusedException("There is no team '" + team + "'. Use one of " + properties.teams().keySet() + ".");
-            }
-            ServiceNowClient.Incident incident = owned(number);
-            Map<String, String> fields = new LinkedHashMap<>();
-            fields.put("assignment_group", target.group());
-            fields.put("assigned_to", "");
-            fields.put("work_notes", requireNote(note));
-            serviceNow.updateByDisplayValue(incident.sysId(), fields);
-            cases.reportHandedToTeam(incident, target.group());
-            return new Acknowledgement(number, "Assigned to " + target.group() + ", who are notified by ServiceNow");
-        });
+            @McpToolParam(description = ToolDescriptions.INCIDENT_NUMBER) String number,
+            @McpToolParam(description = ToolDescriptions.TEAM, required = false) String team,
+            @McpToolParam(description = ToolDescriptions.HAND_OVER_NOTE) String note) {
+        return guard.run(context, ToolNames.ASSIGN_TO_TEAM, AuditValues.ASSIGNED_TO_TEAM.formatted(number, team),
+                agentId -> {
+                    var teamKey = team == null || team.isBlank() ? properties.defaultTeam() : team;
+                    var target = properties.teams().get(teamKey);
+                    if (target == null) {
+                        throw new UnknownTeamException(team, properties.teams().keySet());
+                    }
+                    var incident = owned(number);
+                    var fields = new LinkedHashMap<String, String>();
+                    fields.put(ServiceNowFields.ASSIGNMENT_GROUP, target.group());
+                    fields.put(ServiceNowFields.ASSIGNED_TO, "");
+                    fields.put(ServiceNowFields.WORK_NOTES, requireNote(note));
+                    serviceNow.updateByDisplayValue(incident.sysId(), fields);
+                    cases.reportHandedToTeam(incident, target.group());
+                    return new Acknowledgement(number, ToolResults.ASSIGNED_TO_TEAM.formatted(target.group()));
+                });
     }
 
-    @McpTool(name = "resolve_incident", description = """
-            Resolve an incident you are working, once it is fully handled. The resolution is shown to whoever reads \
-            the incident: say what was wrong and what you did.""")
+    @McpTool(name = ToolNames.RESOLVE_INCIDENT, description = ToolDescriptions.RESOLVE_INCIDENT)
     Acknowledgement resolveIncident(McpTransportContext context,
-            @McpToolParam(description = "The incident number") String number,
-            @McpToolParam(description = "What was wrong and what was done") String resolution) {
-        return guard.run(context, "resolve_incident", "Resolved " + number, agentId -> {
-            ServiceNowClient.Incident incident = owned(number);
-            Map<String, String> fields = new LinkedHashMap<>();
-            fields.put("state", ServiceNowClient.STATE_RESOLVED);
-            fields.put("close_code", properties.closeCode());
-            fields.put("close_notes", requireNote(resolution));
+            @McpToolParam(description = ToolDescriptions.INCIDENT_NUMBER) String number,
+            @McpToolParam(description = ToolDescriptions.RESOLUTION) String resolution) {
+        return guard.run(context, ToolNames.RESOLVE_INCIDENT, AuditValues.RESOLVED.formatted(number), agentId -> {
+            var incident = owned(number);
+            var fields = new LinkedHashMap<String, String>();
+            fields.put(ServiceNowFields.STATE, IncidentStates.RESOLVED);
+            fields.put(ServiceNowFields.CLOSE_CODE, properties.closeCode());
+            fields.put(ServiceNowFields.CLOSE_NOTES, requireNote(resolution));
             serviceNow.update(incident.sysId(), fields);
-            return new Acknowledgement(number, "The incident is resolved");
+            return new Acknowledgement(number, ToolResults.INCIDENT_RESOLVED);
         });
     }
 
-    private ServiceNowClient.Incident find(String number) {
+    private Incident find(String number) {
         if (!properties.isConfigured()) {
-            throw new ToolRefusedException("ServiceNow is not configured");
+            throw new ServiceNowNotConfiguredException();
         }
         if (number == null || !INCIDENT_NUMBER.matcher(number).matches()) {
-            throw new ToolRefusedException("'" + number + "' is not an incident number such as INC0010001");
+            throw new InvalidIncidentNumberException(number);
         }
-        return serviceNow.findByNumber(number)
-                .orElseThrow(() -> new ToolRefusedException("Incident " + number + " does not exist"));
+        return serviceNow.findByNumber(number).orElseThrow(() -> new IncidentNotFoundException(number));
     }
 
     /** The incident, if the agent is the one working it; otherwise the call is refused. */
-    private ServiceNowClient.Incident owned(String number) {
-        ServiceNowClient.Incident incident = find(number);
+    private Incident owned(String number) {
+        var incident = find(number);
         if (!incident.isClaimedBy(serviceNow.integrationUserSysId(), properties.agentGroup())) {
-            throw new ToolRefusedException("Incident " + number + " is not yours to change: it is " + incident.stateName()
-                    + (incident.isAssigned() ? " and assigned to " + incident.assignedTo() : " and unassigned")
-                    + " in " + incident.assignmentGroup() + ".");
+            throw new IncidentNotOwnedException(incident);
         }
         return incident;
     }
 
     private static String requireNote(String note) {
         if (note == null || note.isBlank()) {
-            throw new ToolRefusedException("The note cannot be empty");
+            throw new EmptyNoteException();
         }
         if (note.length() > MAX_NOTE_LENGTH) {
-            throw new ToolRefusedException("A note can be at most " + MAX_NOTE_LENGTH + " characters");
+            throw new NoteTooLongException(MAX_NOTE_LENGTH);
         }
         return note;
     }

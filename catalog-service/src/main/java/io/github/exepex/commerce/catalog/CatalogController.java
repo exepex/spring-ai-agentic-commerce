@@ -1,11 +1,12 @@
 package io.github.exepex.commerce.catalog;
 
-import io.github.exepex.commerce.catalog.CatalogViews.ProductView;
-import io.github.exepex.commerce.catalog.CatalogViews.ReservationView;
+import io.github.exepex.commerce.catalog.constants.ApiPaths;
+import io.github.exepex.commerce.catalog.dto.AdjustStockRequest;
+import io.github.exepex.commerce.catalog.dto.ProductView;
+import io.github.exepex.commerce.catalog.dto.ReservationView;
+import io.github.exepex.commerce.catalog.dto.ReserveStockRequest;
+import io.github.exepex.commerce.catalog.exception.ProductNotFoundException;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -16,55 +17,49 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api")
 @RequiredArgsConstructor
 class CatalogController {
-
-    record ReserveStockRequest(@NotNull UUID orderId, @Positive int quantity) {}
-
-    record AdjustStockRequest(int delta, @NotBlank String reason) {}
 
     private final ProductRepository products;
     private final StockService stock;
 
-    @GetMapping("/products")
+    @GetMapping(ApiPaths.PRODUCTS)
     @Transactional(readOnly = true)
     List<ProductView> listProducts() {
-        return products.findAllByOrderBySku().stream().map(CatalogViews::toView).toList();
+        return products.findAllByOrderBySku().stream().map(CatalogMapper::toView).toList();
     }
 
-    @GetMapping("/products/{productId}")
+    @GetMapping(ApiPaths.PRODUCT)
     @Transactional(readOnly = true)
     ProductView getProduct(@PathVariable UUID productId) {
-        return products.findById(productId).map(CatalogViews::toView)
+        return products.findById(productId).map(CatalogMapper::toView)
                 .orElseThrow(() -> new ProductNotFoundException(productId));
     }
 
-    @PostMapping("/products/{productId}/reservations")
+    @PostMapping(ApiPaths.PRODUCT_RESERVATIONS)
     @ResponseStatus(HttpStatus.CREATED)
     ReservationView reserveStock(@PathVariable UUID productId, @Valid @RequestBody ReserveStockRequest request) {
-        return CatalogViews.toView(stock.reserve(request.orderId(), productId, request.quantity()));
+        return CatalogMapper.toView(stock.reserve(request.orderId(), productId, request.quantity()));
     }
 
-    @DeleteMapping("/orders/{orderId}/reservations")
+    @DeleteMapping(ApiPaths.ORDER_RESERVATIONS)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     void releaseOrderReservations(@PathVariable UUID orderId) {
         stock.releaseOrder(orderId);
     }
 
-    @PostMapping("/orders/{orderId}/dispatch")
+    @PostMapping(ApiPaths.ORDER_DISPATCH)
     @ResponseStatus(HttpStatus.NO_CONTENT)
     void dispatchOrder(@PathVariable UUID orderId) {
         stock.dispatchOrder(orderId);
     }
 
-    @PostMapping("/products/{productId}/stock-adjustments")
+    @PostMapping(ApiPaths.STOCK_ADJUSTMENTS)
     ProductView adjustStock(@PathVariable UUID productId, @Valid @RequestBody AdjustStockRequest request) {
-        return CatalogViews.toView(stock.adjustStock(productId, request.delta(), request.reason()));
+        return CatalogMapper.toView(stock.adjustStock(productId, request.delta(), request.reason()));
     }
 }

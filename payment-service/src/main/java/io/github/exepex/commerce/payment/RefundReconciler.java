@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.payment;
 
+import io.github.exepex.commerce.payment.constants.ConfigKeys;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -31,15 +32,14 @@ class RefundReconciler {
     private final ApplicationEventPublisher events;
     private final Clock clock;
 
-    @Value("${commerce.payments.refund-check.watch}")
+    @Value(ConfigKeys.REFUND_CHECK_WATCH)
     private final Duration watch;
 
-    @Scheduled(fixedDelayString = "${commerce.payments.refund-check.interval}",
-            initialDelayString = "${commerce.payments.refund-check.interval}")
+    @Scheduled(fixedDelayString = ConfigKeys.REFUND_CHECK_INTERVAL, initialDelayString = ConfigKeys.REFUND_CHECK_INTERVAL)
     void reconcile() {
-        for (Refund refund : refunds.findUnsettled(gateway.name(), Instant.now(clock).minus(watch))) {
+        for (var refund : refunds.findUnsettled(gateway.name(), Instant.now(clock).minus(watch))) {
             try {
-                PaymentGateway.RefundStatus latest = gateway.refundStatus(refund.getProviderReference());
+                var latest = gateway.refundStatus(refund.getProviderReference());
                 if (latest != refund.getStatus()) {
                     record(refund, latest);
                 }
@@ -52,8 +52,8 @@ class RefundReconciler {
     /** Under the payment's lock, so it cannot interleave with a new refund's refundable check. */
     private void record(Refund refund, PaymentGateway.RefundStatus latest) {
         transaction.executeWithoutResult(status -> {
-            Payment payment = payments.findByIdForUpdate(refund.getPaymentId()).orElseThrow();
-            Refund current = refunds.findById(refund.getId()).orElseThrow();
+            var payment = payments.findByIdForUpdate(refund.getPaymentId()).orElseThrow();
+            var current = refunds.findById(refund.getId()).orElseThrow();
             if (current.getStatus() == PaymentGateway.RefundStatus.FAILED) {
                 return;
             }

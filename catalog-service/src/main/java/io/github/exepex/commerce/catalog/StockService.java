@@ -1,5 +1,10 @@
 package io.github.exepex.commerce.catalog;
 
+import io.github.exepex.commerce.catalog.exception.NothingReservedException;
+import io.github.exepex.commerce.catalog.exception.ProductNotFoundException;
+import io.github.exepex.commerce.catalog.exception.ReservationConflictException;
+import io.github.exepex.commerce.catalog.exception.StockReleasedException;
+import io.github.exepex.commerce.catalog.exception.StockShortfallException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -23,12 +28,13 @@ public class StockService {
     /** Holds {@code quantity} units for the order. Repeating the same request returns the same reservation. */
     @Transactional
     public StockReservation reserve(UUID orderId, UUID productId, int quantity) {
-        Product product = lockProduct(productId);
+        var product = lockProduct(productId);
         var existing = reservations.findByOrderIdAndProductId(orderId, productId);
         if (existing.isPresent()) {
-            StockReservation reservation = existing.get();
+            var reservation = existing.get();
             if (!reservation.isSameReservationAs(quantity)) {
-                throw new ReservationConflictException(orderId, product.getSku(), reservation);
+                throw new ReservationConflictException(orderId, product.getSku(), reservation.getStatus().name(),
+                        reservation.getQuantity());
             }
             return reservation;
         }
@@ -42,7 +48,7 @@ public class StockService {
      */
     @Transactional
     public void releaseOrder(UUID orderId) {
-        for (StockReservation reservation : reservations.findByOrderIdOrderByProductId(orderId)) {
+        for (var reservation : reservations.findByOrderIdOrderByProductId(orderId)) {
             switch (reservation.getStatus()) {
                 case RESERVED -> {
                     lockProduct(reservation.getProductId()).release(reservation.getQuantity());
@@ -66,18 +72,18 @@ public class StockService {
      */
     @Transactional
     public void dispatchOrder(UUID orderId) {
-        List<StockReservation> held = reservations.findByOrderIdOrderByProductId(orderId);
+        var held = reservations.findByOrderIdOrderByProductId(orderId);
         if (held.isEmpty()) {
-            throw DispatchRefusedException.nothingReserved(orderId);
+            throw new NothingReservedException(orderId);
         }
         if (held.stream().anyMatch(reservation -> reservation.getStatus() == StockReservation.Status.RELEASED)) {
-            throw DispatchRefusedException.released(orderId);
+            throw new StockReleasedException(orderId);
         }
-        for (StockReservation reservation : held) {
+        for (var reservation : held) {
             if (reservation.getStatus() == StockReservation.Status.RESERVED) {
-                Product product = lockProduct(reservation.getProductId());
+                var product = lockProduct(reservation.getProductId());
                 if (newestOrdersCovering(product).contains(orderId)) {
-                    throw DispatchRefusedException.stockShort(orderId, product.getSku());
+                    throw new StockShortfallException(orderId, product.getSku());
                 }
                 product.dispatch(reservation.getQuantity());
                 reservation.markDispatched();
@@ -94,7 +100,7 @@ public class StockService {
      */
     @Transactional
     public Product adjustStock(UUID productId, int delta, String reason) {
-        Product product = lockProduct(productId);
+        var product = lockProduct(productId);
         product.adjustOnHand(delta);
         if (delta < 0 && product.shortfall() > 0) {
             events.publishEvent(StockOutEvent.of(product, reason, newestOrdersCovering(product), Instant.now(clock)));
@@ -103,9 +109,9 @@ public class StockService {
     }
 
     private List<UUID> newestOrdersCovering(Product product) {
-        List<UUID> affectedOrderIds = new ArrayList<>();
-        int unitsCovered = 0;
-        for (StockReservation reservation : reservations.findByProductIdAndStatusOrderByCreatedAtDesc(
+        var affectedOrderIds = new ArrayList<UUID>();
+        var unitsCovered = 0;
+        for (var reservation : reservations.findByProductIdAndStatusOrderByCreatedAtDesc(
                 product.getId(), StockReservation.Status.RESERVED)) {
             if (unitsCovered >= product.shortfall()) {
                 break;

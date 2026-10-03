@@ -1,5 +1,12 @@
 package io.github.exepex.commerce.servicenow.governance;
 
+import io.github.exepex.commerce.servicenow.constants.AuditValues;
+import io.github.exepex.commerce.servicenow.constants.AuthValues;
+import io.github.exepex.commerce.servicenow.constants.ToolNames;
+import io.github.exepex.commerce.servicenow.exception.AgentSwitchedOffException;
+import io.github.exepex.commerce.servicenow.exception.ToolNotPermittedException;
+import io.github.exepex.commerce.servicenow.exception.ToolRefusedException;
+import io.github.exepex.commerce.servicenow.governance.dto.ToolCall;
 import io.github.exepex.commerce.servicenow.security.AgentRegistry;
 import io.github.exepex.commerce.servicenow.security.CallingAgent;
 import io.modelcontextprotocol.common.McpTransportContext;
@@ -18,9 +25,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class ToolGuard {
 
-    /** The tool that hands work to people; never blocked by the kill switch. */
-    public static final String HAND_TO_TEAM = "assign_to_team";
-
     private final AgentRegistry agents;
     private final GovernanceApi governance;
 
@@ -29,25 +33,24 @@ public class ToolGuard {
      * @throws ToolRefusedException when the agent may not make the call, or the tool refuses it
      */
     public <T> T run(McpTransportContext context, String tool, String summary, Function<String, T> action) {
-        String agentId = CallingAgent.of(context);
+        var agentId = CallingAgent.of(context);
         if (!agents.mayCall(agentId, tool)) {
-            record(agentId, tool, "DENIED", summary + ": tool not permitted for this agent");
-            throw new ToolRefusedException("Agent " + agentId + " is not permitted to call " + tool);
+            record(agentId, tool, AuditValues.DENIED, AuditValues.NOT_PERMITTED.formatted(summary));
+            throw new ToolNotPermittedException(agentId, tool);
         }
-        if (!HAND_TO_TEAM.equals(tool) && !isSwitchedOn(agentId)) {
-            record(agentId, tool, "DENIED", summary + ": agent is switched off");
-            throw new ToolRefusedException("Agent " + agentId + " is switched off. Stop, and hand the incident to a team "
-                    + "with " + HAND_TO_TEAM + ".");
+        if (!ToolNames.ASSIGN_TO_TEAM.equals(tool) && !isSwitchedOn(agentId)) {
+            record(agentId, tool, AuditValues.DENIED, AuditValues.SWITCHED_OFF.formatted(summary));
+            throw new AgentSwitchedOffException(agentId);
         }
         try {
-            T result = action.apply(agentId);
-            record(agentId, tool, "SUCCEEDED", summary);
+            var result = action.apply(agentId);
+            record(agentId, tool, AuditValues.SUCCEEDED, summary);
             return result;
         } catch (ToolRefusedException refused) {
-            record(agentId, tool, "DENIED", summary + ": " + refused.getMessage());
+            record(agentId, tool, AuditValues.DENIED, AuditValues.NOT_DONE.formatted(summary, refused.getMessage()));
             throw refused;
         } catch (RuntimeException failure) {
-            record(agentId, tool, "FAILED", summary + ": " + failure.getMessage());
+            record(agentId, tool, AuditValues.FAILED, AuditValues.NOT_DONE.formatted(summary, failure.getMessage()));
             throw failure;
         }
     }
@@ -68,8 +71,8 @@ public class ToolGuard {
      */
     private void record(String agentId, String tool, String outcome, String summary) {
         try {
-            governance.recordToolCall("Bearer " + agents.tokenOf(agentId),
-                    new GovernanceApi.ToolCall(null, "servicenow:" + tool, outcome, summary, null));
+            governance.recordToolCall(AuthValues.BEARER_PREFIX + agents.tokenOf(agentId),
+                    new ToolCall(null, AuditValues.ACTION_PREFIX + tool, outcome, summary, null));
         } catch (RuntimeException unreachable) {
             log.warn("Could not record {} by {} in the audit trail: {}", LogValues.safe(tool), LogValues.safe(agentId),
                     LogValues.safe(summary), unreachable);

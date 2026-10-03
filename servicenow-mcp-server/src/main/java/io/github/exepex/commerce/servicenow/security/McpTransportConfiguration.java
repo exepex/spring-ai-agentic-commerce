@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.servicenow.security;
 
+import io.github.exepex.commerce.servicenow.constants.AuthValues;
 import io.modelcontextprotocol.common.McpTransportContext;
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper;
 import java.util.Map;
@@ -16,16 +17,14 @@ import tools.jackson.databind.json.JsonMapper;
 @Configuration(proxyBeanMethods = false)
 class McpTransportConfiguration {
 
-    static final String AGENT_ID = "agentId";
-
     @Bean
     WebMvcStreamableServerTransportProvider webMvcStreamableServerTransportProvider(JsonMapper jsonMapper,
             McpServerStreamableHttpProperties properties) {
         return WebMvcStreamableServerTransportProvider.builder()
                 .jsonMapper(new JacksonMcpJsonMapper(jsonMapper))
                 .mcpEndpoint(properties.getMcpEndpoint())
-                .contextExtractor(request -> McpTransportContext.create(Map.of(AGENT_ID,
-                        request.servletRequest().getAttribute(AgentAuthenticationFilter.AGENT_ID_ATTRIBUTE))))
+                .contextExtractor(request -> McpTransportContext.create(Map.of(AuthValues.AGENT_ID,
+                        request.servletRequest().getAttribute(AuthValues.AGENT_ID_ATTRIBUTE))))
                 .build();
     }
 }

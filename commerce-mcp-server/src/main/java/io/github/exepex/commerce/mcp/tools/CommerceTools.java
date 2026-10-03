@@ -2,24 +2,31 @@ package io.github.exepex.commerce.mcp.tools;
 
 import io.github.exepex.commerce.mcp.cases.CaseService;
 import io.github.exepex.commerce.mcp.cases.CaseType;
+import io.github.exepex.commerce.mcp.constants.DownstreamApis;
+import io.github.exepex.commerce.mcp.constants.ToolDescriptions;
+import io.github.exepex.commerce.mcp.constants.ToolMessages;
+import io.github.exepex.commerce.mcp.constants.ToolNames;
 import io.github.exepex.commerce.mcp.downstream.CatalogApi;
 import io.github.exepex.commerce.mcp.downstream.Downstream;
-import io.github.exepex.commerce.mcp.downstream.DownstreamException;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
 import io.github.exepex.commerce.mcp.downstream.ShippingApi;
+import io.github.exepex.commerce.mcp.downstream.dto.CancelOrderRequest;
+import io.github.exepex.commerce.mcp.downstream.dto.Order;
+import io.github.exepex.commerce.mcp.exception.DownstreamException;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.NotificationService;
 import io.github.exepex.commerce.mcp.governance.ProposalService;
-import io.github.exepex.commerce.mcp.governance.RefundRequest;
 import io.github.exepex.commerce.mcp.governance.RefundService;
-import io.github.exepex.commerce.mcp.tools.ToolViews.Acknowledgement;
-import io.github.exepex.commerce.mcp.tools.ToolViews.OrderDetails;
-import io.github.exepex.commerce.mcp.tools.ToolViews.OrderSummary;
-import io.github.exepex.commerce.mcp.tools.ToolViews.PaymentSummary;
-import io.github.exepex.commerce.mcp.tools.ToolViews.ProductSummary;
-import io.github.exepex.commerce.mcp.tools.ToolViews.RefundResult;
-import io.github.exepex.commerce.mcp.tools.ToolViews.ShipmentSummary;
+import io.github.exepex.commerce.mcp.governance.dto.Proposal;
+import io.github.exepex.commerce.mcp.governance.dto.RequestedLine;
+import io.github.exepex.commerce.mcp.tools.dto.Acknowledgement;
+import io.github.exepex.commerce.mcp.tools.dto.OrderDetails;
+import io.github.exepex.commerce.mcp.tools.dto.OrderSummary;
+import io.github.exepex.commerce.mcp.tools.dto.PaymentSummary;
+import io.github.exepex.commerce.mcp.tools.dto.ProductSummary;
+import io.github.exepex.commerce.mcp.tools.dto.RefundResult;
+import io.github.exepex.commerce.mcp.tools.dto.ShipmentSummary;
 import io.modelcontextprotocol.common.McpTransportContext;
 import java.math.BigDecimal;
 import java.util.Arrays;
@@ -39,8 +46,6 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 class CommerceTools {
 
-    private static final String CUSTOMER_EMAIL = "The customer's email. In a customer conversation the application fills it in.";
-
     private final ToolGuard guard;
     private final CatalogApi catalog;
     private final OrderApi orders;
@@ -51,162 +56,149 @@ class CommerceTools {
     private final NotificationService notifications;
     private final CaseService cases;
 
-    @McpTool(name = "search_products", description = """
-            Search the catalog. Returns matching products with their id, price and how many are available. \
-            Leave the query empty to list every product.""")
+    @McpTool(name = ToolNames.SEARCH_PRODUCTS, description = ToolDescriptions.SEARCH_PRODUCTS)
     List<ProductSummary> searchProducts(McpTransportContext context,
-            @McpToolParam(description = "Words to look for in the product name, SKU or description", required = false) String query) {
-        return guard.run(context, "search_products", null, "Searched products for '" + query + "'", false, agentId -> {
-            List<String> words = query == null || query.isBlank()
-                    ? List.of()
-                    : Arrays.stream(query.toLowerCase(Locale.ROOT).split("\\s+")).toList();
-            return Downstream.call("catalog", catalog::listProducts).stream()
-                    .filter(product -> words.stream().allMatch(word -> (product.name() + " " + product.sku() + " "
-                            + product.description()).toLowerCase(Locale.ROOT).contains(word)))
-                    .map(ToolViews::toSummary)
-                    .toList();
-        });
+            @McpToolParam(description = ToolDescriptions.PRODUCT_QUERY, required = false) String query) {
+        return guard.run(context, ToolNames.SEARCH_PRODUCTS, null, ToolMessages.SEARCHED_PRODUCTS.formatted(query),
+                false, agentId -> {
+                    var words = query == null || query.isBlank()
+                            ? List.<String>of()
+                            : Arrays.stream(query.toLowerCase(Locale.ROOT).split(ToolMessages.QUERY_WORD_SEPARATOR))
+                                    .toList();
+                    return Downstream.call(DownstreamApis.CATALOG, catalog::listProducts).stream()
+                            .filter(product -> words.stream().allMatch(word -> ToolMessages.SEARCHABLE_PRODUCT_TEXT
+                                    .formatted(product.name(), product.sku(), product.description())
+                                    .toLowerCase(Locale.ROOT).contains(word)))
+                            .map(ToolMapper::toSummary)
+                            .toList();
+                });
     }
 
-    @McpTool(name = "find_customer_orders", description = "List a customer's orders, newest first.")
+    @McpTool(name = ToolNames.FIND_CUSTOMER_ORDERS, description = ToolDescriptions.FIND_CUSTOMER_ORDERS)
     List<OrderSummary> findCustomerOrders(McpTransportContext context,
-            @McpToolParam(description = CUSTOMER_EMAIL) String customerEmail) {
-        return guard.run(context, "find_customer_orders", null, "Listed the orders of " + customerEmail, false, agentId ->
-                Downstream.call("order service", () -> orders.findOrders(ToolArguments.requireCustomer(customerEmail)))
-                        .stream()
-                        .map(order -> ToolViews.toSummary(order, ToolViews.itemsOf(order)))
-                        .toList());
+            @McpToolParam(description = ToolDescriptions.CUSTOMER_EMAIL) String customerEmail) {
+        return guard.run(context, ToolNames.FIND_CUSTOMER_ORDERS, null,
+                ToolMessages.LISTED_ORDERS.formatted(customerEmail), false, agentId ->
+                        Downstream.call(DownstreamApis.ORDER_SERVICE,
+                                        () -> orders.findOrders(ToolArguments.requireCustomer(customerEmail)))
+                                .stream()
+                                .map(order -> ToolMapper.toSummary(order, ToolMapper.itemsOf(order)))
+                                .toList());
     }
 
-    @McpTool(name = "get_order", description = """
-            Get everything about one order: its lines and status, the payment (paid, refunded and still refundable), \
-            the shipment, any refunds already requested for it (with their idempotency keys), and when the customer \
-            was notified about it.""")
+    @McpTool(name = ToolNames.GET_ORDER, description = ToolDescriptions.GET_ORDER)
     OrderDetails getOrder(McpTransportContext context,
-            @McpToolParam(description = "The order id") String orderId,
-            @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
-        UUID id = ToolArguments.parseOrderId(orderId);
-        return guard.run(context, "get_order", id, "Looked up the order", false, agentId -> {
-            OrderApi.Order order = Downstream.call("order service", () -> orders.getOrder(id));
+            @McpToolParam(description = ToolDescriptions.ORDER_ID) String orderId,
+            @McpToolParam(description = ToolDescriptions.CUSTOMER_EMAIL, required = false) String customerEmail) {
+        var id = ToolArguments.parseOrderId(orderId);
+        return guard.run(context, ToolNames.GET_ORDER, id, ToolMessages.LOOKED_UP_ORDER, false, agentId -> {
+            var order = Downstream.call(DownstreamApis.ORDER_SERVICE, () -> orders.getOrder(id));
             guard.ensureCustomerOwns(agentId, order, customerEmail);
-            return ToolViews.toDetails(order, paymentOf(id), shipmentOf(id), refunds.forOrder(id),
+            return ToolMapper.toDetails(order, paymentOf(id), shipmentOf(id), refunds.forOrder(id),
                     notifications.forOrder(id));
         });
     }
 
-    @McpTool(name = "track_shipment", description = """
-            Get an order's shipment: its tracking number, status, estimated delivery date, when it shipped and was \
-            delivered, and what went wrong if it was not. The status is PREPARING, SHIPPED, DELIVERED, \
-            DELIVERY_FAILED, LOST or CANCELLED.""")
+    @McpTool(name = ToolNames.TRACK_SHIPMENT, description = ToolDescriptions.TRACK_SHIPMENT)
     ShipmentSummary trackShipment(McpTransportContext context,
-            @McpToolParam(description = "The order id") String orderId,
-            @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
-        UUID id = ToolArguments.parseOrderId(orderId);
-        return guard.run(context, "track_shipment", id, "Tracked the shipment", false, agentId -> {
-            guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
-            return ToolViews.toSummary(Downstream.call("shipping service", () -> shipping.getShipment(id)));
+            @McpToolParam(description = ToolDescriptions.ORDER_ID) String orderId,
+            @McpToolParam(description = ToolDescriptions.CUSTOMER_EMAIL, required = false) String customerEmail) {
+        var id = ToolArguments.parseOrderId(orderId);
+        return guard.run(context, ToolNames.TRACK_SHIPMENT, id, ToolMessages.TRACKED_SHIPMENT, false, agentId -> {
+            guard.ensureCustomerOwns(agentId, orderOf(id), customerEmail);
+            return ToolMapper.toSummary(Downstream.call(DownstreamApis.SHIPPING_SERVICE, () -> shipping.getShipment(id)));
         });
     }
 
-    @McpTool(name = "propose_order", description = """
-            Put together an order for the customer to confirm. Nothing is charged or reserved: the customer sees the \
-            proposal in the chat and must press "Confirm and pay" themselves. Use product ids from search_products.""")
-    ProposalService.Proposal proposeOrder(McpTransportContext context,
-            @McpToolParam(description = CUSTOMER_EMAIL) String customerEmail,
-            @McpToolParam(description = "The products and quantities to order") List<ProposalService.RequestedLine> lines) {
-        return guard.run(context, "propose_order", null, "Proposed an order to " + customerEmail, false,
-                agentId -> proposals.propose(ToolArguments.requireCustomer(customerEmail), lines));
+    @McpTool(name = ToolNames.PROPOSE_ORDER, description = ToolDescriptions.PROPOSE_ORDER)
+    Proposal proposeOrder(McpTransportContext context,
+            @McpToolParam(description = ToolDescriptions.CUSTOMER_EMAIL) String customerEmail,
+            @McpToolParam(description = ToolDescriptions.PROPOSED_LINES) List<RequestedLine> lines) {
+        return guard.run(context, ToolNames.PROPOSE_ORDER, null, ToolMessages.PROPOSED_ORDER.formatted(customerEmail),
+                false, agentId -> proposals.propose(ToolArguments.requireCustomer(customerEmail), lines));
     }
 
-    @McpTool(name = "cancel_order", description = """
-            Cancel an order: its stock goes back to the shelf and its shipment is cancelled. Cancelling does not \
-            refund the payment; use issue_refund for that. Cancelling an already cancelled order changes nothing. An \
-            order that has shipped can no longer be cancelled.""")
+    @McpTool(name = ToolNames.CANCEL_ORDER, description = ToolDescriptions.CANCEL_ORDER)
     OrderSummary cancelOrder(McpTransportContext context,
-            @McpToolParam(description = "The order id") String orderId,
-            @McpToolParam(description = "Why the order is cancelled, in a sentence") String reason,
-            @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
-        UUID id = ToolArguments.parseOrderId(orderId);
-        return guard.run(context, "cancel_order", id, "Cancelled the order: " + reason, false, agentId -> {
-            guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
-            OrderApi.Order order = Downstream.call("order service",
-                    () -> orders.cancelOrder(id, new OrderApi.CancelOrderRequest(reason)));
-            return ToolViews.toSummary(order, null);
-        });
+            @McpToolParam(description = ToolDescriptions.ORDER_ID) String orderId,
+            @McpToolParam(description = ToolDescriptions.CANCELLATION_REASON) String reason,
+            @McpToolParam(description = ToolDescriptions.CUSTOMER_EMAIL, required = false) String customerEmail) {
+        var id = ToolArguments.parseOrderId(orderId);
+        return guard.run(context, ToolNames.CANCEL_ORDER, id, ToolMessages.CANCELLED_ORDER.formatted(reason), false,
+                agentId -> {
+                    guard.ensureCustomerOwns(agentId, orderOf(id), customerEmail);
+                    var order = Downstream.call(DownstreamApis.ORDER_SERVICE,
+                            () -> orders.cancelOrder(id, new CancelOrderRequest(reason)));
+                    return ToolMapper.toSummary(order, null);
+                });
     }
 
-    @McpTool(name = "issue_refund", description = """
-            Refund part or all of an order's payment. Refunds above the approval limit are not paid out straight away: \
-            they wait for a human, and the result says so. Choose an idempotency key for each new refund, for example \
-            "refund-<order id>-1". If a refund fails because a service is down, retrying with the SAME key is safe and \
-            never pays out twice.""")
+    @McpTool(name = ToolNames.ISSUE_REFUND, description = ToolDescriptions.ISSUE_REFUND)
     RefundResult issueRefund(McpTransportContext context,
-            @McpToolParam(description = "The order id") String orderId,
-            @McpToolParam(description = "The amount to refund, in the order's currency") BigDecimal amount,
-            @McpToolParam(description = "Why the customer is refunded, in a sentence") String reason,
-            @McpToolParam(description = "A key that identifies this refund; reuse it only to retry the same refund") String idempotencyKey,
-            @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail,
-            @McpToolParam(description = "The incident the refund is for; set by the agent platform, not by the model",
-                    required = false) String incidentNumber) {
-        UUID id = ToolArguments.parseOrderId(orderId);
-        return guard.run(context, "issue_refund", id, "Asked to refund " + amount, true, agentId -> {
-            guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
-            RefundRequest request = refunds.requestRefund(agentId, id, amount, reason, idempotencyKey, incidentNumber);
-            return ToolViews.toResult(request);
-        });
+            @McpToolParam(description = ToolDescriptions.ORDER_ID) String orderId,
+            @McpToolParam(description = ToolDescriptions.REFUND_AMOUNT) BigDecimal amount,
+            @McpToolParam(description = ToolDescriptions.REFUND_REASON) String reason,
+            @McpToolParam(description = ToolDescriptions.REFUND_KEY) String idempotencyKey,
+            @McpToolParam(description = ToolDescriptions.CUSTOMER_EMAIL, required = false) String customerEmail,
+            @McpToolParam(description = ToolDescriptions.INCIDENT_NUMBER, required = false) String incidentNumber) {
+        var id = ToolArguments.parseOrderId(orderId);
+        return guard.run(context, ToolNames.ISSUE_REFUND, id, ToolMessages.ASKED_TO_REFUND.formatted(amount), true,
+                agentId -> {
+                    guard.ensureCustomerOwns(agentId, orderOf(id), customerEmail);
+                    var request = refunds.requestRefund(agentId, id, amount, reason, idempotencyKey, incidentNumber);
+                    return ToolMapper.toResult(request);
+                });
     }
 
-    @McpTool(name = "notify_customer", description = """
-            Send the customer of an order a short message, for example to explain a cancellation and refund. With an \
-            idempotency key the message is sent once: sending again with the same key sends nothing.""")
+    @McpTool(name = ToolNames.NOTIFY_CUSTOMER, description = ToolDescriptions.NOTIFY_CUSTOMER)
     Acknowledgement notifyCustomer(McpTransportContext context,
-            @McpToolParam(description = "The order id") String orderId,
-            @McpToolParam(description = "The message, written to the customer") String message,
-            @McpToolParam(description = "A key that identifies this message; reuse it only to repeat the same message",
-                    required = false) String idempotencyKey) {
-        UUID id = ToolArguments.parseOrderId(orderId);
-        return guard.run(context, "notify_customer", id, "Notified the customer", true, agentId -> {
-            OrderApi.Order order = Downstream.call("order service", () -> orders.getOrder(id));
-            NotificationService.Sent sent = notifications.notifyCustomer(agentId, id, order.customerEmail(), message,
+            @McpToolParam(description = ToolDescriptions.ORDER_ID) String orderId,
+            @McpToolParam(description = ToolDescriptions.MESSAGE) String message,
+            @McpToolParam(description = ToolDescriptions.MESSAGE_KEY, required = false) String idempotencyKey) {
+        var id = ToolArguments.parseOrderId(orderId);
+        return guard.run(context, ToolNames.NOTIFY_CUSTOMER, id, ToolMessages.NOTIFIED_CUSTOMER, true, agentId -> {
+            var order = orderOf(id);
+            var sent = notifications.notifyCustomer(agentId, id, order.customerEmail(), message,
                     ToolArguments.optionalKey(idempotencyKey));
-            return new Acknowledgement(sent.notification().getId(), sent.now() ? "The customer was notified"
-                    : "The customer was already told about this at " + sent.notification().getCreatedAt()
-                            + "; nothing was sent again");
+            return new Acknowledgement(sent.notification().getId(), sent.now() ? ToolMessages.CUSTOMER_NOTIFIED
+                    : ToolMessages.CUSTOMER_ALREADY_NOTIFIED.formatted(sent.notification().getCreatedAt()));
         });
     }
 
-    @McpTool(name = "escalate_to_human", description = """
-            Hand a problem to the support team when you cannot or should not resolve it yourself, for example when a \
-            service keeps failing. It becomes a ServiceNow incident: the incident agent looks into it first and passes \
-            it to the right team when a person is needed. Say what happened, what you already did, and what you \
-            recommend.""")
+    @McpTool(name = ToolNames.ESCALATE_TO_HUMAN, description = ToolDescriptions.ESCALATE_TO_HUMAN)
     Acknowledgement escalateToHuman(McpTransportContext context,
-            @McpToolParam(description = "The order id, if the problem is about one order", required = false) String orderId,
-            @McpToolParam(description = "What happened, what you already did, and what you recommend") String summary,
-            @McpToolParam(description = CUSTOMER_EMAIL, required = false) String customerEmail) {
-        UUID id = ToolArguments.optionalOrderId(orderId);
-        return guard.run(context, "escalate_to_human", id, "Handed to the support team", true, agentId -> {
+            @McpToolParam(description = ToolDescriptions.ESCALATED_ORDER_ID, required = false) String orderId,
+            @McpToolParam(description = ToolDescriptions.ESCALATION_SUMMARY) String summary,
+            @McpToolParam(description = ToolDescriptions.CUSTOMER_EMAIL, required = false) String customerEmail) {
+        var id = ToolArguments.optionalOrderId(orderId);
+        return guard.run(context, ToolNames.ESCALATE_TO_HUMAN, id, ToolMessages.HANDED_TO_SUPPORT, true, agentId -> {
             // Only a customer-scoped agent's order is looked up, so handing work to a person never depends on the
             // order service being up.
             if (id != null && guard.isCustomerScoped(agentId)) {
-                guard.ensureCustomerOwns(agentId, Downstream.call("order service", () -> orders.getOrder(id)), customerEmail);
+                guard.ensureCustomerOwns(agentId, orderOf(id), customerEmail);
             }
-            return new Acknowledgement(cases.raise(CaseType.HANDOFF, id, summary, AuditEvent.ActorType.AGENT, agentId).getId(),
-                    "The support team has it as a ServiceNow incident and will take it from here");
+            var supportCase = cases.raise(CaseType.HANDOFF, id, summary, AuditEvent.ActorType.AGENT, agentId);
+            return new Acknowledgement(supportCase.getId(), ToolMessages.HANDED_OVER);
         });
+    }
+
+    private Order orderOf(UUID orderId) {
+        return Downstream.call(DownstreamApis.ORDER_SERVICE, () -> orders.getOrder(orderId));
     }
 
     private PaymentSummary paymentOf(UUID orderId) {
         try {
-            return ToolViews.toSummary(Downstream.call("payment service", () -> payments.getPayment(orderId)));
+            return ToolMapper.toSummary(Downstream.call(DownstreamApis.PAYMENT_SERVICE,
+                    () -> payments.getPayment(orderId)));
         } catch (DownstreamException failure) {
-            return failure.isRetryable() ? ToolViews.paymentUnknown(failure.getMessage()) : null;
+            return failure.isRetryable() ? ToolMapper.paymentUnknown(failure.getMessage()) : null;
         }
     }
 
     private ShipmentSummary shipmentOf(UUID orderId) {
         try {
-            return ToolViews.toSummary(Downstream.call("shipping service", () -> shipping.getShipment(orderId)));
+            return ToolMapper.toSummary(Downstream.call(DownstreamApis.SHIPPING_SERVICE,
+                    () -> shipping.getShipment(orderId)));
         } catch (DownstreamException unavailable) {
             return null;
         }

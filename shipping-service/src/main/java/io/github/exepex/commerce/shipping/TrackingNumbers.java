@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.shipping;
 
+import io.github.exepex.commerce.shipping.constants.ShippingValues;
 import java.security.SecureRandom;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -8,13 +9,13 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class TrackingNumbers {
 
-    private static final String ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final SecureRandom RANDOM = new SecureRandom();
 
     static String next() {
-        StringBuilder trackingNumber = new StringBuilder("AC");
-        for (int position = 0; position < 10; position++) {
-            trackingNumber.append(ALPHABET.charAt(RANDOM.nextInt(ALPHABET.length())));
+        var trackingNumber = new StringBuilder(ShippingValues.TRACKING_NUMBER_PREFIX);
+        for (var position = 0; position < 10; position++) {
+            trackingNumber.append(ShippingValues.TRACKING_NUMBER_ALPHABET.charAt(
+                    RANDOM.nextInt(ShippingValues.TRACKING_NUMBER_ALPHABET.length())));
         }
         return trackingNumber.toString();
     }

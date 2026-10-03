@@ -1,20 +1,28 @@
 package io.github.exepex.commerce.mcp.cases;
 
+import io.github.exepex.commerce.mcp.cases.dto.Outgoing;
+import io.github.exepex.commerce.mcp.constants.Actors;
+import io.github.exepex.commerce.mcp.constants.AuditActions;
+import io.github.exepex.commerce.mcp.constants.CaseWording;
+import io.github.exepex.commerce.mcp.constants.ConfigKeys;
+import io.github.exepex.commerce.mcp.exception.CaseNotFoundException;
+import io.github.exepex.commerce.mcp.exception.CaseNoteNotFoundException;
+import io.github.exepex.commerce.mcp.exception.NotTheCaseIncidentException;
+import io.github.exepex.commerce.mcp.exception.OrderHandledByPeopleException;
+import io.github.exepex.commerce.mcp.exception.PendingIncidentStateException;
+import io.github.exepex.commerce.mcp.exception.ServiceDeskIncidentNotWorkedException;
 import io.github.exepex.commerce.mcp.governance.AdvisoryLocks;
 import io.github.exepex.commerce.mcp.governance.AuditEvent;
 import io.github.exepex.commerce.mcp.governance.AuditTrail;
-import io.github.exepex.commerce.mcp.governance.GovernanceException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,18 +41,10 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class CaseService {
 
-    /** The actor recorded for what ServiceNow did, as reported by its poller. */
-    static final String SERVICENOW = "servicenow";
-    static final String RAISE_CASE = "raise_case";
-    static final String FOLLOW_INCIDENT = "follow_incident";
-
     private static final List<SupportCase.Status> UNRESOLVED = List.of(SupportCase.Status.PENDING,
             SupportCase.Status.WITH_AGENT, SupportCase.Status.WITH_TEAM);
     private static final List<SupportCase.Status> IN_SERVICENOW = List.of(SupportCase.Status.WITH_AGENT,
             SupportCase.Status.WITH_TEAM);
-
-    /** A case with what is still to be sent to ServiceNow: its incident, when it has none, and its unsent notes. */
-    public record Outgoing(SupportCase supportCase, List<CaseNote> unsentNotes) {}
 
     private final SupportCaseRepository cases;
     private final CaseNoteRepository notes;
@@ -53,7 +53,7 @@ public class CaseService {
     private final JdbcClient jdbc;
     private final Clock clock;
 
-    @Value("${commerce.cases.worker}")
+    @Value(ConfigKeys.CASE_WORKER)
     private final String worker;
 
     /**
@@ -95,13 +95,13 @@ public class CaseService {
     /** Opens the case or adds to the open one, within the caller's transaction. */
     private SupportCase openOrAddTo(CaseType type, UUID orderId, String details, AuditEvent.ActorType raisedByType,
             String raisedBy) {
-        String text = CaseTexts.fit(details);
-        Instant now = Instant.now(clock);
+        var text = CaseTexts.fit(details);
+        var now = Instant.now(clock);
         if (orderId != null) {
             // Two raises of the same problem at once must not each miss the other's case.
             lockProblem(orderId, type);
-            Optional<SupportCase> open = cases.findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(orderId,
-                    type, SupportCase.Status.RESOLVED);
+            var open = cases.findByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseFalse(orderId, type,
+                    SupportCase.Status.RESOLVED);
             if (open.isEmpty()) {
                 // The case a reopened one stood beside is resolved: the reopened one takes the problem over.
                 open = cases.findFirstByOrderIdAndTypeAndStatusNotAndReopenedBesideOpenCaseTrueOrderByCreatedAtDesc(
@@ -110,14 +110,14 @@ public class CaseService {
             }
             if (open.isPresent()) {
                 notes.save(new CaseNote(open.get().getId(), text, now));
-                audit.record(orderId, raisedByType, raisedBy, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
-                        "Added to the open " + type + " case" + CaseTexts.incidentOf(open.get()), text);
+                audit.record(orderId, raisedByType, raisedBy, AuditActions.RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
+                        CaseWording.ADDED_TO_OPEN_CASE.formatted(type, CaseTexts.incidentOf(open.get())), text);
                 return open.get();
             }
         }
-        SupportCase opened = cases.save(new SupportCase(orderId, type, text, raisedBy, now));
-        audit.record(orderId, raisedByType, raisedBy, RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
-                "Opened a " + type + " case; it goes to ServiceNow as an incident for the incident agent", text);
+        var opened = cases.save(new SupportCase(orderId, type, text, raisedBy, now));
+        audit.record(orderId, raisedByType, raisedBy, AuditActions.RAISE_CASE, AuditEvent.Outcome.SUCCEEDED,
+                CaseWording.OPENED_CASE.formatted(type), text);
         return opened;
     }
 
@@ -129,15 +129,13 @@ public class CaseService {
      * ServiceNow was last read, and while a team has one, they may be paying the customer back another way.
      */
     public void ensureAgentMayPay(UUID orderId, String agentId, String incidentNumber) {
-        Optional<SupportCase> open = cases.findByOrderIdAndStatusIn(orderId, UNRESOLVED).stream()
+        var open = cases.findByOrderIdAndStatusIn(orderId, UNRESOLVED).stream()
                 .filter(supportCase -> blocksPayment(supportCase, agentId, incidentNumber))
                 .findFirst();
         if (open.isEmpty()) {
             return;
         }
-        throw new GovernanceException(HttpStatus.CONFLICT, "This order is " + CaseTexts.holderOf(open.get())
-                + ", who will finish it. Do not retry or refund it another way; tell the customer a person is looking "
-                + "into it.");
+        throw new OrderHandledByPeopleException(CaseTexts.holderOf(open.get()));
     }
 
     private boolean blocksPayment(SupportCase supportCase, String agentId, String incidentNumber) {
@@ -154,11 +152,11 @@ public class CaseService {
     /** Cases whose incident is still to be created, and cases with notes still to be sent, oldest first. */
     @Transactional(readOnly = true)
     public List<Outgoing> toSend() {
-        Map<UUID, List<CaseNote>> unsentByCase = new LinkedHashMap<>();
-        for (CaseNote note : notes.findBySentAtIsNullOrderByCreatedAt()) {
+        var unsentByCase = new LinkedHashMap<UUID, List<CaseNote>>();
+        for (var note : notes.findBySentAtIsNullOrderByCreatedAt()) {
             unsentByCase.computeIfAbsent(note.getCaseId(), caseId -> new ArrayList<>()).add(note);
         }
-        Map<UUID, SupportCase> outgoing = new LinkedHashMap<>();
+        var outgoing = new LinkedHashMap<UUID, SupportCase>();
         cases.findByStatusInOrderByCreatedAt(List.of(SupportCase.Status.PENDING))
                 .forEach(pending -> outgoing.put(pending.getId(), pending));
         cases.findByIdIn(unsentByCase.keySet()).forEach(withNotes -> outgoing.putIfAbsent(withNotes.getId(), withNotes));
@@ -170,11 +168,11 @@ public class CaseService {
     /** Records the incident ServiceNow created for the case. Reporting it again changes nothing. */
     @Transactional
     public SupportCase linkIncident(UUID caseId, String number, String url) {
-        SupportCase supportCase = find(caseId);
+        var supportCase = find(caseId);
         if (supportCase.linkIncident(number, url, Instant.now(clock))) {
-            audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, "open_incident",
-                    AuditEvent.Outcome.SUCCEEDED, "Opened ServiceNow incident " + number + " for the "
-                            + supportCase.getType() + " case", null);
+            audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, Actors.SERVICENOW,
+                    AuditActions.OPEN_INCIDENT, AuditEvent.Outcome.SUCCEEDED,
+                    CaseWording.OPENED_INCIDENT.formatted(number, supportCase.getType()), null);
         }
         return supportCase;
     }
@@ -193,8 +191,7 @@ public class CaseService {
     public SupportCase recordServiceDeskIncident(UUID orderId, String number, String url, String shortDescription,
             SupportCase.Status status, String assignmentGroup) {
         if (status != SupportCase.Status.WITH_AGENT && status != SupportCase.Status.WITH_TEAM) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT,
-                    "A service-desk incident being worked is with the agent or a team");
+            throw new ServiceDeskIncidentNotWorkedException();
         }
         return serviceDesk.record(orderId, number, url, shortDescription, status, assignmentGroup);
     }
@@ -203,8 +200,7 @@ public class CaseService {
     public void markNoteSent(UUID caseId, UUID noteId) {
         notes.findById(noteId)
                 .filter(note -> note.getCaseId().equals(caseId))
-                .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND,
-                        "Case " + caseId + " has no note " + noteId))
+                .orElseThrow(() -> new CaseNoteNotFoundException(caseId, noteId))
                 .markSent(Instant.now(clock));
     }
 
@@ -213,7 +209,7 @@ public class CaseService {
      * is resolved but may still be reopened, until ServiceNow closes or cancels it.
      */
     public List<SupportCase> inServiceNow() {
-        List<SupportCase> inServiceNow = new ArrayList<>(cases.findByStatusInOrderByCreatedAt(IN_SERVICENOW));
+        var inServiceNow = new ArrayList<SupportCase>(cases.findByStatusInOrderByCreatedAt(IN_SERVICENOW));
         inServiceNow.addAll(cases.findByStatusAndIncidentFinalFalseOrderByCreatedAt(SupportCase.Status.RESOLVED));
         return inServiceNow;
     }
@@ -243,32 +239,31 @@ public class CaseService {
     public SupportCase followIncident(UUID caseId, String number, SupportCase.Status status, String assignmentGroup,
             boolean incidentFinal, UUID incidentOrderId) {
         if (status == SupportCase.Status.PENDING) {
-            throw new GovernanceException(HttpStatus.UNPROCESSABLE_CONTENT, "An incident in ServiceNow is not pending");
+            throw new PendingIncidentStateException();
         }
-        SupportCase supportCase = find(caseId);
+        var supportCase = find(caseId);
         if (!number.equals(supportCase.getIncidentNumber())) {
-            throw new GovernanceException(HttpStatus.CONFLICT, "Incident " + number + " is not the incident of case "
-                    + caseId);
+            throw new NotTheCaseIncidentException(number, caseId);
         }
         if (supportCase.getOrderId() != null) {
             lockProblem(supportCase.getOrderId(), supportCase.getType());
         }
-        Instant now = Instant.now(clock);
+        var now = Instant.now(clock);
         if (supportCase.getType() == CaseType.SERVICE_DESK
                 && serviceDesk.followOrder(supportCase, number, status, assignmentGroup, incidentFinal, incidentOrderId,
                         now)) {
             return supportCase;
         }
-        boolean reopened = supportCase.getStatus() == SupportCase.Status.RESOLVED
+        var reopened = supportCase.getStatus() == SupportCase.Status.RESOLVED
                 && status != SupportCase.Status.RESOLVED;
         // Looked up before the case changes, so that it does not find itself.
-        Optional<SupportCase> open = reopened ? openCaseOfTheSameProblem(supportCase) : Optional.empty();
+        var open = reopened ? openCaseOfTheSameProblem(supportCase) : Optional.<SupportCase>empty();
         if (supportCase.followIncident(status, assignmentGroup, incidentFinal, open.isPresent(), Instant.now(clock))) {
-            String summary = CaseTexts.followed(supportCase.getIncidentNumber(), reopened, status, assignmentGroup);
-            String details = open.map(other -> "The order's open " + other.getType() + " case"
-                    + CaseTexts.incidentOf(other) + " still takes what is raised again.").orElse(null);
-            audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, SERVICENOW, FOLLOW_INCIDENT,
-                    AuditEvent.Outcome.SUCCEEDED, summary, details);
+            var summary = CaseTexts.followed(supportCase.getIncidentNumber(), reopened, status, assignmentGroup);
+            var details = open.map(other -> CaseWording.OPEN_CASE_TAKES_PROBLEM.formatted(other.getType(),
+                    CaseTexts.incidentOf(other))).orElse(null);
+            audit.record(supportCase.getOrderId(), AuditEvent.ActorType.SYSTEM, Actors.SERVICENOW,
+                    AuditActions.FOLLOW_INCIDENT, AuditEvent.Outcome.SUCCEEDED, summary, details);
             if (status == SupportCase.Status.RESOLVED) {
                 carryOverUnsentNotes(supportCase);
             }
@@ -293,19 +288,19 @@ public class CaseService {
      * they reach its incident as work notes, however long they are.
      */
     private void carryOverUnsentNotes(SupportCase resolved) {
-        List<CaseNote> unsent = notes.findByCaseIdAndSentAtIsNullOrderByCreatedAt(resolved.getId());
+        var unsent = notes.findByCaseIdAndSentAtIsNullOrderByCreatedAt(resolved.getId());
         if (unsent.isEmpty()) {
             return;
         }
-        SupportCase reopened = openOrAddTo(resolved.getType(), resolved.getOrderId(), "Raised again after "
-                + resolved.getIncidentNumber() + " was resolved; what was raised follows as work notes.",
-                AuditEvent.ActorType.SYSTEM, SERVICENOW);
+        var reopened = openOrAddTo(resolved.getType(), resolved.getOrderId(),
+                CaseWording.RAISED_AGAIN.formatted(resolved.getIncidentNumber()), AuditEvent.ActorType.SYSTEM,
+                Actors.SERVICENOW);
         unsent.forEach(note -> note.moveTo(reopened.getId()));
     }
 
     /** Serializes everything that opens, adds to or resolves the order's case of this type. */
     private void lockProblem(UUID orderId, CaseType type) {
-        AdvisoryLocks.lock(jdbc, orderId + "/" + type, 2);
+        AdvisoryLocks.lock(jdbc, CaseWording.PROBLEM_LOCK_KEY.formatted(orderId, type), 2);
     }
 
     public List<SupportCase> unresolved() {
@@ -322,6 +317,6 @@ public class CaseService {
 
     private SupportCase find(UUID caseId) {
         return cases.findById(caseId)
-                .orElseThrow(() -> new GovernanceException(HttpStatus.NOT_FOUND, "Case " + caseId + " does not exist"));
+                .orElseThrow(() -> new CaseNotFoundException(caseId));
     }
 }

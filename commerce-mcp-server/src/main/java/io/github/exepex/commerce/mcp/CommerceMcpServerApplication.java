@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.mcp;
 
 import io.github.exepex.commerce.agents.AgentDefinitions;
+import io.github.exepex.commerce.mcp.constants.ConfigKeys;
 import io.github.exepex.commerce.mcp.downstream.CatalogApi;
 import io.github.exepex.commerce.mcp.downstream.OrderApi;
 import io.github.exepex.commerce.mcp.downstream.PaymentApi;
@@ -16,10 +17,10 @@ import org.springframework.web.service.registry.ImportHttpServices;
 @SpringBootApplication
 @ConfigurationPropertiesScan
 @EnableScheduling
-@ImportHttpServices(group = "catalog", types = CatalogApi.class)
-@ImportHttpServices(group = "order", types = OrderApi.class)
-@ImportHttpServices(group = "payment", types = PaymentApi.class)
-@ImportHttpServices(group = "shipping", types = ShippingApi.class)
+@ImportHttpServices(group = ConfigKeys.CATALOG_CLIENT, types = CatalogApi.class)
+@ImportHttpServices(group = ConfigKeys.ORDER_CLIENT, types = OrderApi.class)
+@ImportHttpServices(group = ConfigKeys.PAYMENT_CLIENT, types = PaymentApi.class)
+@ImportHttpServices(group = ConfigKeys.SHIPPING_CLIENT, types = ShippingApi.class)
 public class CommerceMcpServerApplication {
 
     public static void main(String[] arguments) {

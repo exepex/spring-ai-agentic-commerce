@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.agent;
 
+import io.github.exepex.commerce.agent.constants.McpValues;
 import java.util.Set;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
@@ -17,7 +18,7 @@ final class ToolJson {
 
     /** The arguments the model passed to a tool; a call without any reads as an empty object. */
     static JsonNode arguments(String toolInput) {
-        return JSON.readTree(toolInput == null || toolInput.isBlank() ? "{}" : toolInput);
+        return JSON.readTree(toolInput == null || toolInput.isBlank() ? McpValues.NO_ARGUMENTS : toolInput);
     }
 
     /** One text argument of a tool call, or empty when the call has none. */
@@ -40,12 +41,12 @@ final class ToolJson {
 
     /** The tool as the model sees it: the same tool without the parameters code sets. */
     static ToolDefinition without(Set<String> parameters, ToolDefinition original) {
-        ObjectNode schema = (ObjectNode) JSON.readTree(original.inputSchema());
-        if (schema.get("properties") instanceof ObjectNode properties) {
+        var schema = (ObjectNode) JSON.readTree(original.inputSchema());
+        if (schema.get(McpValues.SCHEMA_PROPERTIES) instanceof ObjectNode properties) {
             parameters.forEach(properties::remove);
         }
-        if (schema.get("required") instanceof ArrayNode required) {
-            for (int index = required.size() - 1; index >= 0; index--) {
+        if (schema.get(McpValues.SCHEMA_REQUIRED) instanceof ArrayNode required) {
+            for (var index = required.size() - 1; index >= 0; index--) {
                 if (parameters.contains(required.get(index).asString())) {
                     required.remove(index);
                 }
