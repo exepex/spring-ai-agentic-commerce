@@ -30,12 +30,15 @@ public class ProposalReconciler {
     @Value(ConfigKeys.RECONCILIATION_SETTLE_AFTER)
     private final Duration settleAfter;
 
-    /** One instance at a time; the oldest confirmations first, a batch per run, so a backlog cannot swamp it. */
+    /**
+     * One instance at a time; the oldest confirmations first, 50 per run, so a backlog cannot swamp it and a run ends
+     * well within its lock even when every call waits for its timeout.
+     */
     @Scheduled(fixedDelayString = ConfigKeys.RECONCILIATION_INTERVAL,
             initialDelayString = ConfigKeys.RECONCILIATION_INTERVAL)
     @SchedulerLock(name = JobLocks.PROPOSAL_RECONCILIATION)
     public void reconcile() {
-        for (var proposal : proposals.findTop200ByStatusAndConfirmingSinceBeforeOrderByConfirmingSince(
+        for (var proposal : proposals.findTop50ByStatusAndConfirmingSinceBeforeOrderByConfirmingSince(
                 OrderProposal.Status.CONFIRMING,
                 Instant.now(clock).minus(settleAfter))) {
             try {

@@ -28,7 +28,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 @RequiredArgsConstructor
 class RefundReconciler {
 
-    private static final Limit BATCH = Limit.of(500);
+    private static final Limit BATCH = Limit.of(50);
 
     private final RefundRepository refunds;
     private final PaymentRepository payments;
@@ -40,7 +40,10 @@ class RefundReconciler {
     @Value(ConfigKeys.REFUND_CHECK_WATCH)
     private final Duration watch;
 
-    /** One instance at a time; the oldest refunds first, a batch per run, so a backlog cannot swamp it. */
+    /**
+     * One instance at a time; the 50 least recently checked refunds per run, so a backlog cannot swamp it, every
+     * refund gets its turn, and a run ends well within its lock even when every call waits for its timeout.
+     */
     @Scheduled(fixedDelayString = ConfigKeys.REFUND_CHECK_INTERVAL, initialDelayString = ConfigKeys.REFUND_CHECK_INTERVAL)
     @SchedulerLock(name = JobLocks.REFUND_CHECK)
     void reconcile() {
@@ -52,6 +55,8 @@ class RefundReconciler {
                 }
             } catch (RuntimeException failure) {
                 log.warn("Could not check refund {} with the card processor; it will be retried", refund.getId(), failure);
+            } finally {
+                refunds.markChecked(refund.getId(), Instant.now(clock));
             }
         }
     }

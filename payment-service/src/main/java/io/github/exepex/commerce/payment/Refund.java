@@ -43,6 +43,10 @@ public class Refund {
     @Column(name = "created_at")
     private Instant createdAt;
 
+    /** When the refund check last asked the processor about it. */
+    @Column(name = "checked_at")
+    private Instant checkedAt;
+
     Refund(UUID paymentId, BigDecimal amount, String reason, String idempotencyKey,
             PaymentGateway.RefundResult result, Instant createdAt) {
         this.id = UUID.randomUUID();

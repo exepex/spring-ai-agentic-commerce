@@ -33,13 +33,16 @@ class OrderReconciler {
 
     private final Clock clock;
 
-    /** One instance at a time; the oldest stalled orders first, a batch per run, so a backlog cannot swamp it. */
+    /**
+     * One instance at a time; the oldest stalled orders first, 50 per run, so a backlog cannot swamp it and a run
+     * ends well within its lock even when every call waits for its timeout.
+     */
     @Scheduled(fixedDelayString = ConfigKeys.RECONCILIATION_INTERVAL,
             initialDelayString = ConfigKeys.RECONCILIATION_INTERVAL)
     @SchedulerLock(name = JobLocks.ORDER_RECONCILIATION)
     void reconcile() {
         var stalledBefore = Instant.now(clock).minus(settleAfter);
-        for (var order : orders.findTop200ByStatusInAndCreatedAtBeforeOrderByCreatedAt(
+        for (var order : orders.findTop50ByStatusInAndCreatedAtBeforeOrderByCreatedAt(
                 List.of(OrderStatus.PLACED, OrderStatus.PAYMENT_PENDING), stalledBefore)) {
             try {
                 orderService.settlePayment(order);
