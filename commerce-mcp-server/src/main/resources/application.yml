@@ -55,6 +55,9 @@ spring:
       enabled: true
 
 commerce:
+  # Calls to the services' internal endpoints (placing, cancelling, refunding) present the service token.
+  internal-api:
+    clients: catalog, order, payment
   # How often confirmations that did not finish are settled. A confirmation counts as stalled once it is older than
   # settle-after, so one still running is left alone.
   reconciliation:

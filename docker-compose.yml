@@ -16,6 +16,7 @@ x-service-environment: &service-environment
   SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/commerce
   SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+  AGENTIC_COMMERCE_INTERNAL_API_TOKEN: ${AGENTIC_COMMERCE_INTERNAL_API_TOKEN:-dev-internal-api-token}
 
 services:
   postgres:

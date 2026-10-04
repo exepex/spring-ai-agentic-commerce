@@ -35,6 +35,12 @@ spring:
       enabled: true
 
 commerce:
+  # Only other services may reserve, release and hand over stock; they present the service token.
+  internal-api:
+    protected-endpoints:
+      - POST /api/products/{productId}/reservations
+      - DELETE /api/orders/{orderId}/reservations
+      - POST /api/orders/{orderId}/dispatch
   topics:
     stock-out: inventory.stock-out
 

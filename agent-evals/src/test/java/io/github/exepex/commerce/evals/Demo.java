@@ -17,6 +17,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
@@ -36,7 +37,18 @@ final class Demo {
     private final RestClient api = RestClient.builder()
             .baseUrl(System.getProperty("evals.baseUrl", "http://localhost:8080/svc"))
             .requestFactory(httpOneOneWithTimeouts())
+            // Orders are set up the way the shop's MCP server places them, so the evals present the service token.
+            .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + internalApiToken())
             .build();
+
+    /** The services' token: {@code -Devals.internalApiToken}, else the same variable the services read, else theirs. */
+    private static String internalApiToken() {
+        var token = System.getProperty("evals.internalApiToken");
+        if (token == null || token.isBlank()) {
+            token = System.getenv("AGENTIC_COMMERCE_INTERNAL_API_TOKEN");
+        }
+        return token == null || token.isBlank() ? "dev-internal-api-token" : token;
+    }
 
     String placeOrder(String customerEmail, String productId) {
         return api.post().uri("/orders/api/orders")

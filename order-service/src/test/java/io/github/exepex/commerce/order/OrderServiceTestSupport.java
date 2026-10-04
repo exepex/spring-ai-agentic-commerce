@@ -25,6 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
@@ -50,6 +51,9 @@ abstract class OrderServiceTestSupport {
     protected static final UUID UNKNOWN_PRODUCT = UUID.fromString("00000000-0000-0000-0000-000000000000");
 
     protected static final WireMockServer DEPENDENCIES = startWireMock();
+
+    /** What the services that call this one present; anyone else is refused. */
+    protected static final String SERVICE_TOKEN = "Bearer dev-internal-api-token";
 
     @Autowired
     protected MockMvcTester mockMvc;
@@ -107,7 +111,7 @@ abstract class OrderServiceTestSupport {
                     {"productId": "%s", "quantity": %d}""".formatted(productsAndQuantities[index],
                     productsAndQuantities[index + 1]));
         }
-        return mockMvc.post().uri("/api/orders")
+        return mockMvc.post().uri("/api/orders").header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"orderId": %s, "customerEmail": "%s", "lines": [%s]}""".formatted(
@@ -123,6 +127,7 @@ abstract class OrderServiceTestSupport {
 
     protected MvcTestResult cancel(String orderId, String reason) {
         return mockMvc.post().uri("/api/orders/{orderId}/cancellation", orderId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"reason": "%s"}""".formatted(reason))

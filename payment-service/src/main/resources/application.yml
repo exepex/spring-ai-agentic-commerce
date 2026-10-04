@@ -33,6 +33,11 @@ spring:
       enabled: true
 
 commerce:
+  # Only other services may charge and refund: a refund through the shop's MCP server is held to the approval limit.
+  internal-api:
+    protected-endpoints:
+      - POST /api/payments
+      - POST /api/payments/{orderId}/refunds
   topics:
     payment-events: payment.events
   payments:

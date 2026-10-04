@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
@@ -39,6 +40,9 @@ class CatalogApiIntegrationTest {
     private static final UUID RAIN_JACKET = UUID.fromString("8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0003");
     private static final UUID HEADLAMP = UUID.fromString("8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0004");
     private static final UUID BOTTLE = UUID.fromString("8c1f8a52-6f53-4f37-9d2e-1b0a9a6c0005");
+
+    /** What the services that call this one present; anyone else is refused. */
+    private static final String SERVICE_TOKEN = "Bearer dev-internal-api-token";
 
     @Autowired
     private MockMvcTester mockMvc;
@@ -78,8 +82,10 @@ class CatalogApiIntegrationTest {
         UUID orderId = UUID.randomUUID();
         reserve(RAIN_JACKET, orderId, 5);
 
-        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)).hasStatus(HttpStatus.NO_CONTENT);
-        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)).hasStatus(HttpStatus.NO_CONTENT);
+        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)).hasStatus(HttpStatus.NO_CONTENT);
+        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)).hasStatus(HttpStatus.NO_CONTENT);
         assertThat(product(RAIN_JACKET)).bodyJson().extractingPath("$.reserved").isEqualTo(0);
     }
 
@@ -92,7 +98,8 @@ class CatalogApiIntegrationTest {
 
         List<Callable<Integer>> releases = new ArrayList<>();
         for (int attempt = 0; attempt < 8; attempt++) {
-            releases.add(() -> mockMvc.delete().uri("/api/orders/{orderId}/reservations", released).exchange()
+            releases.add(() -> mockMvc.delete().uri("/api/orders/{orderId}/reservations", released)
+                    .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN).exchange()
                     .getResponse().getStatus());
         }
         try (ExecutorService threads = Executors.newFixedThreadPool(releases.size())) {
@@ -102,7 +109,8 @@ class CatalogApiIntegrationTest {
         }
 
         assertThat(product(RAIN_JACKET)).bodyJson().extractingPath("$.reserved").isEqualTo(3);
-        mockMvc.delete().uri("/api/orders/{orderId}/reservations", kept).exchange();
+        mockMvc.delete().uri("/api/orders/{orderId}/reservations", kept)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN).exchange();
     }
 
     @Test
@@ -153,8 +161,10 @@ class CatalogApiIntegrationTest {
         reserve(RAIN_JACKET, orderId, 2);
         dispatch(orderId);
 
-        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)).hasStatus(HttpStatus.NO_CONTENT);
-        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)).hasStatus(HttpStatus.NO_CONTENT);
+        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)).hasStatus(HttpStatus.NO_CONTENT);
+        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)).hasStatus(HttpStatus.NO_CONTENT);
 
         assertThat(product(RAIN_JACKET)).bodyJson().extractingPath("$.onHand").isEqualTo(onHandBefore);
         assertThat(dispatch(orderId)).hasStatus(HttpStatus.CONFLICT);
@@ -175,12 +185,30 @@ class CatalogApiIntegrationTest {
     }
 
     @Test
+    void onlyAServiceWithTheTokenCanReserveReleaseOrHandOverStock() {
+        var orderId = UUID.randomUUID();
+
+        assertThat(mockMvc.post().uri("/api/products/{productId}/reservations", HEADLAMP)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"orderId": "%s", "quantity": 1}""".formatted(orderId)))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(mockMvc.delete().uri("/api/orders/{orderId}/reservations", orderId))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(mockMvc.post().uri("/api/orders/{orderId}/dispatch", orderId)
+                .header(HttpHeaders.AUTHORIZATION, "Bearer guessed"))
+                .hasStatus(HttpStatus.UNAUTHORIZED);
+        assertThat(mockMvc.get().uri("/api/products")).hasStatusOk();
+    }
+
+    @Test
     void refusesToDispatchAnOrderWithNoStockReserved() {
         assertThat(dispatch(UUID.randomUUID())).hasStatus(HttpStatus.CONFLICT);
     }
 
     private MvcTestResult reserve(UUID productId, UUID orderId, int quantity) {
         return mockMvc.post().uri("/api/products/{productId}/reservations", productId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"orderId": "%s", "quantity": %d}""".formatted(orderId, quantity))
@@ -196,7 +224,8 @@ class CatalogApiIntegrationTest {
     }
 
     private MvcTestResult dispatch(UUID orderId) {
-        return mockMvc.post().uri("/api/orders/{orderId}/dispatch", orderId).exchange();
+        return mockMvc.post().uri("/api/orders/{orderId}/dispatch", orderId)
+                .header(HttpHeaders.AUTHORIZATION, SERVICE_TOKEN).exchange();
     }
 
     private MvcTestResult product(UUID productId) {

@@ -51,6 +51,13 @@ spring:
       enabled: true
 
 commerce:
+  # Orders are placed and cancelled only by the shop's MCP server: a confirmed proposal or an agent's cancellation.
+  # Checkout calls the catalog and payments with the service token.
+  internal-api:
+    protected-endpoints:
+      - POST /api/orders
+      - POST /api/orders/{orderId}/cancellation
+    clients: catalog, payment
   # How often checkout's unfinished work is retried: payments whose outcome is unknown and unconfirmed stock releases.
   # An order counts as stalled once it is older than settle-after, so a checkout still running is left alone.
   reconciliation:
