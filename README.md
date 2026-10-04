@@ -320,8 +320,10 @@ single instance of servicenow-mcp-server.
 
 For development, start only the infrastructure (`docker compose up -d postgres kafka jaeger`), run the services from
 your IDE or with `mvn spring-boot:run` in a service's folder, and the UI with `npm start` in `shop-ui`
-(http://localhost:4200). To work ServiceNow incidents this way, also run servicenow-mcp-server and start agent-service
-with `AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8087`.
+(http://localhost:4200). Only Compose reads `.env`: if you changed `AGENTIC_COMMERCE_DATABASE_PASSWORD` (or any other
+variable there), export it for the services too, for example with `set -a; . ./.env; set +a` in the shell that runs
+Maven, or in your IDE's run configuration. To work ServiceNow incidents this way, also run servicenow-mcp-server and
+start agent-service with `AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8087`.
 
 ### Project layout
 
