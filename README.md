@@ -425,9 +425,9 @@ running, use `mvn -pl agent-evals -Pevals test`. Point them at a UI run with `np
   (`<topic>.DLT`) exactly as it arrived, and the events behind it go on. An event that is not even valid JSON goes
   there at once. Each listener runs up to three consumers (`spring.kafka.listener.concurrency`) and topics have six
   partitions; an order's or product's events share a partition, so they are still handled in order. The incident
-  agent's listener keeps retrying a failed hand-off until it succeeds, and takes one incident per poll; Kafka gives an
-  incident to another consumer only after 20 minutes, when the poller has long handed an unfinished claim to a team,
-  so two runs never act on one incident. An event counts as parked only once Kafka has it on the dead-letter topic.
+  agent's listener keeps retrying a failed hand-off until it succeeds, and takes one incident per poll. An incident run
+  may act for 15 minutes; after that its tool calls are refused and the unfinished incident goes to a team. Kafka gives
+  an incident to another consumer only after 20 minutes, so two runs never act on one incident. An event counts as parked only once Kafka has it on the dead-letter topic.
 - **Events can arrive twice, and that is harmless.** The audit trail records each event once per order, and opens its
   case once per order, by the id its service gave it. A case's incident carries the case id in its Correlation display
   field, so a poller that stopped after creating it finds it again instead of opening a second one. An incident

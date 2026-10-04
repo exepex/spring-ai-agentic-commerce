@@ -2,6 +2,7 @@ package io.github.exepex.commerce.agent;
 
 import io.github.exepex.commerce.agent.constants.ToolNames;
 import io.github.exepex.commerce.agent.constants.ToolParameters;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -25,6 +26,7 @@ public final class ToolRun {
     private final Set<String> changeableOrders;
     private final Predicate<String> workStillAllows;
     private final AtomicInteger callsLeft;
+    private final Instant deadline;
     private final List<ToolResult> succeeded = new ArrayList<>();
 
     public ToolRun(String customerEmail, int callBudget) {
@@ -40,7 +42,14 @@ public final class ToolRun {
      */
     public ToolRun(String customerEmail, int callBudget, String workId, Set<String> changeableOrders,
             Predicate<String> workStillAllows) {
+        this(customerEmail, callBudget, workId, changeableOrders, workStillAllows, null);
+    }
+
+    /** @param deadline when this run stops being allowed to call tools; {@code null} for no time limit */
+    public ToolRun(String customerEmail, int callBudget, String workId, Set<String> changeableOrders,
+            Predicate<String> workStillAllows, Instant deadline) {
         this.customerEmail = customerEmail;
+        this.deadline = deadline;
         this.workId = workId;
         this.workStillAllows = workStillAllows;
         this.changeableOrders = changeableOrders == null ? null
@@ -83,6 +92,11 @@ public final class ToolRun {
      */
     String notificationKeyFor(String orderId) {
         return workId == null ? null : ToolParameters.NOTIFICATION_KEY.formatted(normalized(orderId), workId);
+    }
+
+    /** Whether this run has used its time: it may no longer act, so work it did not finish goes to a person. */
+    boolean pastDeadline() {
+        return deadline != null && Instant.now().isAfter(deadline);
     }
 
     boolean takeCall() {

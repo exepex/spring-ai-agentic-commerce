@@ -51,8 +51,6 @@ commerce:
     # New, unassigned incidents in this assignment group are claimed for the incident agent.
     agent-group: ${AGENTIC_COMMERCE_SERVICENOW_AGENT_GROUP:Online Shop Agent}
     poll-interval: 30s
-    # agent-service lets Kafka redeliver an incident only after 20 minutes (max.poll.interval.ms), longer than this
-    # plus one poll: keep it so, or a slow run and its redelivery could both act on one incident.
     stale-after: 15m
     close-code: Solution provided
     # The teams the agent can hand an incident to: each is a ServiceNow assignment group, described by what it

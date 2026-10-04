@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
 import io.github.exepex.commerce.agent.constants.McpValues;
+import io.github.exepex.commerce.agent.constants.Refusals;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -77,6 +79,17 @@ class AgentToolCallbackTest {
 
         assertThat(third).startsWith("Refused");
         assertThat(mcpTool.inputs).hasSize(2);
+    }
+
+    @Test
+    void refusesEveryCallOnceTheRunHasUsedItsTime() {
+        var mcpTool = new RecordingTool("resolve_incident");
+        var tool = new AgentToolCallback(mcpTool, false, () -> true);
+        var outOfTime = contextFor(new ToolRun(null, 5, "INC0010001", Set.of(), orderId -> true,
+                Instant.now().minusSeconds(1)));
+
+        assertThat(tool.call("{\"number\": \"INC0010001\"}", outOfTime)).isEqualTo(Refusals.TIME_SPENT);
+        assertThat(mcpTool.inputs).isEmpty();
     }
 
     @Test

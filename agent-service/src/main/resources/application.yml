@@ -17,9 +17,8 @@ spring:
       group-id: agent-service
       # An incident claimed before this service first joined its group is still worked.
       auto-offset-reset: earliest
-      # One incident per poll. Kafka gives an incident to another consumer only after 20 minutes: by then the
-      # ServiceNow poller has handed an unfinished claim to a team (stale-after: 15m, polled every 30s), so the
-      # agent's tools refuse it and two runs can never both act on one incident.
+      # One incident per poll. Kafka gives an incident to another consumer only after 20 minutes, while an incident
+      # run may act for 15 (commerce.agents.incident-run-limit): two runs never both act on one incident.
       max-poll-records: 1
       properties:
         max.poll.interval.ms: 1200000
@@ -49,6 +48,9 @@ commerce:
       token: ${AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN:dev-shopping-assistant-token}
     incident-agent:
       token: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:dev-incident-agent-token}
+    # After this, every tool call of an incident run is refused and the unfinished incident goes to a team. Keep it
+    # well below spring.kafka.consumer max.poll.interval.ms (20 minutes).
+    incident-run-limit: 15m
   slack:
     # The Slack MCP server and the one channel agents may post in. Leave the URL empty to run without Slack.
     mcp-url: ${AGENTIC_COMMERCE_SLACK_MCP_URL:}

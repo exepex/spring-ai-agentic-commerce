@@ -21,6 +21,7 @@ import io.github.exepex.commerce.agent.exception.HandOffUnreachableException;
 import io.github.exepex.commerce.agents.AgentDefinitions;
 import io.github.exepex.commerce.governance.api.client.AgentSwitchesClient;
 import io.modelcontextprotocol.spec.McpSchema;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -36,7 +37,7 @@ class IncidentAgentTest {
     private static final AgentDefinitions DEFINITIONS = AgentDefinitions.load();
     private static final AgentProperties PROPERTIES = new AgentProperties(
             new Agents("http://localhost:8085", new Agent("token"),
-                    new Agent("token")),
+                    new Agent("token"), Duration.ofMinutes(15)),
             new Slack("", "", ""), new ServiceNow("http://localhost:8087"));
     private static final String INCIDENT = "INC0010001";
 
