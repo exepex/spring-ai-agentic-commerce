@@ -1,0 +1,60 @@
+<section class="card chat" aria-label="Shopping assistant">
+  <header class="chat-header">
+    <span class="assistant-avatar"><app-icon name="sparkles" [size]="20" /></span>
+    <div>
+      <h2>Shopping assistant</h2>
+      <p class="muted">Finds gear, prepares orders, tracks deliveries</p>
+    </div>
+  </header>
+
+  <div class="transcript" #transcript aria-live="polite">
+    @for (message of messages(); track message.id) {
+      <div class="message" [attr.data-author]="message.author">
+        <p class="bubble">{{ message.text }}</p>
+        @for (proposal of message.proposals; track proposal.id) {
+          <app-proposal-card
+            [proposal]="proposal"
+            [paying]="payingProposalId() === proposal.id"
+            (pay)="pay(proposal, $event)"
+          />
+        }
+      </div>
+    }
+    @if (awaitingReply()) {
+      <div class="message" data-author="assistant">
+        <p class="bubble typing" aria-label="The assistant is typing"><i></i><i></i><i></i></p>
+      </div>
+    }
+  </div>
+
+  @if (messages().length === 1) {
+    <div class="suggestions" aria-label="Suggestions">
+      @for (suggestion of suggestions; track suggestion) {
+        <button type="button" class="suggestion" (click)="send(suggestion)">
+          {{ suggestion }}
+        </button>
+      }
+    </div>
+  }
+
+  <form class="composer" (submit)="$event.preventDefault(); send()">
+    <input
+      #composer
+      class="input"
+      name="message"
+      autocomplete="off"
+      placeholder="Ask about gear, orders, deliveries…"
+      aria-label="Message to the assistant"
+      [value]="draft()"
+      (input)="draft.set($any($event.target).value)"
+    />
+    <button
+      type="submit"
+      class="button primary send"
+      aria-label="Send"
+      [disabled]="awaitingReply() || !draft().trim()"
+    >
+      <app-icon name="send" [size]="16" />
+    </button>
+  </form>
+</section>

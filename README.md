@@ -65,7 +65,7 @@ after it was paid. They act only through MCP tools, and the MCP server is the po
 
 ```mermaid
 flowchart LR
-    ui["shop-ui (Angular)<br/>shop · orders · operations"]
+    ui["shop-ui (Angular)<br/>shop · my orders · all orders · operations"]
     agent["agent-service<br/>shopping assistant +<br/>incident agent<br/>(Spring AI + Claude)"]
     mcp["commerce-mcp-server<br/>MCP tools + governance:<br/>permissions, limits, approvals,<br/>idempotency, cases, audit trail"]
     slack["Slack MCP server<br/>(third party, one channel)"]
@@ -157,7 +157,7 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    group, is recorded as a `SERVICE_DESK` case of that order. An order has at most one open case of each kind except
    `SERVICE_DESK`; the same problem raised again adds a work note to its incident. The incident agent works each case
    the shop opens first; a failed delivery goes to Fulfilment and a failed refund to Payments. The console's
-   **Cases** card shows who has each incident now. An incident reopened after it was resolved opens its case again;
+   **Cases** tab shows who has each incident now. An incident reopened after it was resolved opens its case again;
    if a newer case of the same kind is open by then, both are open, and the newer one still takes the problem raised
    again. While a team or a person has one of an order's incidents, agents leave the order's money to them: their
    refunds are refused. While any case of an order is open, the shopping assistant may not refund it either, and the
@@ -170,7 +170,7 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
    writes what it found and did as work notes, and resolves the incident. When it cannot decide, it hands the
    incident to the team whose work it is (customer care, payments or fulfilment) with a note of what that team needs
    to do; ServiceNow notifies the team. It needs a ServiceNow instance; see "ServiceNow incidents" below.
-9. **Shipping and delivery.** In the operations console, **Ship** sends a paid order: the catalog takes its units
+9. **Shipping and delivery.** On the console's **Shipping** tab, **Ship** sends a paid order: the catalog takes its units
    out of the warehouse and the order becomes *shipped*. From then on it can no longer be cancelled, by a person or an
    agent. An order that a stock-out left without stock cannot ship. Playing the carrier, an operator then reports the
    parcel *delivered*, *delivery failed* or *lost*; the order follows, and its timeline shows each step.
@@ -185,7 +185,7 @@ read; [AGENTS.md](AGENTS.md#the-demos-agents) lists them.
 | Docker with Compose v2 (Docker Desktop, or Docker Engine with the compose plugin) | recent | Runs Postgres, Kafka, Jaeger, the seven services and the UI. Give Docker at least **8 GB of memory**: up to eight Spring Boot services and Kafka run at once. |
 | JDK | 21 | `start-demo.sh` builds the services with Maven on your machine before it builds the images. |
 | Maven | 3.9 or newer | Builds the services. |
-| Node.js and npm | Node 22.22 or newer, or 24 | `start-demo.sh` builds the Angular UI on your machine. |
+| Node.js and npm | Node 22.22.3 or newer, or 24 | `start-demo.sh` builds the Angular UI on your machine. |
 | An Anthropic API key | | For the agents (console.anthropic.com). Optional: without one everything else runs, and the incident agent hands every incident to a team. |
 
 Optional extras: a Stripe **test-mode** key (payments are simulated without one), a ServiceNow developer instance (the
@@ -222,15 +222,15 @@ The shop sells five seeded products, from a €24.00 bottle to €129.90 trail s
 
 1. **Order through chat.** On **Shop**, ask the shopping assistant: *"I need a headlamp for night hikes."* It
    searches the catalog and proposes an order. Click **Confirm and pay**: the order is placed and paid (the test card
-   is accepted). **Orders** lists it; open it to see its timeline.
+   is accepted). **My orders** lists it, as the customer sees it; under **All orders** the back office sees its full timeline.
 2. **Cause a stock-out.** On **Operations**, under **Write off damaged stock**, write off enough headlamps that fewer
    remain than are reserved. The catalog announces the stock-out and the shop opens a `STOCK_OUT` case; the **Cases**
-   card shows it go to ServiceNow and to the incident agent.
+   tab shows it go to ServiceNow and to the incident agent.
 3. **Watch the incident agent work.** Within about half a minute the agent claims the incident, cancels the order,
-   refunds it, tells the customer (see **Your inbox** on **Shop**) and resolves the incident. Open the order: its
-   **Timeline** shows every system, agent and human step, each linked to its trace in Jaeger.
+   refunds it, tells the customer (see **Messages** on **My orders**) and resolves the incident. Open the order under
+   **All orders**: its **Timeline** shows every agent, human and automatic step, each with its trace in Jaeger.
 4. **Hit the refund limit.** Repeat with the €129.90 trail shoes: the refund is above the €100 limit, so it waits under
-   **Refunds waiting for approval** and the incident goes to the Payments team. Approve or reject it yourself.
+   **Waiting for approval** on the **Refunds** tab and the incident goes to the Payments team. Approve or reject it yourself.
 5. **Break things on purpose.** Under **Demo controls**, switch on the payment-service outage, or switch an agent off
    under **Agents**, and repeat a stock-out: the agent retries with the same idempotency key and hands over, or the
    incident goes straight to a team. Ask the assistant to cancel another customer's order: it is refused and recorded
@@ -339,7 +339,7 @@ start agent-service with `AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8
 | `servicenow-simulator` | The in-memory ServiceNow stand-in used by `--simulator` and the scenario suite. |
 | `catalog-service`, `order-service`, `payment-service`, `shipping-service` | The shop's ordinary microservices. |
 | `agent-evals` | The scenario suite that runs the workflows against the whole demo with the real model. |
-| `shop-ui` | The Angular shop, orders and operations console. |
+| `shop-ui` | The Angular shop, the customer's orders and messages, all orders, and the operations console. |
 | `docker`, `docker-compose.yml`, `start-demo.sh`, `run-scenarios.sh` | How the demo is built and started. |
 
 The shared modules hold only what every service needs in the same way; a service's own rules stay in the service.

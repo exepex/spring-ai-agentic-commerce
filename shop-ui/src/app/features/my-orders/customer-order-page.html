@@ -1,0 +1,137 @@
+<main class="page">
+  <a class="back-link" routerLink="/my-orders"
+    ><app-icon name="arrow-left" [size]="16" /> My orders</a
+  >
+
+  @if (order(); as order) {
+    <header class="page-header">
+      <div>
+        <div class="cluster">
+          <h1>Your order</h1>
+          <app-status-badge [status]="order.status" />
+        </div>
+        <p class="lead">Placed {{ order.createdAt | date: 'EEEE, MMM d, y' }}</p>
+      </div>
+    </header>
+
+    <div class="stack">
+      <section class="card status-card">
+        @if (update(); as update) {
+          <p class="update" [attr.data-tone]="update.tone">{{ update.text }}</p>
+        }
+        <app-order-progress
+          [status]="order.status"
+          [paid]="paid()"
+          [shipped]="!!shipment()?.shippedAt"
+        />
+      </section>
+
+      <div class="customer-grid">
+        <app-panel heading="What you ordered" icon="package">
+          <ul class="lines">
+            @for (line of order.lines; track line.productId) {
+              <li>
+                <span class="line-name">{{ line.quantity }} × {{ line.productName }}</span>
+                <span class="amount">{{ line.lineTotal | currency: order.currency }}</span>
+              </li>
+            }
+          </ul>
+          <div class="split total">
+            <span>Total</span>
+            <span class="amount">{{ order.total | currency: order.currency }}</span>
+          </div>
+        </app-panel>
+
+        <div class="stack">
+          <app-panel heading="Payment" icon="card">
+            @if (payment(); as payment) {
+              <dl class="facts">
+                @if (payment.status === 'SUCCEEDED') {
+                  <div>
+                    <dt>Paid</dt>
+                    <dd class="amount">{{ payment.amount | currency: payment.currency }}</dd>
+                  </div>
+                  @if (payment.refundedAmount > 0) {
+                    <div>
+                      <dt>Refunded to your card</dt>
+                      <dd class="amount">
+                        {{ payment.refundedAmount | currency: payment.currency }}
+                      </dd>
+                    </div>
+                  }
+                } @else {
+                  <div>
+                    <dt>Not charged</dt>
+                    <dd class="amount">{{ payment.amount | currency: payment.currency }}</dd>
+                  </div>
+                }
+              </dl>
+              @for (refund of refundsOnTheirWay(); track refund.id) {
+                <p class="callout">
+                  <app-icon name="refund" [size]="16" />
+                  <span
+                    >A refund of {{ refund.amount | currency: refund.currency }} is on its way. It
+                    usually reaches your card within a few days.</span
+                  >
+                </p>
+              }
+            } @else {
+              <app-empty-state title="Waiting for your payment" icon="clock" />
+            }
+          </app-panel>
+
+          <app-panel heading="Delivery" icon="truck">
+            @if (shipment(); as shipment) {
+              <dl class="facts">
+                <div>
+                  <dt>Status</dt>
+                  <dd><app-status-badge [status]="shipment.status" /></dd>
+                </div>
+                <div>
+                  <dt>Tracking number</dt>
+                  <dd class="mono">{{ shipment.trackingNumber }}</dd>
+                </div>
+                @if (shipment.deliveredAt) {
+                  <div>
+                    <dt>Delivered</dt>
+                    <dd>{{ shipment.deliveredAt | date: 'MMM d, HH:mm' }}</dd>
+                  </div>
+                } @else if (shipment.status === 'PREPARING' || shipment.status === 'SHIPPED') {
+                  <div>
+                    <dt>Expected</dt>
+                    <dd>{{ shipment.estimatedDelivery | date: 'EEEE, MMM d' }}</dd>
+                  </div>
+                }
+              </dl>
+            } @else {
+              <app-empty-state title="Not shipped yet" icon="truck" />
+            }
+          </app-panel>
+        </div>
+      </div>
+
+      <app-panel heading="Messages about this order" icon="mail">
+        @if (messages().length) {
+          <ul class="messages">
+            @for (message of messages(); track message.id) {
+              <li>
+                <p>{{ message.message }}</p>
+                <span class="muted small">{{ message.createdAt | date: 'MMM d, HH:mm' }}</span>
+              </li>
+            }
+          </ul>
+        } @else {
+          <app-empty-state title="No messages yet" icon="mail">
+            We'll write here if anything about this order changes.
+          </app-empty-state>
+        }
+      </app-panel>
+    </div>
+  } @else if (belongsToSomeoneElse() || notFound()) {
+    <app-empty-state title="We couldn't find this order" icon="receipt">
+      It isn't one of your orders. <a routerLink="/my-orders">See your orders</a>
+    </app-empty-state>
+  } @else {
+    <p class="muted loading">Loading your order…</p>
+  }
+</main>

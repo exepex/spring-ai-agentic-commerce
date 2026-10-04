@@ -1,0 +1,24 @@
+<article class="card product">
+  <div class="product-art" [attr.data-stock]="stockLevel()">
+    <app-icon [name]="icon()" [size]="40" />
+  </div>
+  <div class="product-body">
+    <h3>{{ product().name }}</h3>
+    <p class="muted description">{{ product().description }}</p>
+  </div>
+  <div class="product-footer">
+    <div class="split">
+      <span class="price amount">{{ product().price | currency: product().currency }}</span>
+      <span class="stock" [attr.data-stock]="stockLevel()">{{ stockText() }}</span>
+    </div>
+    <button
+      type="button"
+      class="button block"
+      [disabled]="stockLevel() === 'out'"
+      (click)="ask.emit(product())"
+    >
+      <app-icon name="sparkles" [size]="16" />
+      Ask the assistant
+    </button>
+  </div>
+</article>

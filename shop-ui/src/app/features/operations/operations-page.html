@@ -1,0 +1,83 @@
+<main class="page">
+  <header class="page-header">
+    <div>
+      <h1>Operations</h1>
+      <p class="lead">
+        The work that waits for a person, the agents and their kill switches, and the switches that
+        break things on purpose.
+      </p>
+    </div>
+    <label class="field operator">
+      <span>Acting as</span>
+      <select
+        class="input"
+        [value]="session.operator()"
+        (change)="session.actAs($any($event.target).value)"
+      >
+        @for (operator of operators; track operator) {
+          <option [value]="operator" [selected]="operator === session.operator()">
+            {{ operator }}
+          </option>
+        }
+      </select>
+    </label>
+  </header>
+
+  <section class="key-figures" aria-label="Key figures">
+    @for (figure of keyFigures(); track figure.label) {
+      <a
+        class="card key-figure"
+        [class.urgent]="figure.urgent && figure.value > 0"
+        [routerLink]="[]"
+        [queryParams]="{ tab: figure.tab }"
+      >
+        <span class="value">{{ figure.value }}</span>
+        <span class="label">{{ figure.label }}</span>
+      </a>
+    }
+  </section>
+
+  <nav class="tabs" aria-label="Operations sections">
+    @for (tab of tabs; track tab.id) {
+      <a
+        [routerLink]="[]"
+        [queryParams]="{ tab: tab.id }"
+        [class.active]="activeTab() === tab.id"
+        [attr.aria-current]="activeTab() === tab.id ? 'page' : null"
+      >
+        <app-icon [name]="tab.icon" [size]="16" />
+        {{ tab.label }}
+        @if (tab.count && tab.count() > 0) {
+          <span class="count">{{ tab.count() }}</span>
+        }
+      </a>
+    }
+  </nav>
+
+  @switch (activeTab()) {
+    @case ('refunds') {
+      <app-refund-queue />
+    }
+    @case ('cases') {
+      <app-case-board />
+    }
+    @case ('shipping') {
+      <app-shipping-desk />
+    }
+    @case ('agents') {
+      <app-agent-controls />
+    }
+    @case ('activity') {
+      <app-panel
+        heading="Activity"
+        icon="activity"
+        description="The latest steps across all orders, by the agents, people and the shop itself."
+      >
+        <app-audit-timeline [events]="store.activity()" [showOrder]="true" />
+      </app-panel>
+    }
+    @case ('demo') {
+      <app-demo-controls />
+    }
+  }
+</main>

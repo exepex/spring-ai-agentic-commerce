@@ -1,0 +1,63 @@
+@if (store.agents()) {
+  <section class="card connections" aria-label="Connections">
+    @for (connection of connections(); track connection.name) {
+      <div class="connection" [attr.data-connected]="connection.connected">
+        <span class="dot" aria-hidden="true"></span>
+        <span>
+          <strong>{{ connection.name }}</strong>
+          <span class="muted small">{{ connection.connected ? 'Connected' : connection.off }}</span>
+        </span>
+      </div>
+    }
+  </section>
+
+  @for (card of agentCards(); track card.agent.id) {
+    <app-panel
+      [heading]="card.name"
+      icon="bot"
+      [description]="card.agent.model + ' · ' + card.agent.effort + ' effort'"
+    >
+      <label class="switch" panelActions>
+        <input
+          type="checkbox"
+          [checked]="card.agent.enabled === true"
+          [indeterminate]="card.agent.enabled === null"
+          (change)="setEnabled(card.agent.id, $event)"
+          [attr.aria-label]="card.name + ' enabled'"
+        />
+        {{ card.agent.enabled === null ? 'Unknown' : card.agent.enabled ? 'On' : 'Off' }}
+      </label>
+
+      @if (card.agent.enabled === false) {
+        <p class="callout" data-tone="warning">
+          <app-icon name="alert" [size]="16" />
+          <span>Kill switch on: the MCP servers refuse every tool call from this agent.</span>
+        </p>
+      } @else if (card.agent.enabled === null) {
+        <p class="callout" data-tone="warning">
+          <app-icon name="alert" [size]="16" />
+          <span>The kill switch can't be read: the MCP server is unreachable.</span>
+        </p>
+      }
+
+      <h3 class="tools-heading">Allowed tools</h3>
+      <div class="tool-groups">
+        @for (group of card.toolGroups; track group.server) {
+          <div>
+            <p class="server">{{ group.server }}</p>
+            <ul class="tools">
+              @for (tool of group.tools; track tool) {
+                <li>{{ tool }}</li>
+              }
+            </ul>
+          </div>
+        }
+      </div>
+    </app-panel>
+  }
+} @else {
+  <p class="callout span-all" data-tone="danger">
+    <app-icon name="alert" [size]="16" />
+    <span>The agent service can't be reached, so its agents and kill switches can't be shown.</span>
+  </p>
+}

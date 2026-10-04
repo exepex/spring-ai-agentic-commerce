@@ -1,0 +1,89 @@
+<app-panel
+  heading="Ready to ship"
+  icon="package"
+  description="Paid orders waiting in the warehouse. Shipping is refused once an order is cancelled or its stock is short."
+>
+  @for (shipment of toShip(); track shipment.id) {
+    <article class="item">
+      <div class="split">
+        <span class="mono">{{ shipment.trackingNumber }}</span>
+        <app-order-link [orderId]="shipment.orderId" />
+      </div>
+      <p class="muted small">{{ shipment.customerEmail }}</p>
+      <div class="actions">
+        <button
+          type="button"
+          class="button primary"
+          [disabled]="store.isBusy(shipment.id)"
+          (click)="store.ship(shipment)"
+        >
+          <app-icon name="truck" [size]="16" /> Ship
+        </button>
+      </div>
+      @if (store.refusalFor(shipment.id); as refusal) {
+        <p class="callout" data-tone="danger">{{ refusal }}</p>
+      }
+    </article>
+  } @empty {
+    <app-empty-state title="Nothing to ship" icon="package" />
+  }
+</app-panel>
+
+<app-panel
+  heading="With the carrier"
+  icon="truck"
+  description="Play the carrier: deliver the parcel, or report that it could not be delivered or was lost."
+>
+  @for (shipment of inTransit(); track shipment.id) {
+    <article class="item">
+      <div class="split">
+        <span class="cluster">
+          <span class="mono">{{ shipment.trackingNumber }}</span>
+          <app-status-badge [status]="shipment.status" />
+        </span>
+        <app-order-link [orderId]="shipment.orderId" />
+      </div>
+      <p class="muted small">{{ shipment.customerEmail }}</p>
+      <label class="field">
+        <span>What went wrong</span>
+        <input
+          class="input"
+          placeholder="Optional, for a failed or lost delivery"
+          [value]="problemFor(shipment.id)"
+          (input)="setProblem(shipment.id, $any($event.target).value)"
+        />
+      </label>
+      <div class="actions">
+        <button
+          type="button"
+          class="button primary"
+          [disabled]="store.isBusy(shipment.id)"
+          (click)="report(shipment, 'DELIVERED')"
+        >
+          <app-icon name="check" [size]="16" /> Delivered
+        </button>
+        <button
+          type="button"
+          class="button"
+          [disabled]="store.isBusy(shipment.id)"
+          (click)="report(shipment, 'DELIVERY_FAILED')"
+        >
+          Delivery failed
+        </button>
+        <button
+          type="button"
+          class="button danger"
+          [disabled]="store.isBusy(shipment.id)"
+          (click)="report(shipment, 'LOST')"
+        >
+          Lost
+        </button>
+      </div>
+      @if (store.refusalFor(shipment.id); as refusal) {
+        <p class="callout" data-tone="danger">{{ refusal }}</p>
+      }
+    </article>
+  } @empty {
+    <app-empty-state title="No parcels on their way" icon="truck" />
+  }
+</app-panel>

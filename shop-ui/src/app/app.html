@@ -1,23 +1,47 @@
-<header class="topbar">
-  <div class="topbar-inner">
-    <a class="brand" routerLink="/shop">
-      <span class="logo" aria-hidden="true">▲</span>
-      Trailhead
-      <span class="tag">governed AI agents demo</span>
+<header class="app-header">
+  <div class="app-header-inner">
+    <a class="brand" routerLink="/shop" aria-label="Trailhead home">
+      <span class="brand-mark"><app-icon name="mountain" [size]="18" /></span>
+      <span class="brand-name">Trailhead</span>
     </a>
-    <nav>
-      <a routerLink="/shop" routerLinkActive="active">Shop</a>
-      <a routerLink="/orders" routerLinkActive="active">Orders</a>
-      <a routerLink="/operations" routerLinkActive="active">Operations</a>
-    </nav>
-    <label class="persona">
-      <span class="muted small">Signed in as</span>
-      <select [ngModel]="session.customer()" (ngModelChange)="session.switchTo($event)" aria-label="Customer">
-        @for (customer of customers; track customer) {
-          <option [value]="customer">{{ customer }}</option>
+
+    <nav class="app-nav" aria-label="Main">
+      <div class="nav-group">
+        @for (link of customerLinks; track link.path) {
+          <a [routerLink]="link.path" routerLinkActive="active" ariaCurrentWhenActive="page">
+            <app-icon [name]="link.icon" [size]="16" />{{ link.label }}
+          </a>
         }
-      </select>
+      </div>
+      <span class="nav-divider" aria-hidden="true"></span>
+      <div class="nav-group">
+        <span class="visually-hidden">Back office:</span>
+        @for (link of backOfficeLinks; track link.path) {
+          <a [routerLink]="link.path" routerLinkActive="active" ariaCurrentWhenActive="page">
+            <app-icon [name]="link.icon" [size]="16" />{{ link.label }}
+          </a>
+        }
+      </div>
+    </nav>
+
+    <label class="customer-picker">
+      <span class="avatar" aria-hidden="true">{{ customerInitials() }}</span>
+      <span class="picker-text">
+        <span class="picker-caption">Signed in as</span>
+        <select
+          [value]="session.customer()"
+          (change)="session.signInAs($any($event.target).value)"
+          aria-label="Signed in as customer"
+        >
+          @for (customer of customers; track customer) {
+            <option [value]="customer" [selected]="customer === session.customer()">
+              {{ customer }}
+            </option>
+          }
+        </select>
+      </span>
     </label>
   </div>
 </header>
+
 <router-outlet />

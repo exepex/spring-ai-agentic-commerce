@@ -1,0 +1,58 @@
+<main class="page">
+  <header class="page-header">
+    <div>
+      <h1>My orders</h1>
+      <p class="lead">Everything you ordered, and every message about it, as it happens.</p>
+    </div>
+  </header>
+
+  <div class="my-orders-layout">
+    <app-panel heading="Orders" icon="receipt">
+      @if (orders().length) {
+        <ul class="order-list">
+          @for (order of orders(); track order.id) {
+            <li>
+              <a class="order-row" [routerLink]="['/my-orders', order.id]">
+                <span class="order-summary">
+                  <span class="order-title">
+                    {{ order.lines[0]?.productName }}
+                    @if (order.lines.length > 1) {
+                      <span class="muted">and {{ order.lines.length - 1 }} more</span>
+                    }
+                  </span>
+                  <span class="muted small">{{ order.createdAt | date: 'MMM d, y · HH:mm' }}</span>
+                </span>
+                <span class="order-status">
+                  <span class="amount">{{ order.total | currency: order.currency }}</span>
+                  <app-status-badge [status]="order.status" />
+                </span>
+                <app-icon class="chevron" name="chevron-right" [size]="18" />
+              </a>
+            </li>
+          }
+        </ul>
+      } @else {
+        <app-empty-state title="No orders yet" icon="bag">
+          Ask the assistant in the shop to put one together.
+        </app-empty-state>
+      }
+    </app-panel>
+
+    <app-panel heading="Messages" icon="mail" description="Updates from Trailhead">
+      @if (notifications().length) {
+        <ul class="inbox">
+          @for (notification of notifications(); track notification.id) {
+            <li>
+              <p>{{ notification.message }}</p>
+              <span class="muted small">{{ notification.createdAt | date: 'MMM d, HH:mm' }}</span>
+            </li>
+          }
+        </ul>
+      } @else {
+        <app-empty-state title="No messages" icon="mail">
+          Updates about your orders arrive here.
+        </app-empty-state>
+      }
+    </app-panel>
+  </div>
+</main>
