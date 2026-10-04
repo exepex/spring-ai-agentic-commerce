@@ -15,7 +15,9 @@ import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.matching.RequestPatternBuilder;
 import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -170,6 +172,27 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
         reconciler.reconcile();
 
         assertThat(stockReleases.existsById(orderId)).isFalse();
+    }
+
+    @Test
+    void aBacklogOfStockReleasesIsWorkedOffOldestFirstInBoundedRuns() {
+        DEPENDENCIES.stubFor(delete(urlMatching("/api/orders/.+/reservations")).willReturn(aResponse().withStatus(204)));
+        var backlog = new ArrayList<UUID>();
+        var longAgo = Instant.parse("2000-01-01T00:00:00Z");
+        for (int i = 0; i < 60; i++) {
+            backlog.add(UUID.randomUUID());
+            jdbc.update("insert into orders.stock_release (order_id, requested_at) values (?, ?)",
+                    backlog.getLast(), Timestamp.from(longAgo.plusSeconds(i)));
+        }
+
+        reconciler.reconcile();
+
+        assertThat(backlog.subList(0, 50)).noneMatch(stockReleases::existsById);
+        assertThat(backlog.subList(50, 60)).allMatch(stockReleases::existsById);
+
+        reconciler.reconcile();
+
+        assertThat(backlog).noneMatch(stockReleases::existsById);
     }
 
     @Test

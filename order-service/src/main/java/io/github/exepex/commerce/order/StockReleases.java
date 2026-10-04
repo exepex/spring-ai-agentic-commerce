@@ -37,7 +37,8 @@ class StockReleases {
         }
     }
 
+    /** Retries the oldest recorded releases, 50 per run, so a run stays well within its lock however many wait. */
     void retryAll() {
-        releases.findAll().forEach(release -> attempt(release.getOrderId()));
+        releases.findTop50ByOrderByRequestedAt().forEach(release -> attempt(release.getOrderId()));
     }
 }
