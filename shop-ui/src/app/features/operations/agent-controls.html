@@ -31,7 +31,10 @@
       @if (card.agent.enabled === false) {
         <p class="callout" data-tone="warning">
           <app-icon name="alert" [size]="16" />
-          <span>Kill switch on: the MCP servers refuse every tool call from this agent.</span>
+          <span
+            >Kill switch on: the MCP servers refuse this agent's tool calls, except handing work to
+            a person or a team.</span
+          >
         </p>
       } @else if (card.agent.enabled === null) {
         <p class="callout" data-tone="warning">

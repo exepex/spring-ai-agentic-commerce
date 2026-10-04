@@ -203,6 +203,10 @@
         </div>
       </div>
     </div>
+  } @else if (unavailable()) {
+    <app-empty-state title="The order can't be loaded right now" icon="clock">
+      The order service is not answering. This page keeps trying.
+    </app-empty-state>
   } @else if (notFound()) {
     <app-empty-state title="Order not found" icon="alert">
       There is no order {{ shortId() }}. It may have been mistyped.

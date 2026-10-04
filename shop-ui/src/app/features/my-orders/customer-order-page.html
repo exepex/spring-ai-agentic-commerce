@@ -66,14 +66,24 @@
                   </div>
                 }
               </dl>
-              @for (refund of refundsOnTheirWay(); track refund.id) {
-                <p class="callout">
-                  <app-icon name="refund" [size]="16" />
-                  <span
-                    >A refund of {{ refund.amount | currency: refund.currency }} is on its way. It
-                    usually reaches your card within a few days.</span
-                  >
-                </p>
+              @for (refund of openRefunds(); track refund.id) {
+                @if (refund.status === 'PENDING_APPROVAL') {
+                  <p class="callout">
+                    <app-icon name="clock" [size]="16" />
+                    <span
+                      >A refund of {{ refund.amount | currency: refund.currency }} is being
+                      reviewed. We'll let you know once it's approved.</span
+                    >
+                  </p>
+                } @else {
+                  <p class="callout" data-tone="warning">
+                    <app-icon name="alert" [size]="16" />
+                    <span
+                      >A refund of {{ refund.amount | currency: refund.currency }} hasn't gone
+                      through yet. We're looking into it and will let you know.</span
+                    >
+                  </p>
+                }
               }
             } @else {
               <app-empty-state title="Waiting for your payment" icon="clock" />
@@ -127,6 +137,10 @@
         }
       </app-panel>
     </div>
+  } @else if (unavailable()) {
+    <app-empty-state title="We can't load this order right now" icon="clock">
+      Please wait a moment: we'll keep trying.
+    </app-empty-state>
   } @else if (belongsToSomeoneElse() || notFound()) {
     <app-empty-state title="We couldn't find this order" icon="receipt">
       It isn't one of your orders. <a routerLink="/my-orders">See your orders</a>

@@ -206,6 +206,11 @@ export class CommerceApi {
   }
 }
 
+/** Whether a request failed because what it asked for does not exist, rather than because a service is unavailable. */
+export function isNotFound(failure: unknown): boolean {
+  return (failure as { status?: unknown } | null)?.status === 404;
+}
+
 /** The reason a service gave for refusing a request, from its problem details answer. */
 export function refusalReason(failure: unknown, fallback: string): string {
   const detail = (failure as { error?: { detail?: unknown } } | null)?.error?.detail;

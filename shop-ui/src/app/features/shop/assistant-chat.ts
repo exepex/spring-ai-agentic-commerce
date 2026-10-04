@@ -101,13 +101,21 @@ export class AssistantChat {
 
   protected pay(proposal: Proposal, paymentMethod: string): void {
     this.payingProposalId.set(proposal.id);
+    // As with replies, the outcome belongs to the conversation it started in; after a switch it is dropped.
+    const conversation = this.conversationId;
     this.api.confirmProposal(proposal.id, paymentMethod).subscribe({
       next: (latest) => {
+        if (conversation !== this.conversationId) {
+          return;
+        }
         this.payingProposalId.set(null);
         this.replaceProposal(latest);
         this.followWhileConfirming(latest);
       },
       error: (failure) => {
+        if (conversation !== this.conversationId) {
+          return;
+        }
         this.payingProposalId.set(null);
         this.addMessage(
           'assistant',
