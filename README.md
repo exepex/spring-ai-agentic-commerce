@@ -253,6 +253,7 @@ Everything is set in `.env` (copied from `.env.example`); Docker Compose passes 
 | `AGENTIC_COMMERCE_SHOPPING_ASSISTANT_TOKEN`, `AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN` | yes (defaults in `.env.example`) | Each agent's bearer token, shared by agent-service and the MCP servers. Change them for anything beyond a local demo. |
 | `AGENTIC_COMMERCE_INTERNAL_API_TOKEN` | yes (default in `.env.example`) | The token services present to each other's internal endpoints: placing and cancelling orders, charging, refunding, reserving stock. Without it nobody can call them directly, so the refund approval limit cannot be bypassed. Change it for anything beyond a local demo. |
 | `AGENTIC_COMMERCE_SLACK_MCP_API_KEY` | with `--slack` | The key agent-service presents to the Slack MCP server. |
+| `AGENTIC_COMMERCE_DATABASE_PASSWORD` | yes (default in `.env.example`) | The password of the `commerce` database user, for Postgres and every service. Postgres keeps the password it was first started with, so set it before the first start (or remove the volume with `docker compose down -v`). Change it for anything beyond a local demo. |
 
 Behaviour that is not a secret lives in each service's `src/main/resources/application.yml`, for example the refund
 approval limit (`commerce.governance.refund-approval-threshold` in commerce-mcp-server) and the reconciliation
@@ -319,8 +320,10 @@ single instance of servicenow-mcp-server.
 
 For development, start only the infrastructure (`docker compose up -d postgres kafka jaeger`), run the services from
 your IDE or with `mvn spring-boot:run` in a service's folder, and the UI with `npm start` in `shop-ui`
-(http://localhost:4200). To work ServiceNow incidents this way, also run servicenow-mcp-server and start agent-service
-with `AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8087`.
+(http://localhost:4200). Only Compose reads `.env`: if you changed `AGENTIC_COMMERCE_DATABASE_PASSWORD` (or any other
+variable there), export it for the services too, for example with `set -a; . ./.env; set +a` in the shell that runs
+Maven, or in your IDE's run configuration. To work ServiceNow incidents this way, also run servicenow-mcp-server and
+start agent-service with `AGENTIC_COMMERCE_SERVICENOW_MCP_URL=http://localhost:8087`.
 
 ### Project layout
 
