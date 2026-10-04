@@ -38,5 +38,6 @@ interface OrderProposalRepository extends JpaRepository<OrderProposal, UUID> {
     int settle(@Param("id") UUID id, @Param("outcome") OrderProposal.Status outcome, @Param("orderId") UUID orderId,
             @Param("failure") String failure);
 
-    List<OrderProposal> findByStatusAndConfirmingSinceBefore(OrderProposal.Status status, Instant confirmingBefore);
+    List<OrderProposal> findTop200ByStatusAndConfirmingSinceBeforeOrderByConfirmingSince(OrderProposal.Status status,
+            Instant confirmingBefore);
 }

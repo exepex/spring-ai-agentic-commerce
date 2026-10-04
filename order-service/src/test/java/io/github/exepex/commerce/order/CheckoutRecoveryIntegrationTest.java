@@ -26,6 +26,7 @@ import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
 /**
@@ -42,6 +43,9 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
 
     @Autowired
     private StockReleaseRepository stockReleases;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @Test
     void aPaymentWithAnUnknownOutcomeIsAskedForAgainAndConfirmsTheOrder() throws Exception {
@@ -84,6 +88,32 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
 
         assertThat(statusOf(orderId.toString())).isEqualTo("CONFIRMED");
         assertThat(orderEventTypesFor(orderId.toString(), 1)).containsExactly("ORDER_CONFIRMED");
+    }
+
+    @Test
+    void whileAnotherInstanceReconcilesThisOneLeavesTheOrdersToIt() throws Exception {
+        // The first run creates the job's lock; then another instance holds it.
+        reconciler.reconcile();
+        jdbc.update("""
+                update orders.shedlock set lock_until = now() + interval '1 hour', locked_by = 'another-instance'
+                where name = 'order-reconciliation'""");
+        UUID stalled = UUID.randomUUID();
+        orders.save(CustomerOrder.place(stalled, "lena@example.com", "EUR",
+                List.of(new OrderLine(SHOE, "RUN-SHOE-BLUE-42", "Trail running shoe, blue, EU 42", 1,
+                        new BigDecimal("129.90"))),
+                "pm_card_visa", Instant.now()));
+        try {
+            reconciler.reconcile();
+
+            assertThat(statusOf(stalled.toString())).isEqualTo("PLACED");
+            DEPENDENCIES.verify(0, paymentsFor(stalled.toString()));
+        } finally {
+            jdbc.update("update orders.shedlock set lock_until = now() where name = 'order-reconciliation'");
+        }
+
+        reconciler.reconcile();
+
+        assertThat(statusOf(stalled.toString())).isEqualTo("CONFIRMED");
     }
 
     @Test

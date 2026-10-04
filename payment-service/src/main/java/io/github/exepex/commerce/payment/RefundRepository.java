@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -22,6 +23,7 @@ interface RefundRepository extends JpaRepository<Refund, UUID> {
             where refund.paymentId = payment.id and payment.provider = :provider
               and (refund.status = io.github.exepex.commerce.payment.PaymentGateway.RefundStatus.PENDING
                    or (refund.status = io.github.exepex.commerce.payment.PaymentGateway.RefundStatus.SUCCEEDED
-                       and refund.succeededAt > :succeededAfter))""")
-    List<Refund> findUnsettled(String provider, Instant succeededAfter);
+                       and refund.succeededAt > :succeededAfter))
+            order by refund.createdAt""")
+    List<Refund> findUnsettled(String provider, Instant succeededAfter, Limit limit);
 }

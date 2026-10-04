@@ -11,5 +11,6 @@ interface CustomerOrderRepository extends JpaRepository<CustomerOrder, UUID> {
 
     List<CustomerOrder> findTop100ByOrderByCreatedAtDesc();
 
-    List<CustomerOrder> findByStatusInAndCreatedAtBefore(List<OrderStatus> statuses, Instant createdBefore);
+    List<CustomerOrder> findTop200ByStatusInAndCreatedAtBeforeOrderByCreatedAt(List<OrderStatus> statuses,
+            Instant createdBefore);
 }

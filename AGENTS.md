@@ -9,9 +9,10 @@ defined, which review findings are wanted, and how changes are made.
 A working demo of governed AI agents on ordinary Spring Boot microservices: an online shop, two agents, an MCP
 server that enforces the rules, and an audit trail. The README describes the services and the workflows.
 
-It is a demo, not a production system. Each service runs as one instance, and some production concerns are
-deliberately left out (see "Design decisions" in the README). But it must be a **good** demo: every workflow in the
-README has to work correctly, including the edge cases a real user, operator or model can cause.
+It is a demo built to production standards. Every service but servicenow-mcp-server may run as several instances
+(see "Operate" in the README), and some production concerns are deliberately left out (see "Design decisions" in the
+README, and the open issues). It must work correctly: every workflow in the README, including the edge cases a real
+user, operator or model can cause, and at volume.
 
 ## The demo's agents
 
@@ -52,7 +53,8 @@ Report a finding when it describes a concrete scenario that this code can actual
 - **A README workflow behaves wrongly**, including under realistic edge cases:
   - a double click or a retried request;
   - two people acting on the same item at the same time (a refund, a case, a proposal);
-  - a dependency that is down or slow (payments, the MCP server, Slack, Claude);
+  - a dependency that is down or slow (payments, the MCP server, Slack, Claude, Kafka, the database);
+  - load: a query, lock or pool that stops keeping up as orders, cases or events grow;
   - the model misbehaving: calling the wrong tool, stopping without acting, or obeying a prompt injection.
 - **Money or stock is wrong:** a double charge or refund, a refund above what was paid, or stock oversold or never
   released.
@@ -72,7 +74,8 @@ Do not report:
 - **Scenarios that need a code path that does not exist.** For example, products come only from the seed migration
   and there is no API to create them. Hand-edited database rows are out of scope too.
 - **Trade-offs already decided.** These are listed under "Design decisions" in the README.
-- **Concerns that only apply to running several instances of a service.**
+- **Concerns that only apply to running several instances of servicenow-mcp-server** (issue #57). Several instances
+  of every other service are in scope: report what two instances doing the same work at once would break.
 - **Style, naming or formatting** without a functional effect.
 
 ## Working rules for coding agents
