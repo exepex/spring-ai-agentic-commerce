@@ -44,6 +44,7 @@ public class IncidentAgent {
     private final DecisionRecorder decisions;
     private final AgentDefinition definition;
     private final String systemPrompt;
+    private final Duration runLimit;
 
     IncidentAgent(ChatModel chatModel, McpToolboxes toolboxes, AgentSwitchboard switchboard, DecisionRecorder decisions,
             AgentDefinitions definitions, AgentProperties properties) {
@@ -54,6 +55,7 @@ public class IncidentAgent {
         this.toolboxes = toolboxes;
         this.switchboard = switchboard;
         this.decisions = decisions;
+        this.runLimit = properties.agents().incidentRunLimit();
         this.systemPrompt = definition.systemPrompt(properties.slack().isConfigured() ? properties.slack().channelId() : null);
     }
 
@@ -75,7 +77,7 @@ public class IncidentAgent {
         var started = Instant.now();
         var run = new ToolRun(null, definition.toolCallBudget(), number,
                 linkedOrderId == null || linkedOrderId.isBlank() ? Set.of() : Set.of(linkedOrderId),
-                orderId -> stillLinksTo(number, orderId));
+                orderId -> stillLinksTo(number, orderId), started.plus(runLimit));
         ChatResponse response;
         try {
             response = chatClient.prompt()

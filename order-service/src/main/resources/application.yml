@@ -42,8 +42,10 @@ spring:
     consumer:
       group-id: order-service
       auto-offset-reset: earliest
-      value-deserializer: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
+      # An event that is not valid JSON goes to the dead-letter topic with its bytes instead of failing forever.
+      value-deserializer: org.springframework.kafka.support.serializer.ErrorHandlingDeserializer
       properties:
+        spring.deserializer.value.delegate.class: org.springframework.kafka.support.serializer.JacksonJsonDeserializer
         spring.json.value.default.type: io.github.exepex.commerce.order.ShipmentEvent
         spring.json.use.type.headers: false
   mvc:

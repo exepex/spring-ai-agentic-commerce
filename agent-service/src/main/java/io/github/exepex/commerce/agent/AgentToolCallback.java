@@ -86,6 +86,9 @@ final class AgentToolCallback implements ToolCallback {
         if (!run.takeCall()) {
             return Optional.of(Refusals.BUDGET_SPENT);
         }
+        if (run.pastDeadline()) {
+            return Optional.of(Refusals.TIME_SPENT);
+        }
         if (INCIDENT_TOOLS.contains(definition.name())) {
             var number = ToolJson.argument(toolInput, ToolParameters.NUMBER);
             if (!run.mayWorkIncident(number)) {
