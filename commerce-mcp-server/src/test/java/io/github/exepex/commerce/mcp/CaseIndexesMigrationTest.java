@@ -2,7 +2,6 @@ package io.github.exepex.commerce.mcp;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
@@ -23,7 +22,7 @@ class CaseIndexesMigrationTest {
             postgres.start();
             var dataSource = new SingleConnectionDataSource(postgres.getJdbcUrl(), postgres.getUsername(),
                     postgres.getPassword(), true);
-            Flyway.configure().dataSource(dataSource).schemas("governance").defaultSchema("governance").load().migrate();
+            GovernanceMigrations.migrate(dataSource, "latest");
             var jdbc = JdbcClient.create(dataSource);
             // An empty table is cheapest to scan; the planner shows which index it can use once scanning is ruled out.
             jdbc.sql("set enable_seqscan = off").update();
