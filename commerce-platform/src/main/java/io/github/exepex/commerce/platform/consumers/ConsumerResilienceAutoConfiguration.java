@@ -15,6 +15,7 @@ import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
+import tools.jackson.core.JacksonException;
 
 /**
  * Every service's Kafka listeners retry a failed event a few times with growing pauses, then park it on its
@@ -63,6 +64,9 @@ public class ConsumerResilienceAutoConfiguration {
         backOff.setInitialInterval(properties.firstRetry().toMillis());
         backOff.setMultiplier(2);
         backOff.setMaxInterval(properties.longestBackOff().toMillis());
-        return new DefaultErrorHandler(deadLetters, backOff);
+        var handler = new DefaultErrorHandler(deadLetters, backOff);
+        // An event that is not valid JSON fails the same way every time: it is parked at once.
+        handler.addNotRetryableExceptions(JacksonException.class);
+        return handler;
     }
 }

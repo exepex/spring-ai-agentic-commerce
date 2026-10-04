@@ -17,10 +17,12 @@ spring:
       group-id: agent-service
       # An incident claimed before this service first joined its group is still worked.
       auto-offset-reset: earliest
-      # One incident per poll, and time for a whole agent run before Kafka gives the incident to another consumer.
+      # One incident per poll. Kafka gives an incident to another consumer only after 20 minutes: by then the
+      # ServiceNow poller has handed an unfinished claim to a team (stale-after: 15m, polled every 30s), so the
+      # agent's tools refuse it and two runs can never both act on one incident.
       max-poll-records: 1
       properties:
-        max.poll.interval.ms: 900000
+        max.poll.interval.ms: 1200000
   http:
     clients:
       connect-timeout: 2s

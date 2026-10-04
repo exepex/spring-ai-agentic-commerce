@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.platform.consumers;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import lombok.AccessLevel;
@@ -22,6 +23,7 @@ import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 final class DeadLetters {
 
     static final String SUFFIX = ".DLT";
+    static final Duration SEND_TIMEOUT = Duration.ofSeconds(10);
 
     static DeadLetterPublishingRecoverer recoverer(ProducerFactory<Object, Object> producers,
             KafkaTemplate<Object, Object> objects) {
@@ -29,8 +31,12 @@ final class DeadLetters {
         templates.put(byte[].class, templateWith(producers, ByteArraySerializer.class));
         templates.put(String.class, templateWith(producers, StringSerializer.class));
         templates.put(Object.class, objects);
-        return new DeadLetterPublishingRecoverer(templates,
+        var recoverer = new DeadLetterPublishingRecoverer(templates,
                 (event, failure) -> new TopicPartition(event.topic() + SUFFIX, -1));
+        // An event counts as parked only once Kafka has it on the dead-letter topic; otherwise it is tried again.
+        recoverer.setFailIfSendResultIsError(true);
+        recoverer.setWaitForSendResultTimeout(SEND_TIMEOUT);
+        return recoverer;
     }
 
     private static KafkaTemplate<Object, Object> templateWith(ProducerFactory<Object, Object> producers,

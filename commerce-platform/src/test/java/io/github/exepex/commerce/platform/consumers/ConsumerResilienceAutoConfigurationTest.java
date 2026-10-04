@@ -16,6 +16,11 @@ import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.CommonLoggingErrorHandler;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.listener.ExceptionClassifier;
+import org.springframework.kafka.listener.ListenerExecutionFailedException;
+import org.springframework.kafka.support.ExceptionMatcher;
+import org.springframework.test.util.ReflectionTestUtils;
+import tools.jackson.core.exc.StreamReadException;
 
 class ConsumerResilienceAutoConfigurationTest {
 
@@ -43,6 +48,33 @@ class ConsumerResilienceAutoConfigurationTest {
             assertThat(thread.isVirtual()).isFalse();
             assertThat(thread.getName()).startsWith(ConsumerResilienceAutoConfiguration.CONSUMER_THREAD_PREFIX);
         });
+    }
+
+    @Test
+    void anEventIsParkedOnlyOnceKafkaHasItOnTheDeadLetterTopic() {
+        contexts.run(context -> assertThat(ReflectionTestUtils.getField(
+                context.getBean(DeadLetterPublishingRecoverer.class), "failIfSendResultIsError")).isEqualTo(true));
+    }
+
+    @Test
+    void anEventThatIsNotValidJsonIsParkedAtOnceAndAnyOtherFailureIsRetried() {
+        contexts.run(context -> {
+            var handler = context.getBean(DefaultErrorHandler.class);
+            var unreadable = new ListenerExecutionFailedException("listener failed",
+                    new StreamReadException(null, "Unexpected character ('t')"));
+            var databaseDown = new ListenerExecutionFailedException("listener failed",
+                    new IllegalStateException("database down"));
+
+            assertThat(retries(handler).match(unreadable)).isFalse();
+            assertThat(retries(handler).match(databaseDown)).isTrue();
+        });
+    }
+
+    /** Spring Kafka keeps the classification to itself; the test reads it to check which failures are retried. */
+    private static ExceptionMatcher retries(DefaultErrorHandler handler) throws ReflectiveOperationException {
+        var getter = ExceptionClassifier.class.getDeclaredMethod("getExceptionMatcher");
+        getter.setAccessible(true);
+        return (ExceptionMatcher) getter.invoke(handler);
     }
 
     @Test
