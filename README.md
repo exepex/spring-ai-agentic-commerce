@@ -313,7 +313,8 @@ payment simulator's switch (payment-service, demo only). A chat turn can reach a
 conversations are in Postgres. Each topic has six partitions and each listener up to three consumers per instance; the
 outbox relay runs on one instance at a time per service, so an order's events keep their order. The scheduled jobs
 (stalled checkouts, refund checks, unfinished confirmations, the ServiceNow poller) run on one instance at a time,
-through a ShedLock table in each service's schema, and take the oldest work first in bounded batches.
+through a ShedLock table in each service's schema; the lock is renewed while a job runs. The reconcilers take the
+oldest work first in bounded batches; the ServiceNow poller works through everything open in ServiceNow on each run.
 
 ## Develop
 
