@@ -380,8 +380,11 @@ demo with simulated payments:
 docker run --rm -i --network host -e INTERNAL_API_TOKEN=dev-internal-api-token grafana/k6 run - < load-tests/shop.js
 ```
 
+Leave `AGENTIC_COMMERCE_STRIPE_SECRET_KEY` unset: with a key, every order is charged at Stripe.
+
 `BROWSE_RATE`, `CHECKOUT_RATE` and `DURATION` change the load. It adds stock for two products first and places
-orders as the shop's MCP server does, with the services' token. Run it once to warm the JVMs up before measuring.
+orders as the shop's MCP server does, with the services' token. Run it once to warm the JVMs up before measuring:
+a service restarted just before the run takes the full load cold, runs out of database connections and fails it.
 
 On one 4-vCPU machine running the whole demo (twelve containers) and k6 together, the default load (about 350
 requests/s, 48 checkouts/s) passed with no errors, a 95th percentile of 96 ms for browsing and 430 ms for checkout.
