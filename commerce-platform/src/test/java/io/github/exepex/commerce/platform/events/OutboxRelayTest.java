@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.SmartLifecycle;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -80,6 +81,11 @@ class OutboxRelayTest {
 
         verify(outbox, never()).nextBatch(10);
         verify(kafka, never()).send(anyString(), anyString(), any());
+    }
+
+    @Test
+    void theRelayStopsOnlyAfterTheWebServerHasFinishedItsRequests() {
+        assertThat(relay.getPhase()).isLessThan(SmartLifecycle.DEFAULT_PHASE - 1024);
     }
 
     private static CompletableFuture<SendResult<String, Object>> taken() {

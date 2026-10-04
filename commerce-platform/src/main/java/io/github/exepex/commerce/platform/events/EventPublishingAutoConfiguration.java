@@ -1,5 +1,6 @@
 package io.github.exepex.commerce.platform.events;
 
+import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.propagation.Propagator;
 import java.util.List;
@@ -50,6 +51,16 @@ public class EventPublishingAutoConfiguration {
             OutboxRelay relay) {
         return new OutboxWriter(outbox, routes, KafkaSerializers.valueSerializerOf(kafkaTemplate.getProducerFactory()),
                 tracing.getIfAvailable(() -> TracePropagation.NONE), relay);
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(MeterBinder.class)
+    static class Metrics {
+
+        @Bean
+        OutboxMetrics outboxMetrics(OutboxStore outbox, OutboxProperties properties) {
+            return new OutboxMetrics(outbox, properties);
+        }
     }
 
     @Configuration(proxyBeanMethods = false)

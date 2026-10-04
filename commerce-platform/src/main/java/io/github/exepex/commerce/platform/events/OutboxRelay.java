@@ -22,6 +22,9 @@ import tools.jackson.databind.util.RawValue;
 @Slf4j
 class OutboxRelay implements SmartLifecycle {
 
+    /** Below the web server's graceful shutdown phase ({@code SmartLifecycle.DEFAULT_PHASE - 1024}). */
+    static final int SHUTS_DOWN_AFTER_THE_WEB_SERVER = SmartLifecycle.DEFAULT_PHASE - 2048;
+
     private final OutboxStore outbox;
     private final KafkaTemplate<String, Object> kafka;
     private final TransactionTemplate transactions;
@@ -64,6 +67,12 @@ class OutboxRelay implements SmartLifecycle {
     @Override
     public boolean isRunning() {
         return running;
+    }
+
+    /** Stops after the web server has finished its requests, so the events they wrote still leave before shutdown. */
+    @Override
+    public int getPhase() {
+        return SHUTS_DOWN_AFTER_THE_WEB_SERVER;
     }
 
     private void relayUntilStopped() {

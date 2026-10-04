@@ -12,6 +12,13 @@ x-service: &service
     kafka:
       condition: service_healthy
 
+# A service is healthy once its readiness probe answers: it has started and can reach its database and Kafka.
+x-service-healthcheck: &service-healthcheck
+  interval: 10s
+  timeout: 3s
+  retries: 30
+  start_period: 30s
+
 x-service-environment: &service-environment
   SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/commerce
   SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -21,6 +28,8 @@ x-service-environment: &service-environment
 services:
   postgres:
     image: postgres:17-alpine
+    # Every service keeps a pool of up to 20 connections, and there may be several instances of each.
+    command: ["postgres", "-c", "max_connections=300"]
     environment:
       POSTGRES_DB: commerce
       POSTGRES_USER: commerce
@@ -73,6 +82,9 @@ services:
       <<: *service-environment
     ports:
       - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health/readiness"]
+      <<: *service-healthcheck
 
   order-service:
     <<: *service
@@ -83,6 +95,9 @@ services:
       SPRING_HTTP_SERVICECLIENT_PAYMENT_BASEURL: http://payment-service:8083
     ports:
       - "8082:8082"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/actuator/health/readiness"]
+      <<: *service-healthcheck
 
   payment-service:
     <<: *service
@@ -92,6 +107,9 @@ services:
       AGENTIC_COMMERCE_STRIPE_SECRET_KEY: ${AGENTIC_COMMERCE_STRIPE_SECRET_KEY:-}
     ports:
       - "8083:8083"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8083/actuator/health/readiness"]
+      <<: *service-healthcheck
 
   shipping-service:
     <<: *service
@@ -100,6 +118,9 @@ services:
       <<: *service-environment
     ports:
       - "8084:8084"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8084/actuator/health/readiness"]
+      <<: *service-healthcheck
 
   commerce-mcp-server:
     <<: *service
@@ -114,6 +135,9 @@ services:
       AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN: ${AGENTIC_COMMERCE_INCIDENT_AGENT_TOKEN:-dev-incident-agent-token}
     ports:
       - "8085:8085"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8085/actuator/health/readiness"]
+      <<: *service-healthcheck
 
   servicenow-mcp-server:
     # Governed MCP tools over ServiceNow incidents. Without a ServiceNow instance configured it stays idle.
@@ -133,6 +157,9 @@ services:
       AGENTIC_COMMERCE_SERVICENOW_FULFILMENT_GROUP: ${AGENTIC_COMMERCE_SERVICENOW_FULFILMENT_GROUP:-Fulfilment}
     ports:
       - "8087:8087"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8087/actuator/health/readiness"]
+      <<: *service-healthcheck
 
   servicenow-simulator:
     # A stand-in for the part of ServiceNow's Table API the demo uses, for trying the cases and running the scenario
@@ -164,13 +191,16 @@ services:
       AGENTIC_COMMERCE_SLACK_CHANNEL_ID: ${AGENTIC_COMMERCE_SLACK_CHANNEL_ID:-}
     ports:
       - "8086:8086"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8086/actuator/health/readiness"]
+      <<: *service-healthcheck
 
   shop-ui:
     build: { context: shop-ui }
     restart: unless-stopped
     depends_on:
-      - agent-service
-      - commerce-mcp-server
+      agent-service: { condition: service_healthy }
+      commerce-mcp-server: { condition: service_healthy }
     ports:
       - "8080:80"
 

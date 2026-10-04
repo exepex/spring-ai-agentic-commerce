@@ -224,6 +224,14 @@ class PaymentApiIntegrationTest {
     }
 
     @Test
+    void anOrchestratorCanProbeTheServiceWithoutTheToken() {
+        assertThat(mockMvc.get().uri("/actuator/health/liveness")).hasStatusOk()
+                .bodyJson().extractingPath("$.status").isEqualTo("UP");
+        assertThat(mockMvc.get().uri("/actuator/health/readiness")).hasStatusOk()
+                .bodyJson().extractingPath("$.status").isEqualTo("UP");
+    }
+
+    @Test
     void theSimulatedOutageTakesThePaymentApiDownButNotTheSwitch() {
         setOutage(true);
 

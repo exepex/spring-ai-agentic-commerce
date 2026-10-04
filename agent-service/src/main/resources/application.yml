@@ -4,6 +4,9 @@ server:
 spring:
   application:
     name: agent-service
+  # A chat turn waits for the model; a stopping service lets the turns it has finish.
+  lifecycle:
+    timeout-per-shutdown-phase: 3m
   threads:
     virtual:
       enabled: true

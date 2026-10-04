@@ -14,6 +14,7 @@ class OutboxStore {
     private final String insert;
     private final String nextBatch;
     private final String delete;
+    private final String backlog;
 
     OutboxStore(JdbcClient jdbc, OutboxProperties properties) {
         this.jdbc = jdbc;
@@ -23,6 +24,8 @@ class OutboxStore {
         this.nextBatch = "select id, topic, event_key, payload, trace_headers from " + table
                 + " order by id limit :limit for update";
         this.delete = "delete from " + table + " where id in (:ids)";
+        this.backlog = "select count(*) as waiting, coalesce(extract(epoch from now() - min(created_at)), 0) as age "
+                + "from " + table;
     }
 
     /** Adds an event in the caller's transaction, so it is kept exactly when the change it announces is. */
@@ -53,6 +56,13 @@ class OutboxStore {
                 .query((row, number) -> new OutboxRow(row.getLong("id"), row.getString("topic"),
                         row.getString("event_key"), row.getString("payload"), row.getString("trace_headers")))
                 .list();
+    }
+
+    /** How many events wait, and for how many seconds the oldest has waited: Kafka or the relay is behind. */
+    OutboxBacklog backlog() {
+        return jdbc.sql(backlog)
+                .query((row, number) -> new OutboxBacklog(row.getLong("waiting"), row.getDouble("age")))
+                .single();
     }
 
     void remove(List<Long> ids) {
