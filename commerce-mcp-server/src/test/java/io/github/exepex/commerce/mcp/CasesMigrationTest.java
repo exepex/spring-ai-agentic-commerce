@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
@@ -23,7 +22,7 @@ class CasesMigrationTest {
             postgres.start();
             DriverManagerDataSource dataSource = new DriverManagerDataSource(postgres.getJdbcUrl(), postgres.getUsername(),
                     postgres.getPassword());
-            migrate(dataSource, "4");
+            GovernanceMigrations.migrate(dataSource, "4");
             JdbcClient jdbc = JdbcClient.create(dataSource);
             UUID order = UUID.randomUUID();
             UUID oldest = escalation(jdbc, order, "OPEN", null, "2026-10-01T09:00:00Z", "Refund failed twice.");
@@ -32,7 +31,7 @@ class CasesMigrationTest {
             UUID withoutOrder = escalation(jdbc, null, "ASSIGNED", "ben@trailhead.example", "2026-10-01T12:00:00Z",
                     "Slack is down.");
 
-            migrate(dataSource, "latest");
+            GovernanceMigrations.migrate(dataSource, "latest");
 
             List<Map<String, Object>> cases = jdbc.sql("select * from governance.support_case order by created_at")
                     .query().listOfRows();
@@ -49,11 +48,6 @@ class CasesMigrationTest {
             assertThat((String) cases.get(1).get("description"))
                     .isEqualTo("Slack is down. (It was assigned to ben@trailhead.example in the escalation queue.)");
         }
-    }
-
-    private static void migrate(DriverManagerDataSource dataSource, String target) {
-        Flyway.configure().dataSource(dataSource).schemas("governance").defaultSchema("governance").target(target)
-                .load().migrate();
     }
 
     private static UUID escalation(JdbcClient jdbc, UUID orderId, String status, String assignedTo, String createdAt,

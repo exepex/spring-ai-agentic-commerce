@@ -1,11 +1,13 @@
 package io.github.exepex.commerce.mcp.governance;
 
 import io.github.exepex.commerce.mcp.constants.ConfigKeys;
+import io.github.exepex.commerce.mcp.constants.JobLocks;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -28,10 +30,16 @@ public class ProposalReconciler {
     @Value(ConfigKeys.RECONCILIATION_SETTLE_AFTER)
     private final Duration settleAfter;
 
+    /**
+     * One instance at a time; the oldest confirmations first, 50 per run, so a backlog cannot swamp it and a run ends
+     * well within its lock even when every call waits for its timeout.
+     */
     @Scheduled(fixedDelayString = ConfigKeys.RECONCILIATION_INTERVAL,
             initialDelayString = ConfigKeys.RECONCILIATION_INTERVAL)
+    @SchedulerLock(name = JobLocks.PROPOSAL_RECONCILIATION)
     public void reconcile() {
-        for (var proposal : proposals.findByStatusAndConfirmingSinceBefore(OrderProposal.Status.CONFIRMING,
+        for (var proposal : proposals.findTop50ByStatusAndConfirmingSinceBeforeOrderByConfirmingSince(
+                OrderProposal.Status.CONFIRMING,
                 Instant.now(clock).minus(settleAfter))) {
             try {
                 proposalService.settle(proposal);

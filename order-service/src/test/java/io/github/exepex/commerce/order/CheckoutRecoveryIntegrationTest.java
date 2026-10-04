@@ -15,7 +15,9 @@ import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.matching.RequestPatternBuilder;
 import com.jayway.jsonpath.JsonPath;
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -26,7 +28,10 @@ import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Checkout and cancellation when something fails half way: a payment whose outcome is unknown, an order left behind
@@ -42,6 +47,12 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
 
     @Autowired
     private StockReleaseRepository stockReleases;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void aPaymentWithAnUnknownOutcomeIsAskedForAgainAndConfirmsTheOrder() throws Exception {
@@ -84,6 +95,32 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
 
         assertThat(statusOf(orderId.toString())).isEqualTo("CONFIRMED");
         assertThat(orderEventTypesFor(orderId.toString(), 1)).containsExactly("ORDER_CONFIRMED");
+    }
+
+    @Test
+    void whileAnotherInstanceReconcilesThisOneLeavesTheOrdersToIt() throws Exception {
+        // The first run creates the job's lock; then another instance holds it.
+        reconciler.reconcile();
+        jdbc.update("""
+                update orders.shedlock set lock_until = now() + interval '1 hour', locked_by = 'another-instance'
+                where name = 'order-reconciliation'""");
+        UUID stalled = UUID.randomUUID();
+        orders.save(CustomerOrder.place(stalled, "lena@example.com", "EUR",
+                List.of(new OrderLine(SHOE, "RUN-SHOE-BLUE-42", "Trail running shoe, blue, EU 42", 1,
+                        new BigDecimal("129.90"))),
+                "pm_card_visa", Instant.now()));
+        try {
+            reconciler.reconcile();
+
+            assertThat(statusOf(stalled.toString())).isEqualTo("PLACED");
+            DEPENDENCIES.verify(0, paymentsFor(stalled.toString()));
+        } finally {
+            jdbc.update("update orders.shedlock set lock_until = now() where name = 'order-reconciliation'");
+        }
+
+        reconciler.reconcile();
+
+        assertThat(statusOf(stalled.toString())).isEqualTo("CONFIRMED");
     }
 
     @Test
@@ -140,6 +177,39 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
         reconciler.reconcile();
 
         assertThat(stockReleases.existsById(orderId)).isFalse();
+    }
+
+    @Test
+    void aBacklogOfStockReleasesIsWorkedOffOldestFirstInBoundedRuns() {
+        DEPENDENCIES.stubFor(delete(urlMatching("/api/orders/.+/reservations")).willReturn(aResponse().withStatus(204)));
+        var backlog = new ArrayList<UUID>();
+        var longAgo = Instant.parse("2000-01-01T00:00:00Z");
+        for (int i = 0; i < 60; i++) {
+            backlog.add(UUID.randomUUID());
+            jdbc.update("insert into orders.stock_release (order_id, requested_at) values (?, ?)",
+                    backlog.getLast(), Timestamp.from(longAgo.plusSeconds(i)));
+        }
+
+        reconciler.reconcile();
+
+        assertThat(backlog.subList(0, 50)).noneMatch(stockReleases::existsById);
+        assertThat(backlog.subList(50, 60)).allMatch(stockReleases::existsById);
+
+        reconciler.reconcile();
+
+        assertThat(backlog).noneMatch(stockReleases::existsById);
+    }
+
+    @Test
+    void theOldestStockReleasesAreFoundThroughAnIndex() {
+        // An empty table is cheapest to scan; the planner shows which index it can use once scanning is ruled out.
+        String plan = new TransactionTemplate(transactionManager).execute(transaction -> {
+            jdbc.execute("set local enable_seqscan = off");
+            return String.join("\n", jdbc.queryForList(
+                    "explain select * from orders.stock_release order by requested_at limit 50", String.class));
+        });
+
+        assertThat(plan).contains("stock_release_requested");
     }
 
     @Test

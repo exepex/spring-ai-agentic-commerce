@@ -16,6 +16,7 @@ public final class ErrorMessages {
     public static final String IDEMPOTENCY_KEY_REUSED = "Idempotency key %s was already used for a different refund";
     public static final String PROVIDER_UNAVAILABLE = "The card processor did not respond; try again";
     public static final String CARD_DECLINED = "Your card was declined.";
+    public static final String PAYMENT_REQUEST_REJECTED = "The payment method was not accepted.";
     public static final String PAYMENT_ENDED_IN_STATUS = "Payment ended in status %s";
     public static final String STRIPE_TEST_KEY_REQUIRED = "This demo only accepts a Stripe test-mode key (sk_test_...)";
     public static final String SIMULATED_OUTAGE = "{\"status\": 503, \"title\": \"Service Unavailable\", "

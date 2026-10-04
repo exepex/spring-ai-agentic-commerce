@@ -1,13 +1,16 @@
 package io.github.exepex.commerce.payment;
 
 import io.github.exepex.commerce.payment.constants.ConfigKeys;
+import io.github.exepex.commerce.payment.constants.JobLocks;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Limit;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -25,6 +28,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @RequiredArgsConstructor
 class RefundReconciler {
 
+    private static final Limit BATCH = Limit.of(50);
+
     private final RefundRepository refunds;
     private final PaymentRepository payments;
     private final PaymentGateway gateway;
@@ -35,22 +40,29 @@ class RefundReconciler {
     @Value(ConfigKeys.REFUND_CHECK_WATCH)
     private final Duration watch;
 
+    /**
+     * One instance at a time; the 50 least recently checked refunds per run, so a backlog cannot swamp it, every
+     * refund gets its turn, and a run ends well within its lock even when every call waits for its timeout.
+     */
     @Scheduled(fixedDelayString = ConfigKeys.REFUND_CHECK_INTERVAL, initialDelayString = ConfigKeys.REFUND_CHECK_INTERVAL)
+    @SchedulerLock(name = JobLocks.REFUND_CHECK)
     void reconcile() {
-        for (var refund : refunds.findUnsettled(gateway.name(), Instant.now(clock).minus(watch))) {
+        for (var refund : refunds.findUnsettled(gateway.name(), Instant.now(clock).minus(watch), BATCH)) {
             try {
                 var latest = gateway.refundStatus(refund.getProviderReference());
                 if (latest != refund.getStatus()) {
-                    record(refund, latest);
+                    settle(refund, latest);
                 }
             } catch (RuntimeException failure) {
                 log.warn("Could not check refund {} with the card processor; it will be retried", refund.getId(), failure);
+            } finally {
+                refunds.markChecked(refund.getId(), Instant.now(clock));
             }
         }
     }
 
     /** Under the payment's lock, so it cannot interleave with a new refund's refundable check. */
-    private void record(Refund refund, PaymentGateway.RefundStatus latest) {
+    private void settle(Refund refund, PaymentGateway.RefundStatus latest) {
         transaction.executeWithoutResult(status -> {
             var payment = payments.findByIdForUpdate(refund.getPaymentId()).orElseThrow();
             var current = refunds.findById(refund.getId()).orElseThrow();

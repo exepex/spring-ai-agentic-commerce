@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -22,4 +23,7 @@ class StockRelease {
     @Id
     @Column(name = "order_id")
     private UUID orderId;
+
+    @Column(name = "requested_at")
+    private Instant requestedAt;
 }

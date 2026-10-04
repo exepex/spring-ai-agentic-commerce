@@ -3,7 +3,9 @@ package io.github.exepex.commerce.payment;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
+import io.github.exepex.commerce.payment.constants.PaymentValues;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,11 +20,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.domain.Limit;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
-import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.testcontainers.kafka.KafkaContainer;
@@ -44,6 +47,9 @@ class PaymentApiIntegrationTest {
 
     @Autowired
     private RefundReconciler refundReconciler;
+
+    @Autowired
+    private RefundRepository refunds;
 
     @Autowired
     private JdbcTemplate jdbc;
@@ -127,6 +133,26 @@ class PaymentApiIntegrationTest {
         MvcTestResult payment = mockMvc.get().uri("/api/payments/{orderId}", orderId).exchange();
         assertThat(payment).bodyJson().extractingPath("$.refunds[0].status").isEqualTo("FAILED");
         assertThat(payment).bodyJson().extractingPath("$.refundable").isEqualTo(100.0);
+    }
+
+    @Test
+    void refundsThatStayPendingCannotKeepTheOthersFromBeingChecked() {
+        UUID stuckOrder = UUID.randomUUID();
+        UUID waitingOrder = UUID.randomUUID();
+        charge(stuckOrder, "100.00", "pm_card_visa");
+        charge(waitingOrder, "100.00", "pm_card_visa");
+        refund(stuckOrder, "10.00", "refund-stuck-" + stuckOrder);
+        refund(waitingOrder, "10.00", "refund-waiting-" + waitingOrder);
+        jdbc.update("update payments.refund set status = 'PENDING', succeeded_at = null where idempotency_key in (?, ?)",
+                "refund-stuck-" + stuckOrder, "refund-waiting-" + waitingOrder);
+        // The stuck refund is older, but the check just asked about it.
+        jdbc.update("update payments.refund set created_at = now() - interval '1 day', checked_at = now() "
+                + "where idempotency_key = ?", "refund-stuck-" + stuckOrder);
+
+        var next = refunds.findUnsettled(PaymentValues.SIMULATED, Instant.now().minusSeconds(3600), Limit.of(1));
+
+        assertThat(next).singleElement().extracting(Refund::getIdempotencyKey)
+                .isEqualTo("refund-waiting-" + waitingOrder);
     }
 
     @Test
