@@ -188,9 +188,9 @@ class ShippingIntegrationTest extends OrderServiceTestSupport {
             List<String> parked = new ArrayList<>();
             long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
             while (parked.isEmpty() && System.nanoTime() < deadline) {
-                for (ConsumerRecord<String, String> record : KafkaTestUtils.getRecords(consumer, Duration.ofSeconds(2))) {
-                    if (orderId.equals(record.key())) {
-                        parked.add(record.value());
+                for (ConsumerRecord<String, String> event : KafkaTestUtils.getRecords(consumer, Duration.ofSeconds(2))) {
+                    if (orderId.equals(event.key())) {
+                        parked.add(event.value());
                     }
                 }
             }
