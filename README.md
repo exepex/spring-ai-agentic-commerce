@@ -104,7 +104,7 @@ flowchart LR
 | shipping-service | 8084 | Shipments from order events, and a simulated carrier: a shipped parcel is delivered, not delivered or lost, and each report is published on `shipment.events`. |
 | commerce-mcp-server | 8085 | Nine MCP tools over the services, plus the governance API: audit trail, refund approvals, order proposals, customer notifications, cases. Opens a case for every stock-out, failed delivery, lost parcel, refund that failed at the processor, and hand-off. |
 | servicenow-mcp-server | 8087 | Five MCP tools over ServiceNow incidents, governed like the commerce tools. Opens an incident for each case, claims new incidents for the incident agent, publishes `servicenow.incidents`, and reads back who has each case's incident. |
-| agent-service | 8086 | The two agents, each with its own MCP connections, allowlist, prompt and effort level. |
+| agent-service | 8086 | The two agents, each with its own MCP connections, allowlist, prompt and effort level. Keeps the shopping assistant's conversations in Postgres: the last 30 messages of each, for the customer who started it, until it has been idle for a day (`commerce.agents.conversation-idle-limit`). |
 | servicenow-simulator | 8088 | Only with `./start-demo.sh --simulator`: an in-memory stand-in for the part of ServiceNow's Table API the demo uses, for trying the cases and running the scenario suite without an instance. |
 | shop-ui | 8080 | Angular app served by nginx, which routes `/svc/<service>/` to each service. |
 
@@ -307,9 +307,9 @@ Every Java service gets the same operational behaviour from the shared `commerce
 
 nginx answers 404 for `/svc/<service>/actuator`, so probes and metrics are not reachable from the browser.
 
-**Several instances.** The services keep no state of their own outside Postgres and Kafka, with two exceptions: the
-shopping assistant's recent chat history (agent-service) and the payment simulator's switch (payment-service, demo
-only). Each topic has six partitions and each listener up to three consumers per instance; the outbox relay runs on one
+**Several instances.** The services keep no state of their own outside Postgres and Kafka, with one exception: the
+payment simulator's switch (payment-service, demo only). A chat turn can reach any agent-service instance, since the
+conversations are in Postgres. Each topic has six partitions and each listener up to three consumers per instance; the outbox relay runs on one
 instance at a time per service, so an order's events keep their order. The reconcilers (stalled checkouts, refund
 checks, unfinished confirmations) also run on one instance at a time, through a ShedLock table in each service's
 schema, and take the oldest work first in bounded batches. The ServiceNow poller is the one job that still assumes a

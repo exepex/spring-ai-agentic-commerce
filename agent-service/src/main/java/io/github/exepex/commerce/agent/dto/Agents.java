@@ -12,9 +12,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param shoppingAssistant the shopping assistant's credentials
  * @param incidentAgent the incident agent's credentials
  * @param incidentRunLimit how long one incident run may act: after it, every tool call of the run is refused
+ * @param conversationIdleLimit how long the shopping assistant remembers a conversation nobody writes to
  */
 public record Agents(String mcpUrl, Agent shoppingAssistant, Agent incidentAgent,
-        @DefaultValue("15m") Duration incidentRunLimit) {
+        @DefaultValue("15m") Duration incidentRunLimit, @DefaultValue("1d") Duration conversationIdleLimit) {
 
     /** The bearer token the given agent presents to the MCP servers. */
     public String tokenOf(String agentId) {

@@ -24,7 +24,8 @@ class DecisionRecorderTest {
     private static final AgentDefinitions DEFINITIONS = AgentDefinitions.load();
     private static final AgentProperties PROPERTIES = new AgentProperties(
             new Agents("http://localhost:8085",
-                    new Agent("assistant-token"), new Agent("incident-token"), Duration.ofMinutes(15)),
+                    new Agent("assistant-token"), new Agent("incident-token"), Duration.ofMinutes(15),
+                    Duration.ofDays(1)),
             new Slack("", "", ""), new ServiceNow(""));
 
     private final AgentGovernanceClient governance = mock(AgentGovernanceClient.class);
