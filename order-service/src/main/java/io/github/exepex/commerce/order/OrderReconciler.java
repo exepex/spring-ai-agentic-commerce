@@ -1,12 +1,14 @@
 package io.github.exepex.commerce.order;
 
 import io.github.exepex.commerce.order.constants.ConfigKeys;
+import io.github.exepex.commerce.order.constants.JobLocks;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -31,11 +33,13 @@ class OrderReconciler {
 
     private final Clock clock;
 
+    /** One instance at a time; the oldest stalled orders first, a batch per run, so a backlog cannot swamp it. */
     @Scheduled(fixedDelayString = ConfigKeys.RECONCILIATION_INTERVAL,
             initialDelayString = ConfigKeys.RECONCILIATION_INTERVAL)
+    @SchedulerLock(name = JobLocks.ORDER_RECONCILIATION)
     void reconcile() {
         var stalledBefore = Instant.now(clock).minus(settleAfter);
-        for (var order : orders.findByStatusInAndCreatedAtBefore(
+        for (var order : orders.findTop200ByStatusInAndCreatedAtBeforeOrderByCreatedAt(
                 List.of(OrderStatus.PLACED, OrderStatus.PAYMENT_PENDING), stalledBefore)) {
             try {
                 orderService.settlePayment(order);

@@ -8,7 +8,10 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-/** The case lookups that run on every refund and every order page find their rows through an index. */
+/**
+ * The lookups that run on every refund, every order page, every reconciliation and every operations console refresh
+ * find their rows through an index.
+ */
 class CaseIndexesMigrationTest {
 
     private static final String ORDER = "'6f0c2b8e-1d4a-4f3b-9c2e-7a5d8e9f0b1c'";
@@ -31,6 +34,16 @@ class CaseIndexesMigrationTest {
                     + " and status in ('PENDING', 'WITH_AGENT', 'WITH_TEAM')")).contains("support_case_order");
             assertThat(planOf(jdbc, "select * from governance.case_note where case_id = " + CASE
                     + " and sent_at is null order by created_at")).contains("case_note_case_unsent");
+            assertThat(planOf(jdbc, "select * from governance.order_proposal where status = 'CONFIRMING'"
+                    + " and confirming_since < now() order by confirming_since limit 200"))
+                    .contains("order_proposal_confirming");
+            assertThat(planOf(jdbc, "select * from governance.support_case order by created_at desc limit 100"))
+                    .contains("support_case_recent");
+            assertThat(planOf(jdbc, "select * from governance.refund_request order by created_at desc limit 100"))
+                    .contains("refund_request_recent");
+            assertThat(planOf(jdbc,
+                    "select * from governance.customer_notification order by created_at desc limit 100"))
+                    .contains("customer_notification_recent");
             dataSource.destroy();
         }
     }
