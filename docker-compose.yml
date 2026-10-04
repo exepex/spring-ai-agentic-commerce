@@ -6,13 +6,17 @@
 
 x-service: &service
   restart: unless-stopped
+  # Longer than the services' graceful shutdown (30 s), so a stopping service finishes its requests.
+  stop_grace_period: 40s
   depends_on:
     postgres:
       condition: service_healthy
     kafka:
       condition: service_healthy
 
-# A service is healthy once its readiness probe answers: it has started and can reach its database and Kafka.
+# A service is healthy once its readiness probe answers: it has started, so its database is migrated. Readiness
+# leaves out the database and Kafka on purpose: when one is briefly down, every instance would leave the load
+# balancer at once, instead of answering 503 for the requests that need it.
 x-service-healthcheck: &service-healthcheck
   interval: 10s
   timeout: 3s
@@ -175,6 +179,8 @@ services:
 
   agent-service:
     <<: *service
+    # A chat turn may take up to 3 minutes to finish when the service stops.
+    stop_grace_period: 200s
     build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: agent-service } }
     environment:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092

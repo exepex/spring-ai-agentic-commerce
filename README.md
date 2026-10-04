@@ -296,9 +296,9 @@ Every Java service gets the same operational behaviour from the shared `commerce
 
 | What | Where |
 |---|---|
-| Liveness and readiness probes | `/actuator/health/liveness`, `/actuator/health/readiness` on each service's port. Docker Compose waits for readiness. |
+| Liveness and readiness probes | `/actuator/health/liveness`, `/actuator/health/readiness` on each service's port. Docker Compose waits for readiness. Readiness leaves out the database and Kafka on purpose, so a brief outage does not take every instance out of the load balancer at once; `/actuator/health` shows them. |
 | Metrics | `/actuator/prometheus`. Besides the JVM, HTTP, Kafka and connection pool metrics, `commerce_outbox_waiting` and `commerce_outbox_oldest_age_seconds` show events not yet on Kafka; alert when the age grows. |
-| Graceful shutdown | A stopping service finishes the requests it has (30 s; agent-service 3 min for a chat turn). The outbox relay stops last. |
+| Graceful shutdown | A stopping service finishes the requests it has (30 s; agent-service 3 min for a chat turn), and Compose waits that long before it kills a container. The outbox relay stops last. |
 | Database connections | Up to 20 per instance (`spring.datasource.hikari.maximum-pool-size`); a request waits at most 5 s for one. The compose Postgres allows 300. |
 | Failed events | Retried 4 times with growing pauses, then parked on `<topic>.DLT` with the original bytes and the failure in the headers. |
 | Out of memory | The JVM exits and the container is restarted. |
