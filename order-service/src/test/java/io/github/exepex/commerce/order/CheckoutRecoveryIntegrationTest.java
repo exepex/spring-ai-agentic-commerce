@@ -28,9 +28,10 @@ import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Checkout and cancellation when something fails half way: a payment whose outcome is unknown, an order left behind
@@ -49,6 +50,9 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void aPaymentWithAnUnknownOutcomeIsAskedForAgainAndConfirmsTheOrder() throws Exception {
@@ -199,20 +203,10 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
     @Test
     void theOldestStockReleasesAreFoundThroughAnIndex() {
         // An empty table is cheapest to scan; the planner shows which index it can use once scanning is ruled out.
-        String plan = jdbc.execute((ConnectionCallback<String>) connection -> {
-            try (var statement = connection.createStatement()) {
-                statement.execute("set enable_seqscan = off");
-                try (var rows = statement.executeQuery(
-                        "explain select * from orders.stock_release order by requested_at limit 50")) {
-                    var lines = new StringBuilder();
-                    while (rows.next()) {
-                        lines.append(rows.getString(1)).append('\n');
-                    }
-                    return lines.toString();
-                } finally {
-                    statement.execute("reset enable_seqscan");
-                }
-            }
+        String plan = new TransactionTemplate(transactionManager).execute(transaction -> {
+            jdbc.execute("set local enable_seqscan = off");
+            return String.join("\n", jdbc.queryForList(
+                    "explain select * from orders.stock_release order by requested_at limit 50", String.class));
         });
 
         assertThat(plan).contains("stock_release_requested");
