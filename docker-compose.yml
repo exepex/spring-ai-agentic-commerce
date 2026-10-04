@@ -183,6 +183,8 @@ services:
     stop_grace_period: 200s
     build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: agent-service } }
     environment:
+      # The shopping assistant's conversations.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/commerce
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       SPRING_HTTP_SERVICECLIENT_GOVERNANCE_BASEURL: http://commerce-mcp-server:8085

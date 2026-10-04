@@ -17,7 +17,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.stereotype.Service;
 
@@ -29,7 +28,6 @@ import org.springframework.stereotype.Service;
 @Service
 public class ShoppingAssistant {
 
-    private static final int MAX_CONVERSATIONS = 1_000;
     /** How much of each answer the audit trail shows. */
     private static final int MAX_SUMMARY_LENGTH = 160;
 
@@ -40,15 +38,11 @@ public class ShoppingAssistant {
     private final AgentDefinition definition;
 
     ShoppingAssistant(ChatModel chatModel, McpToolboxes toolboxes, AgentSwitchboard switchboard,
-            DecisionRecorder decisions, AgentDefinitions definitions) {
+            DecisionRecorder decisions, AgentDefinitions definitions, ConversationMemory conversations) {
         this.definition = definitions.get(AgentIds.SHOPPING_ASSISTANT);
-        var memory = MessageWindowChatMemory.builder()
-                .chatMemoryRepository(new RecentConversations(MAX_CONVERSATIONS))
-                .maxMessages(30)
-                .build();
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultOptions(ClaudeOptions.forAgent(definition.model(), definition.effort()))
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(memory).build())
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(conversations).build())
                 .build();
         this.toolboxes = toolboxes;
         this.switchboard = switchboard;
@@ -74,7 +68,8 @@ public class ShoppingAssistant {
                     .user(message)
                     .toolCallbacks(toolboxes.shoppingAssistantTools())
                     .toolContext(Map.of(McpValues.TOOL_RUN_CONTEXT_KEY, run))
-                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID, conversationId))
+                    .advisors(advisor -> advisor.param(ChatMemory.CONVERSATION_ID,
+                            ConversationMemory.key(customerEmail, conversationId)))
                     .call()
                     .chatResponse();
             var text = ClaudeReply.textOf(response);

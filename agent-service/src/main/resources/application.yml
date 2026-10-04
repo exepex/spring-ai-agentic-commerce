@@ -10,6 +10,17 @@ spring:
   threads:
     virtual:
       enabled: true
+  # The shopping assistant's conversations live in this service's own schema.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/commerce
+    username: commerce
+    password: ${AGENTIC_COMMERCE_DATABASE_PASSWORD:commerce}
+    hikari:
+      # Spring AI's chat memory names its table without a schema.
+      schema: agents
+  flyway:
+    default-schema: agents
+    schemas: agents
   kafka:
     bootstrap-servers: localhost:9092
     template:
@@ -33,6 +44,12 @@ spring:
       governance:
         base-url: http://localhost:8085
   ai:
+    chat:
+      memory:
+        repository:
+          jdbc:
+            # The table comes from this service's own Flyway migration.
+            initialize-schema: never
     anthropic:
       api-key: ${AGENTIC_COMMERCE_ANTHROPIC_API_KEY:}
       # Set explicitly: the Anthropic SDK otherwise falls back to an ANTHROPIC_BASE_URL environment variable, which
@@ -54,6 +71,8 @@ commerce:
     # After this, every tool call of an incident run is refused and the unfinished incident goes to a team. Keep it
     # well below spring.kafka.consumer max.poll.interval.ms (20 minutes).
     incident-run-limit: 15m
+    # A conversation nobody has written to for this long is forgotten.
+    conversation-idle-limit: 1d
   slack:
     # The Slack MCP server and the one channel agents may post in. Leave the URL empty to run without Slack.
     mcp-url: ${AGENTIC_COMMERCE_SLACK_MCP_URL:}
