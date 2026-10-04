@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Observable, catchError, of } from 'rxjs';
-import { CommerceApi } from '../../core/commerce-api';
+import { CommerceApi, isNotFound } from '../../core/commerce-api';
 import { shortId } from '../../core/labels';
 import {
   AuditEvent,
@@ -60,6 +60,8 @@ export class OrderDetailPage {
   private readonly api = inject(CommerceApi);
   protected readonly order = signal<Order | null>(null);
   protected readonly notFound = signal(false);
+  /** The order could not be loaded because a service is down; polling keeps trying. */
+  protected readonly unavailable = signal(false);
   protected readonly payment = signal<Payment | null>(null);
   protected readonly shipment = signal<Shipment | null>(null);
   protected readonly refundRequests = signal<RefundRequest[]>([]);
@@ -90,8 +92,15 @@ export class OrderDetailPage {
       next: (order) => {
         this.order.set(order);
         this.notFound.set(false);
+        this.unavailable.set(false);
       },
-      error: () => this.notFound.set(this.order() === null),
+      error: (failure) => {
+        // An order already on screen stays there through a brief outage; the next poll refreshes it.
+        if (this.order() === null) {
+          this.notFound.set(isNotFound(failure));
+          this.unavailable.set(!isNotFound(failure));
+        }
+      },
     });
     orNull(this.api.payment(id)).subscribe((payment) => this.payment.set(payment));
     orNull(this.api.shipment(id)).subscribe((shipment) => this.shipment.set(shipment));
@@ -107,6 +116,7 @@ export class OrderDetailPage {
   private clear(): void {
     this.order.set(null);
     this.notFound.set(false);
+    this.unavailable.set(false);
     this.payment.set(null);
     this.shipment.set(null);
     this.refundRequests.set([]);

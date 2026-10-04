@@ -428,6 +428,9 @@ running, use `mvn -pl agent-evals -Pevals test`. Point them at a UI run with `np
 
 ## Design decisions
 
+The reasoning behind each decision, the options weighed, and the open limitations with their expected solutions
+are recorded in [docs/adr](docs/adr/README.md).
+
 - **Agents handle exceptions, not the happy path.** Checkout is deterministic code. An agent proposes orders; the
   customer confirms them.
 - **Governance lives in the MCP server, not in prompts.** Prompts ask the agent to behave; the server makes sure it

@@ -12,7 +12,7 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Observable, catchError, of } from 'rxjs';
-import { CommerceApi } from '../../core/commerce-api';
+import { CommerceApi, isNotFound } from '../../core/commerce-api';
 import { CustomerNotification, Order, Payment, RefundRequest, Shipment } from '../../core/models';
 import { pollWhileActive } from '../../core/polling';
 import { Session } from '../../core/session';
@@ -60,6 +60,8 @@ export class CustomerOrderPage {
 
   private readonly loadedOrder = signal<Order | null>(null);
   protected readonly notFound = signal(false);
+  /** The order could not be loaded because a service is down; polling keeps trying. */
+  protected readonly unavailable = signal(false);
   protected readonly payment = signal<Payment | null>(null);
   protected readonly shipment = signal<Shipment | null>(null);
   private readonly refundRequests = signal<RefundRequest[]>([]);
@@ -74,8 +76,8 @@ export class CustomerOrderPage {
     () => this.loadedOrder() !== null && this.order() === null,
   );
   protected readonly paid = computed(() => this.payment()?.status === 'SUCCEEDED');
-  /** Refunds asked for but not yet back on the card: waiting for approval, or being retried. */
-  protected readonly refundsOnTheirWay = computed(() =>
+  /** Refunds asked for but not yet back on the card: waiting for a person to approve them, or failed and being looked into. */
+  protected readonly openRefunds = computed(() =>
     this.refundRequests().filter(
       (refund) => refund.status === 'PENDING_APPROVAL' || refund.status === 'FAILED',
     ),
@@ -149,8 +151,15 @@ export class CustomerOrderPage {
       next: (order) => {
         this.loadedOrder.set(order);
         this.notFound.set(false);
+        this.unavailable.set(false);
       },
-      error: () => this.notFound.set(this.loadedOrder() === null),
+      error: (failure) => {
+        // An order already on screen stays there through a brief outage; the next poll refreshes it.
+        if (this.loadedOrder() === null) {
+          this.notFound.set(isNotFound(failure));
+          this.unavailable.set(!isNotFound(failure));
+        }
+      },
     });
     orNull(this.api.payment(id)).subscribe((payment) => this.payment.set(payment));
     orNull(this.api.shipment(id)).subscribe((shipment) => this.shipment.set(shipment));
@@ -163,6 +172,7 @@ export class CustomerOrderPage {
   private clear(): void {
     this.loadedOrder.set(null);
     this.notFound.set(false);
+    this.unavailable.set(false);
     this.payment.set(null);
     this.shipment.set(null);
     this.refundRequests.set([]);
