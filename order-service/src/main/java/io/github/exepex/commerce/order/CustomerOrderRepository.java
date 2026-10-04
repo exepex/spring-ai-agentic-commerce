@@ -7,7 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 interface CustomerOrderRepository extends JpaRepository<CustomerOrder, UUID> {
 
-    List<CustomerOrder> findTop100ByCustomerEmailOrderByCreatedAtDesc(String customerEmail);
+    List<CustomerOrder> findByCustomerEmailOrderByCreatedAtDesc(String customerEmail);
 
     List<CustomerOrder> findTop100ByOrderByCreatedAtDesc();
 

@@ -14,7 +14,7 @@ interface RefundRequestRepository extends JpaRepository<RefundRequest, UUID> {
 
     Optional<RefundRequest> findByIdempotencyKey(String idempotencyKey);
 
-    List<RefundRequest> findTop500ByStatusOrderByCreatedAt(RefundRequest.Status status);
+    List<RefundRequest> findByStatusOrderByCreatedAt(RefundRequest.Status status);
 
     List<RefundRequest> findTop100ByOrderByCreatedAtDesc();
 

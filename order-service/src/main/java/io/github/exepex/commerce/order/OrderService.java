@@ -111,9 +111,9 @@ public class OrderService {
         return orders.findById(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
     }
 
-    /** A customer's 100 most recent orders. */
+    /** Every order of the customer, newest first: the shop and the assistant must be able to find each of them. */
     public List<CustomerOrder> findOrdersOf(String customerEmail) {
-        return orders.findTop100ByCustomerEmailOrderByCreatedAtDesc(customerEmail);
+        return orders.findByCustomerEmailOrderByCreatedAtDesc(customerEmail);
     }
 
     public List<CustomerOrder> findRecentOrders() {
