@@ -173,7 +173,7 @@
         <app-panel
           heading="Timeline"
           icon="activity"
-          description="Every step by the services, the agents and people, with the reason and a link to its trace."
+          description="Every step by the agents, people and the shop itself, with the reason. Technical details hold the trace."
         >
           <app-audit-timeline [events]="timeline()" />
         </app-panel>
@@ -192,7 +192,7 @@
               <div class="item">
                 <p>{{ notification.message }}</p>
                 <p class="muted small">
-                  {{ notification.sentBy | actorName }} ·
+                  {{ notification.sentBy | byline: 'Sent' }} ·
                   {{ notification.createdAt | date: 'MMM d, HH:mm:ss' }}
                 </p>
               </div>

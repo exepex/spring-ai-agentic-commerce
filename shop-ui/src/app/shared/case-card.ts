@@ -2,14 +2,14 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { SupportCase } from '../core/models';
 import { Icon } from './icon';
-import { ActorNamePipe, CaseTypePipe } from './label-pipes';
+import { BylinePipe, CaseTypePipe } from './label-pipes';
 import { OrderLink } from './order-link';
 import { StatusBadge } from './status-badge';
 
 /** One case: what went wrong, its ServiceNow incident, and who has it now. */
 @Component({
   selector: 'app-case-card',
-  imports: [DatePipe, Icon, OrderLink, StatusBadge, ActorNamePipe, CaseTypePipe],
+  imports: [DatePipe, Icon, OrderLink, StatusBadge, BylinePipe, CaseTypePipe],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <article class="item">
@@ -49,7 +49,7 @@ import { StatusBadge } from './status-badge';
         }
       </div>
       <p class="muted small">
-        Raised by {{ supportCase().raisedBy | actorName }} ·
+        {{ supportCase().raisedBy | byline: 'Opened' }} ·
         {{ supportCase().createdAt | date: 'MMM d, HH:mm' }}
       </p>
     </article>

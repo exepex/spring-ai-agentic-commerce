@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { OrderStatus } from '../../core/models';
-import { Icon } from '../../shared/icon';
+import { OrderStatus } from '../core/models';
+import { Icon } from './icon';
 
 type StepState = 'done' | 'current' | 'failed' | 'upcoming';
 

@@ -222,13 +222,13 @@ The shop sells five seeded products, from a €24.00 bottle to €129.90 trail s
 
 1. **Order through chat.** On **Shop**, ask the shopping assistant: *"I need a headlamp for night hikes."* It
    searches the catalog and proposes an order. Click **Confirm and pay**: the order is placed and paid (the test card
-   is accepted). **My orders** lists it; open it to see its progress and timeline.
+   is accepted). **My orders** lists it, as the customer sees it; under **All orders** the back office sees its full timeline.
 2. **Cause a stock-out.** On **Operations**, under **Write off damaged stock**, write off enough headlamps that fewer
    remain than are reserved. The catalog announces the stock-out and the shop opens a `STOCK_OUT` case; the **Cases**
    tab shows it go to ServiceNow and to the incident agent.
 3. **Watch the incident agent work.** Within about half a minute the agent claims the incident, cancels the order,
-   refunds it, tells the customer (see **Messages** on **My orders**) and resolves the incident. Open the order: its
-   **Timeline** shows every system, agent and human step, each linked to its trace in Jaeger.
+   refunds it, tells the customer (see **Messages** on **My orders**) and resolves the incident. Open the order under
+   **All orders**: its **Timeline** shows every agent, human and automatic step, each with its trace in Jaeger.
 4. **Hit the refund limit.** Repeat with the €129.90 trail shoes: the refund is above the €100 limit, so it waits under
    **Waiting for approval** on the **Refunds** tab and the incident goes to the Payments team. Approve or reject it yourself.
 5. **Break things on purpose.** Under **Demo controls**, switch on the payment-service outage, or switch an agent off

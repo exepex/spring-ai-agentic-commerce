@@ -27,10 +27,10 @@ import { AuditTimeline } from '../../shared/audit-timeline';
 import { EmptyState } from '../../shared/empty-state';
 import { Icon } from '../../shared/icon';
 import { CaseCard } from '../../shared/case-card';
-import { ActorNamePipe } from '../../shared/label-pipes';
+import { ActorNamePipe, BylinePipe } from '../../shared/label-pipes';
 import { Panel } from '../../shared/panel';
 import { StatusBadge } from '../../shared/status-badge';
-import { OrderProgress } from './order-progress';
+import { OrderProgress } from '../../shared/order-progress';
 
 /** One order end to end: what was bought, the payment and refunds, the parcel, its cases, and the audit trail. */
 @Component({
@@ -46,6 +46,7 @@ import { OrderProgress } from './order-progress';
     StatusBadge,
     OrderProgress,
     ActorNamePipe,
+    BylinePipe,
     CaseCard,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,

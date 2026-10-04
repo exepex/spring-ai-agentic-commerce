@@ -1,7 +1,6 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
 import { JAEGER_URL } from '../core/endpoints';
-import { actorTypeLabel } from '../core/labels';
 import { ActorType, AuditEvent } from '../core/models';
 import { EmptyState } from './empty-state';
 import { Icon, IconName } from './icon';
@@ -9,9 +8,22 @@ import { ActionLabelPipe, ActorNamePipe } from './label-pipes';
 import { OrderLink } from './order-link';
 import { StatusBadge } from './status-badge';
 
-const ACTOR_ICONS: Record<ActorType, IconName> = { AGENT: 'bot', HUMAN: 'user', SYSTEM: 'server' };
+const ACTOR_ICONS: Record<ActorType, IconName> = { AGENT: 'bot', HUMAN: 'user', SYSTEM: 'sliders' };
 
-/** The audit trail: who or what did each step, how it turned out, why, and a link to its distributed trace. */
+type ActorFilter = 'ALL' | ActorType;
+
+const FILTERS: { id: ActorFilter; label: string }[] = [
+  { id: 'ALL', label: 'All' },
+  { id: 'AGENT', label: 'Agents' },
+  { id: 'HUMAN', label: 'People' },
+  { id: 'SYSTEM', label: 'Automatic' },
+];
+
+/**
+ * The audit trail, for the back office: who did each step (an agent, a person, or the shop on its own), what it was,
+ * how it turned out and why. Which service took an automatic step, and its distributed trace, are in its technical
+ * details.
+ */
 @Component({
   selector: 'app-audit-timeline',
   imports: [DatePipe, Icon, StatusBadge, OrderLink, EmptyState, ActorNamePipe, ActionLabelPipe],
@@ -26,5 +38,22 @@ export class AuditTimeline {
 
   protected readonly jaegerUrl = JAEGER_URL;
   protected readonly actorIcons = ACTOR_ICONS;
-  protected readonly actorTypeLabel = actorTypeLabel;
+  protected readonly filter = signal<ActorFilter>('ALL');
+
+  protected readonly filters = computed(() =>
+    FILTERS.map((filter) => ({
+      ...filter,
+      count:
+        filter.id === 'ALL'
+          ? this.events().length
+          : this.events().filter((event) => event.actorType === filter.id).length,
+    })),
+  );
+
+  protected readonly shownEvents = computed(() => {
+    const filter = this.filter();
+    return filter === 'ALL'
+      ? this.events()
+      : this.events().filter((event) => event.actorType === filter);
+  });
 }

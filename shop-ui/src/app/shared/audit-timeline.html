@@ -1,49 +1,79 @@
 @if (events().length) {
+  <div class="filters" role="group" aria-label="Show steps by">
+    @for (option of filters(); track option.id) {
+      <button
+        type="button"
+        class="filter"
+        [class.active]="filter() === option.id"
+        [attr.aria-pressed]="filter() === option.id"
+        (click)="filter.set(option.id)"
+      >
+        {{ option.label }} <span class="filter-count">{{ option.count }}</span>
+      </button>
+    }
+  </div>
+
   <ol class="audit-timeline">
-    @for (event of events(); track event.id) {
+    @for (event of shownEvents(); track event.id) {
       <li>
-        <span
-          class="actor"
-          [attr.data-actor]="event.actorType"
-          [title]="actorTypeLabel(event.actorType)"
-        >
+        <span class="actor" [attr.data-actor]="event.actorType">
           <app-icon [name]="actorIcons[event.actorType]" [size]="16" />
         </span>
         <div class="entry">
           <div class="entry-head">
-            <strong>{{ event.actor | actorName }}</strong>
-            <span class="visually-hidden">({{ actorTypeLabel(event.actorType) }})</span>
-            <span class="action">{{ event.action | actionLabel }}</span>
+            <strong>{{ event.action | actionLabel: event.outcome }}</strong>
             @if (event.outcome !== 'SUCCEEDED') {
               <app-status-badge [status]="event.outcome" />
             }
           </div>
           <p class="summary">{{ event.summary }}</p>
           <div class="entry-meta">
+            <span class="by" [attr.data-actor]="event.actorType">{{
+              event.actor | actorName: event.actorType
+            }}</span>
             <time [attr.datetime]="event.occurredAt">{{
               event.occurredAt | date: 'MMM d, HH:mm:ss'
             }}</time>
             @if (showOrder() && event.orderId) {
               <app-order-link [orderId]="event.orderId" />
             }
-            @if (event.traceId) {
-              <a [href]="jaegerUrl + '/trace/' + event.traceId" target="_blank" rel="noopener"
-                >Trace <app-icon name="external" [size]="12"
-              /></a>
-            }
           </div>
-          @if (event.details) {
-            <details>
-              <summary>Details</summary>
+          <details>
+            <summary>Technical details</summary>
+            <dl class="technical">
+              <div>
+                <dt>Recorded by</dt>
+                <dd class="mono">{{ event.actor }}</dd>
+              </div>
+              <div>
+                <dt>Action</dt>
+                <dd class="mono">{{ event.action }}</dd>
+              </div>
+              @if (event.traceId) {
+                <div>
+                  <dt>Trace</dt>
+                  <dd>
+                    <a [href]="jaegerUrl + '/trace/' + event.traceId" target="_blank" rel="noopener"
+                      >Open in Jaeger <app-icon name="external" [size]="12"
+                    /></a>
+                  </dd>
+                </div>
+              }
+            </dl>
+            @if (event.details) {
               <pre>{{ event.details }}</pre>
-            </details>
-          }
+            }
+          </details>
         </div>
+      </li>
+    } @empty {
+      <li class="none">
+        <app-empty-state title="No steps of this kind" icon="activity" />
       </li>
     }
   </ol>
 } @else {
   <app-empty-state title="Nothing recorded yet" icon="activity">
-    Every step by the services, the agents and people shows up here.
+    Every step by the agents, people and the shop itself shows up here.
   </app-empty-state>
 }

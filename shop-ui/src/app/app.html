@@ -17,12 +17,7 @@
       <div class="nav-group">
         <span class="visually-hidden">Back office:</span>
         @for (link of backOfficeLinks; track link.path) {
-          <a
-            [routerLink]="link.path"
-            routerLinkActive="active"
-            [routerLinkActiveOptions]="{ exact: link.path === '/orders' }"
-            ariaCurrentWhenActive="page"
-          >
+          <a [routerLink]="link.path" routerLinkActive="active" ariaCurrentWhenActive="page">
             <app-icon [name]="link.icon" [size]="16" />{{ link.label }}
           </a>
         }

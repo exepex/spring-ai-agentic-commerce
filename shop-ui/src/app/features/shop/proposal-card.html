@@ -53,7 +53,7 @@
         @if (proposal().orderId) {
           <span
             >Waiting for the payment to be confirmed.
-            <a [routerLink]="['/orders', proposal().orderId]">View the order</a></span
+            <a [routerLink]="['/my-orders', proposal().orderId]">View the order</a></span
           >
         } @else {
           <span>Placing the order…</span>
@@ -63,7 +63,7 @@
     @case ('CONFIRMED') {
       <p class="callout" data-tone="success">
         <app-icon name="check" [size]="16" />
-        <span>Paid. <a [routerLink]="['/orders', proposal().orderId]">View the order</a></span>
+        <span>Paid. <a [routerLink]="['/my-orders', proposal().orderId]">View the order</a></span>
       </p>
     }
     @case ('FAILED') {

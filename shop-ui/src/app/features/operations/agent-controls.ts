@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { actionLabel, humanize, toolServer } from '../../core/labels';
+import { humanize, toolServer } from '../../core/labels';
 import { AgentStatus } from '../../core/models';
 import { Icon } from '../../shared/icon';
 import { Panel } from '../../shared/panel';
@@ -58,7 +58,10 @@ function groupByServer(tools: string[]): ToolGroup[] {
   const groups = new Map<string, string[]>();
   for (const tool of tools) {
     const server = toolServer(tool);
-    groups.set(server, [...(groups.get(server) ?? []), actionLabel(tool)]);
+    groups.set(server, [
+      ...(groups.get(server) ?? []),
+      humanize(tool.slice(tool.indexOf(':') + 1)),
+    ]);
   }
   return [...groups].map(([server, names]) => ({ server, tools: names }));
 }

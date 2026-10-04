@@ -14,6 +14,12 @@ export const routes: Routes = [
       import('./features/my-orders/my-orders-page').then((page) => page.MyOrdersPage),
   },
   {
+    path: 'my-orders/:orderId',
+    title: 'Your order · Trailhead',
+    loadComponent: () =>
+      import('./features/my-orders/customer-order-page').then((page) => page.CustomerOrderPage),
+  },
+  {
     path: 'orders',
     title: 'All orders · Trailhead',
     loadComponent: () => import('./features/orders/orders-page').then((page) => page.OrdersPage),
