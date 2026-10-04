@@ -40,8 +40,9 @@ export const options = {
     // checkout's own, which the far more numerous browsing checks would otherwise hide.
     'checks': ['rate>0.99'],
     'checks{check:order confirmed}': ['rate>0.99'],
-    // When every VU is busy, k6 stops starting iterations: the offered load was not sustained.
-    'dropped_iterations': ['count<100'],
+    // When every VU is busy, k6 stops starting iterations: the offered load was not sustained. None may be dropped,
+    // whatever the rate and duration (a dropped iteration runs no checks, so no other threshold would notice).
+    'dropped_iterations': ['count<1'],
     'http_req_duration{name:products}': ['p(95)<300'],
     'http_req_duration{name:place order}': ['p(95)<1000'],
   },

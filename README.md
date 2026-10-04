@@ -372,8 +372,8 @@ authentication, permissions, customer scoping, the approval limit, idempotent re
 [load-tests/shop.js](load-tests/shop.js) drives the hot paths through nginx with [k6](https://k6.io): browsing the
 catalog (200 requests/s) and checkout (50 orders/s: reserve stock, charge, announce through the outbox), each order
 read back, for two minutes. It fails if more than 1% of requests fail, more than 1% of its checks or of its checkouts
-fail (an order not confirmed, for example), it could not start 100 of the planned iterations because the services fell
-behind, or the 95th percentile exceeds 300 ms for listing products or 1 s for placing an order. Run it against the
+fail (an order not confirmed, for example), it could not start a planned iteration because the services fell behind,
+or the 95th percentile exceeds 300 ms for listing products or 1 s for placing an order. Run it against the
 demo with simulated payments:
 
 ```bash
