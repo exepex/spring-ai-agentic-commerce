@@ -1,0 +1,69 @@
+<app-panel
+  heading="Write off damaged stock"
+  icon="package"
+  description="If fewer units remain than are reserved, the catalog publishes a stock-out and the shop opens a case for each order it can no longer fulfil."
+>
+  <form class="stack write-off" (submit)="$event.preventDefault(); writeOff()">
+    <label class="field">
+      <span>Product</span>
+      <select
+        class="input"
+        [value]="productId()"
+        (change)="chooseProduct($any($event.target).value)"
+      >
+        @for (product of store.products(); track product.id) {
+          <option [value]="product.id" [selected]="product.id === productId()">
+            {{ product.name }}
+          </option>
+        }
+      </select>
+      @if (selectedProduct(); as product) {
+        <small class="muted">{{ product.onHand }} on hand, {{ product.reserved }} reserved</small>
+      }
+    </label>
+    <div class="write-off-row">
+      <label class="field quantity">
+        <span>Units</span>
+        <input
+          class="input"
+          type="number"
+          min="1"
+          [value]="quantity()"
+          (change)="setQuantity($any($event.target).value)"
+        />
+      </label>
+      <label class="field">
+        <span>Reason</span>
+        <input class="input" [value]="reason()" (input)="reason.set($any($event.target).value)" />
+      </label>
+    </div>
+    <div class="actions">
+      <button type="submit" class="button primary" [disabled]="!productId() || !reason().trim()">
+        Write off
+      </button>
+    </div>
+    @if (store.writeOffOutcome(); as outcome) {
+      <p class="callout" [attr.data-tone]="outcome.succeeded ? 'info' : 'danger'">
+        <app-icon [name]="outcome.succeeded ? 'check' : 'alert'" [size]="16" />
+        <span>{{ outcome.message }}</span>
+      </p>
+    }
+  </form>
+</app-panel>
+
+<app-panel
+  heading="Payment service"
+  icon="card"
+  description="Make the payment service answer 503 to every request, to watch refunds fail and get retried."
+>
+  <label class="switch">
+    <input type="checkbox" [checked]="store.paymentOutage()" (change)="setPaymentOutage($event)" />
+    Simulate an outage
+  </label>
+  @if (store.paymentOutage()) {
+    <p class="callout outage" data-tone="warning">
+      <app-icon name="alert" [size]="16" />
+      <span>Payments are down: charges and refunds fail until you turn this off.</span>
+    </p>
+  }
+</app-panel>

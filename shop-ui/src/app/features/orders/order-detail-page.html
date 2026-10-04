@@ -1,0 +1,213 @@
+<main class="page">
+  <a class="back-link" routerLink="/orders"
+    ><app-icon name="arrow-left" [size]="16" /> All orders</a
+  >
+
+  @if (order(); as order) {
+    <header class="page-header">
+      <div>
+        <div class="cluster">
+          <h1>
+            Order <span class="mono">{{ shortId() }}</span>
+          </h1>
+          <app-status-badge [status]="order.status" />
+        </div>
+        <p class="lead">
+          {{ order.customerEmail }} · placed {{ order.createdAt | date: 'MMM d, y, HH:mm:ss' }}
+        </p>
+      </div>
+    </header>
+
+    <div class="stack">
+      @if (order.cancellationReason) {
+        <p class="callout" data-tone="danger">
+          <app-icon name="alert" [size]="16" />
+          <span><strong>Cancelled:</strong> {{ order.cancellationReason }}</span>
+        </p>
+      }
+      @if (order.paymentFailure) {
+        <p class="callout" data-tone="danger">
+          <app-icon name="alert" [size]="16" />
+          <span><strong>Payment failed:</strong> {{ order.paymentFailure }}</span>
+        </p>
+      }
+
+      <section class="card">
+        <app-order-progress
+          [status]="order.status"
+          [paid]="paid()"
+          [shipped]="!!shipment()?.shippedAt"
+        />
+      </section>
+
+      <div class="summary-grid">
+        <app-panel heading="Items" icon="package">
+          <ul class="lines">
+            @for (line of order.lines; track line.productId) {
+              <li>
+                <span class="line-name">
+                  {{ line.quantity }} × {{ line.productName }}
+                  <span class="muted mono small">{{ line.sku }}</span>
+                </span>
+                <span class="amount">{{ line.lineTotal | currency: order.currency }}</span>
+              </li>
+            }
+          </ul>
+          <div class="split total">
+            <span>Total</span>
+            <span class="amount">{{ order.total | currency: order.currency }}</span>
+          </div>
+        </app-panel>
+
+        <app-panel heading="Payment" icon="card">
+          @if (payment(); as payment) {
+            <dl class="facts">
+              @if (payment.status === 'SUCCEEDED') {
+                <div>
+                  <dt>Paid</dt>
+                  <dd class="amount">{{ payment.amount | currency: payment.currency }}</dd>
+                </div>
+                <div>
+                  <dt>Refunded</dt>
+                  <dd class="amount">{{ payment.refundedAmount | currency: payment.currency }}</dd>
+                </div>
+              } @else {
+                <div>
+                  <dt>Not charged</dt>
+                  <dd class="amount">{{ payment.amount | currency: payment.currency }}</dd>
+                </div>
+              }
+              <div>
+                <dt>Processor</dt>
+                <dd>{{ payment.provider }}</dd>
+              </div>
+              <div>
+                <dt>Reference</dt>
+                <dd class="mono small">{{ payment.providerReference }}</dd>
+              </div>
+            </dl>
+            @if (payment.failureMessage) {
+              <p class="callout" data-tone="danger">{{ payment.failureMessage }}</p>
+            }
+            @for (refund of openRefunds(); track refund.id) {
+              <div class="split refund-line">
+                <span>Refund of {{ refund.amount | currency: payment.currency }}</span>
+                <app-status-badge
+                  [status]="refund.status"
+                  [label]="refund.status === 'FAILED' ? 'Failed, not returned' : undefined"
+                />
+              </div>
+            }
+          } @else if (order.status === 'PAYMENT_PENDING') {
+            <app-empty-state title="Waiting for the card processor" icon="clock" />
+          } @else {
+            <app-empty-state title="No payment" icon="card" />
+          }
+
+          @if (refundRequests().length) {
+            <h3 class="subheading">Refund requests</h3>
+            @for (refund of refundRequests(); track refund.id) {
+              <div class="item">
+                <div class="split">
+                  <strong class="amount">{{ refund.amount | currency: refund.currency }}</strong>
+                  <app-status-badge [status]="refund.status" />
+                </div>
+                <p class="small">{{ refund.reason }}</p>
+                <p class="muted small">Requested by {{ refund.requestedBy | actorName }}</p>
+                @if (refund.decidedBy) {
+                  <p class="small">
+                    Decided by {{ refund.decidedBy }}
+                    @if (refund.decisionNote) {
+                      : {{ refund.decisionNote }}
+                    }
+                  </p>
+                }
+                @if (refund.failure) {
+                  <p class="callout" data-tone="danger">{{ refund.failure }}</p>
+                }
+                <p class="muted mono small">Key {{ refund.idempotencyKey }}</p>
+              </div>
+            }
+          }
+        </app-panel>
+
+        <app-panel heading="Shipment" icon="truck">
+          @if (shipment(); as shipment) {
+            <dl class="facts">
+              <div>
+                <dt>Status</dt>
+                <dd><app-status-badge [status]="shipment.status" /></dd>
+              </div>
+              <div>
+                <dt>Tracking</dt>
+                <dd class="mono small">{{ shipment.trackingNumber }}</dd>
+              </div>
+              @if (shipment.shippedAt) {
+                <div>
+                  <dt>Shipped</dt>
+                  <dd>{{ shipment.shippedAt | date: 'MMM d, HH:mm' }}</dd>
+                </div>
+              }
+              @if (shipment.deliveredAt) {
+                <div>
+                  <dt>Delivered</dt>
+                  <dd>{{ shipment.deliveredAt | date: 'MMM d, HH:mm' }}</dd>
+                </div>
+              } @else {
+                <div>
+                  <dt>Expected</dt>
+                  <dd>{{ shipment.estimatedDelivery | date: 'MMM d' }}</dd>
+                </div>
+              }
+            </dl>
+            @if (shipment.deliveryProblem) {
+              <p class="callout" data-tone="danger">{{ shipment.deliveryProblem }}</p>
+            }
+          } @else {
+            <app-empty-state title="Not shipped yet" icon="truck" />
+          }
+        </app-panel>
+      </div>
+
+      <div class="detail-grid">
+        <app-panel
+          heading="Timeline"
+          icon="activity"
+          description="Every step by the services, the agents and people, with the reason and a link to its trace."
+        >
+          <app-audit-timeline [events]="timeline()" />
+        </app-panel>
+
+        <div class="stack">
+          <app-panel heading="Cases" icon="lifebuoy">
+            @for (supportCase of cases(); track supportCase.id) {
+              <app-case-card [supportCase]="supportCase" [showOrder]="false" />
+            } @empty {
+              <app-empty-state title="No cases" icon="check" />
+            }
+          </app-panel>
+
+          <app-panel heading="Messages to the customer" icon="mail">
+            @for (notification of notifications(); track notification.id) {
+              <div class="item">
+                <p>{{ notification.message }}</p>
+                <p class="muted small">
+                  {{ notification.sentBy | actorName }} ·
+                  {{ notification.createdAt | date: 'MMM d, HH:mm:ss' }}
+                </p>
+              </div>
+            } @empty {
+              <app-empty-state title="No messages" icon="mail" />
+            }
+          </app-panel>
+        </div>
+      </div>
+    </div>
+  } @else if (notFound()) {
+    <app-empty-state title="Order not found" icon="alert">
+      There is no order {{ shortId() }}. It may have been mistyped.
+    </app-empty-state>
+  } @else {
+    <p class="muted loading">Loading the order…</p>
+  }
+</main>

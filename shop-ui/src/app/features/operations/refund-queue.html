@@ -1,0 +1,88 @@
+<app-panel
+  heading="Waiting for approval"
+  icon="shield"
+  description="Agents refund up to the approval limit on their own. Anything above waits here for a person."
+>
+  @for (refund of store.pendingRefunds(); track refund.id) {
+    <article class="item">
+      <div class="split">
+        <strong class="amount headline">{{ refund.amount | currency: refund.currency }}</strong>
+        <app-order-link [orderId]="refund.orderId" />
+      </div>
+      <p>{{ refund.reason }}</p>
+      <p class="muted small">
+        Requested by {{ refund.requestedBy | actorName }} ·
+        {{ refund.createdAt | date: 'MMM d, HH:mm' }}
+      </p>
+      <label class="field">
+        <span>Note</span>
+        <input
+          class="input"
+          placeholder="Optional, kept with your decision"
+          [value]="noteFor(refund.id)"
+          (input)="setNote(refund.id, $any($event.target).value)"
+        />
+      </label>
+      <div class="actions">
+        <button
+          type="button"
+          class="button primary"
+          [disabled]="store.isBusy(refund.id)"
+          (click)="decide(refund, 'approve')"
+        >
+          <app-icon name="check" [size]="16" /> Approve
+        </button>
+        <button
+          type="button"
+          class="button danger"
+          [disabled]="store.isBusy(refund.id)"
+          (click)="decide(refund, 'reject')"
+        >
+          <app-icon name="x" [size]="16" /> Reject
+        </button>
+      </div>
+      @if (store.refusalFor(refund.id); as refusal) {
+        <p class="callout" data-tone="danger">{{ refusal }}</p>
+      }
+    </article>
+  } @empty {
+    <app-empty-state title="Nothing waiting for approval" />
+  }
+</app-panel>
+
+<app-panel
+  heading="Failed refunds"
+  icon="refund"
+  description="Refunds that did not go through. A retry uses the same idempotency key, so the customer is paid at most once."
+>
+  @for (refund of store.failedRefunds(); track refund.id) {
+    <article class="item">
+      <div class="split">
+        <strong class="amount headline">{{ refund.amount | currency: refund.currency }}</strong>
+        <app-order-link [orderId]="refund.orderId" />
+      </div>
+      <p class="muted small">
+        Requested by {{ refund.requestedBy | actorName }} ·
+        {{ refund.createdAt | date: 'MMM d, HH:mm' }}
+      </p>
+      @if (refund.failure) {
+        <p class="callout" data-tone="danger">{{ refund.failure }}</p>
+      }
+      <div class="actions">
+        <button
+          type="button"
+          class="button primary"
+          [disabled]="store.isBusy(refund.id)"
+          (click)="decide(refund, 'retry')"
+        >
+          <app-icon name="refund" [size]="16" /> Retry refund
+        </button>
+      </div>
+      @if (store.refusalFor(refund.id); as refusal) {
+        <p class="callout" data-tone="danger">{{ refusal }}</p>
+      }
+    </article>
+  } @empty {
+    <app-empty-state title="No failed refunds" />
+  }
+</app-panel>

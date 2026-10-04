@@ -1,0 +1,111 @@
+.operator {
+  min-width: 240px;
+}
+
+.key-figures {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.key-figure {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  color: var(--text);
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: var(--brand);
+    text-decoration: none;
+  }
+
+  &.urgent .value {
+    color: var(--warning);
+  }
+}
+
+.value {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  margin-bottom: var(--space-5);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+
+  a {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: -1px;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    white-space: nowrap;
+
+    &:hover {
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    &.active {
+      border-bottom-color: var(--brand);
+      color: var(--brand);
+    }
+  }
+}
+
+.count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--text-xs);
+  line-height: 20px;
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .key-figures {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* On phones the tabs wrap as pills, so none is hidden off screen. */
+@media (max-width: 640px) {
+  .operator {
+    width: 100%;
+  }
+
+  .tabs {
+    gap: var(--space-2);
+    border-bottom: none;
+
+    a {
+      margin: 0;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+
+      &.active {
+        border-color: var(--brand);
+        background: var(--brand-soft);
+      }
+    }
+  }
+}

@@ -1,0 +1,76 @@
+<div class="proposal">
+  <div class="split proposal-head">
+    <span class="title"><app-icon name="receipt" [size]="16" /> Proposed order</span>
+    <app-status-badge [status]="proposal().status" />
+  </div>
+
+  <ul class="lines">
+    @for (line of proposal().lines; track line.productId) {
+      <li>
+        <span class="line-name">{{ line.quantity }} × {{ line.name }}</span>
+        <span class="amount">{{
+          line.unitPrice * line.quantity | currency: proposal().currency
+        }}</span>
+      </li>
+    }
+  </ul>
+  <div class="split total">
+    <span>Total</span>
+    <span class="amount">{{ proposal().total | currency: proposal().currency }}</span>
+  </div>
+
+  @switch (proposal().status) {
+    @case ('PROPOSED') {
+      <label class="field">
+        <span>Pay with</span>
+        <select
+          class="input"
+          [value]="paymentMethod()"
+          (change)="paymentMethod.set($any($event.target).value)"
+        >
+          @for (card of testCards; track card.paymentMethod) {
+            <option [value]="card.paymentMethod">{{ card.label }}</option>
+          }
+        </select>
+      </label>
+      <button
+        type="button"
+        class="button primary block"
+        [disabled]="paying()"
+        (click)="pay.emit(paymentMethod())"
+      >
+        <app-icon name="card" [size]="16" />
+        {{ paying() ? 'Paying…' : 'Confirm and pay' }}
+      </button>
+      <p class="note">
+        <app-icon name="shield" [size]="14" /> Only you can place this order. The assistant can't
+        pay for you.
+      </p>
+    }
+    @case ('CONFIRMING') {
+      <p class="callout">
+        <app-icon name="clock" [size]="16" />
+        @if (proposal().orderId) {
+          <span
+            >Waiting for the payment to be confirmed.
+            <a [routerLink]="['/orders', proposal().orderId]">View the order</a></span
+          >
+        } @else {
+          <span>Placing the order…</span>
+        }
+      </p>
+    }
+    @case ('CONFIRMED') {
+      <p class="callout" data-tone="success">
+        <app-icon name="check" [size]="16" />
+        <span>Paid. <a [routerLink]="['/orders', proposal().orderId]">View the order</a></span>
+      </p>
+    }
+    @case ('FAILED') {
+      <p class="callout" data-tone="danger">
+        <app-icon name="alert" [size]="16" />
+        <span>{{ proposal().failure }}</span>
+      </p>
+    }
+  }
+</div>
