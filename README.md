@@ -371,16 +371,20 @@ authentication, permissions, customer scoping, the approval limit, idempotent re
 
 [load-tests/shop.js](load-tests/shop.js) drives the hot paths through nginx with [k6](https://k6.io): browsing the
 catalog (200 requests/s) and checkout (50 orders/s: reserve stock, charge, announce through the outbox), each order
-read back, for two minutes. It fails if more than 1% of requests fail, more than 1% of its checks fail (an order not
-confirmed, for example), or the 95th percentile exceeds 300 ms for listing products or 1 s for placing an order. Run
-it against the demo with simulated payments:
+read back, for two minutes. It fails if more than 1% of requests fail, more than 1% of its checks or of its checkouts
+fail (an order not confirmed, for example), it could not start a planned iteration because the services fell behind,
+or the 95th percentile exceeds 300 ms for listing products or 1 s for placing an order. Run it against the
+demo with simulated payments:
 
 ```bash
 docker run --rm -i --network host -e INTERNAL_API_TOKEN=dev-internal-api-token grafana/k6 run - < load-tests/shop.js
 ```
 
+Leave `AGENTIC_COMMERCE_STRIPE_SECRET_KEY` unset: with a key, every order is charged at Stripe.
+
 `BROWSE_RATE`, `CHECKOUT_RATE` and `DURATION` change the load. It adds stock for two products first and places
-orders as the shop's MCP server does, with the services' token. Run it once to warm the JVMs up before measuring.
+orders as the shop's MCP server does, with the services' token. Run it once to warm the JVMs up before measuring:
+a service restarted just before the run takes the full load cold, runs out of database connections and fails it.
 
 On one 4-vCPU machine running the whole demo (twelve containers) and k6 together, the default load (about 350
 requests/s, 48 checkouts/s) passed with no errors, a 95th percentile of 96 ms for browsing and 430 ms for checkout.
