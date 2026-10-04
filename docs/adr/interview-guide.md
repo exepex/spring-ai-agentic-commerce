@@ -1,7 +1,8 @@
 # Trailhead design defence
 
 Questions a senior interviewer is likely to ask about this system, with answers backed by the code. Each answer names
-the file to point at.
+the file to point at. The reasoning behind each answer, the options weighed and the open limitations are in the
+[decision records](README.md).
 
 - [Is it a good interview example?](#is-it-a-good-interview-example)
 - [Your two-minute pitch](#your-two-minute-pitch)
@@ -472,15 +473,15 @@ Each one comes with what you'd change. Stating limits with a fix reads as senior
 
 | Limitation | What it means | What you'd change |
 |---|---|---|
-| Static shared secrets for agents and services | Bearer tokens come from environment variables, last indefinitely and are shared by agent-service and the MCP servers. | OAuth client credentials or workload identity (mTLS, SPIFFE) issued by the organisation's identity provider, with short-lived, narrowly scoped tokens. |
-| Governance as a library, not a platform | Every MCP server runs the same checks from `mcp-server-support`. That's consistent, but a policy change means upgrading every server. | An MCP gateway as the single entry point, with policy as code (OPA or Cedar) evaluated there. Domain servers keep only the checks that need domain data, such as order ownership. |
-| The commerce MCP server does too much | It serves the shop's tools and also holds the governance API, cases, kill switches and the audit trail. The ServiceNow server depends on it. | Split governance into its own service, or move it into the gateway, so tool servers are interchangeable. |
-| The audit trail can be edited | It is a Postgres table, so an administrator could change it. | Append-only storage with hash chaining, shipped to the organisation's SIEM. |
-| Data sent to the model is not filtered | Tool results go to a cloud model as they are, including emails and order details. | An LLM gateway that redacts personal data, routes by data class, enforces budgets and falls back to another region or model. |
-| Incident runs are leased by timeouts | The 15-minute run window and 20-minute Kafka redelivery stop two runs overlapping, but the run's progress lives in the incident and the audit trail, not in a workflow state. | A durable workflow engine (Temporal) for incident handling. Each tool step becomes an activity with retries, and approvals become signals. |
-| Hot-product contention | The stock row lock protects against overselling but limits checkout for a single product to Postgres's commit rate. | Stock buckets, or reservation in Redis with a durable record behind it, for flash sales. |
-| No login and no chat rate limits | The demo picks the customer and operator from a list. Chat has no per-customer token or rate limit. | OIDC login, operator roles for approvals and kill switches, and per-customer rate and token budgets at the gateway. |
-| Evals are manual | Ten live scenarios, run by hand, with no trend tracking and no adversarial suite. | Run them on every definition change and nightly, record pass rates, add a red-team set of prompt injections, and use shadow mode when changing a prompt or model. |
+| Static shared secrets for agents and services ([ADR-0023](0023-workload-identity-for-agents.md)) | Bearer tokens come from environment variables, last indefinitely and are shared by agent-service and the MCP servers. | OAuth client credentials or workload identity (mTLS, SPIFFE) issued by the organisation's identity provider, with short-lived, narrowly scoped tokens. |
+| Governance as a library, not a platform ([ADR-0022](0022-mcp-gateway-with-policy-as-code.md)) | Every MCP server runs the same checks from `mcp-server-support`. That's consistent, but a policy change means upgrading every server. | An MCP gateway as the single entry point, with policy as code (OPA or Cedar) evaluated there. Domain servers keep only the checks that need domain data, such as order ownership. |
+| The commerce MCP server does too much ([ADR-0027](0027-separate-governance-from-the-commerce-tools.md)) | It serves the shop's tools and also holds the governance API, cases, kill switches and the audit trail. The ServiceNow server depends on it. | Split governance into its own service, or move it into the gateway, so tool servers are interchangeable. |
+| The audit trail can be edited ([ADR-0026](0026-tamper-evident-audit-trail.md)) | It is a Postgres table, so an administrator could change it. | Append-only storage with hash chaining, shipped to the organisation's SIEM. |
+| Data sent to the model is not filtered ([ADR-0024](0024-llm-gateway-for-data-residency.md)) | Tool results go to a cloud model as they are, including emails and order details. | An LLM gateway that redacts personal data, routes by data class, enforces budgets and falls back to another region or model. |
+| Incident runs are leased by timeouts ([ADR-0025](0025-durable-workflows-for-incident-runs.md)) | The 15-minute run window and 20-minute Kafka redelivery stop two runs overlapping, but the run's progress lives in the incident and the audit trail, not in a workflow state. | A durable workflow engine (Temporal) for incident handling. Each tool step becomes an activity with retries, and approvals become signals. |
+| Hot-product contention ([ADR-0030](0030-hot-product-stock-contention.md)) | The stock row lock protects against overselling but limits checkout for a single product to Postgres's commit rate. | Stock buckets, or reservation in Redis with a durable record behind it, for flash sales. |
+| No login and no chat rate limits ([ADR-0029](0029-per-customer-chat-limits.md), [ADR-0031](0031-login-and-operator-roles.md)) | The demo picks the customer and operator from a list. Chat has no per-customer token or rate limit. | OIDC login, operator roles for approvals and kill switches, and per-customer rate and token budgets at the gateway. |
+| Evals are manual ([ADR-0028](0028-evals-in-ci-and-a-prompt-injection-suite.md)) | Ten live scenarios, run by hand, with no trend tracking and no adversarial suite. | Run them on every definition change and nightly, record pass rates, add a red-team set of prompt injections, and use shadow mode when changing a prompt or model. |
 
 ## How you'd redesign it for a large organisation
 
