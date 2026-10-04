@@ -1,6 +1,7 @@
 package io.github.exepex.commerce.servicenow;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.anyRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
@@ -8,18 +9,51 @@ import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.patchRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.jayway.jsonpath.JsonPath;
 import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * The poller claims new incidents in the agent's group and announces them, hands them to the default team while
  * the agent is switched off, and hands over claims the agent did not finish.
  */
 class IncidentClaimsIntegrationTest extends ServiceNowMcpServerIntegrationTestSupport {
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    @Test
+    void whileAnotherInstancePollsThisOneLeavesServiceNowToIt() {
+        stubNewIncidents("""
+                [{"sys_id": {"value": "sys-1"}, "number": {"value": "INC0010001"}, "state": {"value": "1"},
+                  "assignment_group": {"display_value": "Online Shop Agent"}, "assigned_to": {"value": ""}}]""");
+        stubClaimed("[]");
+        stubIncident("", "1");
+        stubServiceDeskIncidents(
+                "[" + incidentRow("INC0010001", "sys-1", "1", "Online Shop Agent", "", "", Instant.now()) + "]");
+        jdbc.update("""
+                insert into servicenow.shedlock (name, lock_until, locked_at, locked_by)
+                values ('incident-poll', now() + interval '1 hour', now(), 'another-instance')
+                on conflict (name) do update set lock_until = excluded.lock_until, locked_by = excluded.locked_by""");
+        try {
+            poller.poll();
+
+            assertThat(SERVICES.findAll(anyRequestedFor(urlPathMatching("/api/now/.*")))).isEmpty();
+        } finally {
+            jdbc.update("update servicenow.shedlock set lock_until = now() where name = 'incident-poll'");
+        }
+
+        poller.poll();
+
+        SERVICES.verify(patchRequestedFor(urlPathEqualTo("/api/now/table/incident/sys-1"))
+                .withRequestBody(matchingJsonPath("$.assigned_to", equalTo(AGENT_USER))));
+    }
 
     @Test
     void claimsANewIncidentOnceAndAnnouncesIt() {

@@ -7,6 +7,16 @@ spring:
   threads:
     virtual:
       enabled: true
+  # Only the poller's lock lives here, so it runs on one instance at a time: a few connections are enough.
+  datasource:
+    url: jdbc:postgresql://localhost:5432/commerce
+    username: commerce
+    password: ${AGENTIC_COMMERCE_DATABASE_PASSWORD:commerce}
+    hikari:
+      maximum-pool-size: 4
+  flyway:
+    default-schema: servicenow
+    schemas: servicenow
   kafka:
     bootstrap-servers: localhost:9092
     template:

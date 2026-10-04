@@ -149,6 +149,9 @@ services:
     <<: *service
     build: { context: ., dockerfile: docker/service.Dockerfile, args: { MODULE: servicenow-mcp-server } }
     environment:
+      # Only the poller's lock, so it runs on one instance at a time.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/commerce
+      AGENTIC_COMMERCE_DATABASE_PASSWORD: ${AGENTIC_COMMERCE_DATABASE_PASSWORD:-commerce}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       SPRING_HTTP_SERVICECLIENT_GOVERNANCE_BASEURL: http://commerce-mcp-server:8085

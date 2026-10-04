@@ -310,11 +310,10 @@ nginx answers 404 for `/svc/<service>/actuator`, so probes and metrics are not r
 
 **Several instances.** The services keep no state of their own outside Postgres and Kafka, with one exception: the
 payment simulator's switch (payment-service, demo only). A chat turn can reach any agent-service instance, since the
-conversations are in Postgres. Each topic has six partitions and each listener up to three consumers per instance; the outbox relay runs on one
-instance at a time per service, so an order's events keep their order. The reconcilers (stalled checkouts, refund
-checks, unfinished confirmations) also run on one instance at a time, through a ShedLock table in each service's
-schema, and take the oldest work first in bounded batches. The ServiceNow poller is the one job that still assumes a
-single instance of servicenow-mcp-server.
+conversations are in Postgres. Each topic has six partitions and each listener up to three consumers per instance; the
+outbox relay runs on one instance at a time per service, so an order's events keep their order. The scheduled jobs
+(stalled checkouts, refund checks, unfinished confirmations, the ServiceNow poller) run on one instance at a time,
+through a ShedLock table in each service's schema, and take the oldest work first in bounded batches.
 
 ## Develop
 

@@ -12,6 +12,7 @@ import io.github.exepex.commerce.servicenow.constants.AuditValues;
 import io.github.exepex.commerce.servicenow.constants.ConfigKeys;
 import io.github.exepex.commerce.servicenow.constants.IncidentStates;
 import io.github.exepex.commerce.servicenow.constants.IncidentTexts;
+import io.github.exepex.commerce.servicenow.constants.JobLocks;
 import io.github.exepex.commerce.servicenow.constants.ServiceNowFields;
 import io.github.exepex.commerce.servicenow.constants.ToolNames;
 import io.github.exepex.commerce.servicenow.dto.Team;
@@ -28,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -78,7 +80,12 @@ public class IncidentPoller {
     private final AgentRegistry agents;
     private final Clock clock;
 
+    /**
+     * One instance at a time: two pollers at once could open two incidents for one case, or claim and publish one
+     * incident twice, since ServiceNow's Table API has no conditional update.
+     */
     @Scheduled(fixedDelayString = ConfigKeys.POLL_INTERVAL, initialDelayString = ConfigKeys.POLL_INTERVAL)
+    @SchedulerLock(name = JobLocks.INCIDENT_POLL)
     public void poll() {
         if (!properties.isConfigured()) {
             return;
