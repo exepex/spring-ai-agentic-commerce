@@ -2,6 +2,7 @@ package io.github.exepex.commerce.payment;
 
 import com.stripe.StripeClient;
 import com.stripe.exception.CardException;
+import com.stripe.exception.InvalidRequestException;
 import com.stripe.exception.StripeException;
 import com.stripe.param.PaymentIntentCreateParams;
 import com.stripe.param.RefundCreateParams;
@@ -46,11 +47,24 @@ final class StripePaymentGateway implements PaymentGateway {
             return PaymentValues.STRIPE_SUCCEEDED.equals(intent.getStatus())
                     ? ChargeResult.succeeded(intent.getId())
                     : ChargeResult.declined(intent.getId(), ErrorMessages.PAYMENT_ENDED_IN_STATUS.formatted(intent.getStatus()));
-        } catch (CardException declined) {
-            return ChargeResult.declined(StripeRequests.declinedPaymentIntent(declined), declined.getUserMessage());
         } catch (StripeException failure) {
-            throw new PaymentProviderUnavailableException(failure);
+            return chargeFailure(failure);
         }
+    }
+
+    /**
+     * A declined card, or a request Stripe refuses outright (such as one naming a payment method that does not exist),
+     * declines the payment: asking again with the same idempotency key gets the same answer, so the order must fail
+     * rather than wait for it. Any other failure leaves the outcome unknown, and the payment is asked for again.
+     */
+    static ChargeResult chargeFailure(StripeException failure) {
+        if (failure instanceof CardException declined) {
+            return ChargeResult.declined(StripeRequests.declinedPaymentIntent(declined), declined.getUserMessage());
+        }
+        if (failure instanceof InvalidRequestException) {
+            return ChargeResult.declined(null, ErrorMessages.PAYMENT_REQUEST_REJECTED);
+        }
+        throw new PaymentProviderUnavailableException(failure);
     }
 
     @Override

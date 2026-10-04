@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 
@@ -193,6 +194,28 @@ class CheckoutRecoveryIntegrationTest extends OrderServiceTestSupport {
         reconciler.reconcile();
 
         assertThat(backlog).noneMatch(stockReleases::existsById);
+    }
+
+    @Test
+    void theOldestStockReleasesAreFoundThroughAnIndex() {
+        // An empty table is cheapest to scan; the planner shows which index it can use once scanning is ruled out.
+        String plan = jdbc.execute((ConnectionCallback<String>) connection -> {
+            try (var statement = connection.createStatement()) {
+                statement.execute("set enable_seqscan = off");
+                try (var rows = statement.executeQuery(
+                        "explain select * from orders.stock_release order by requested_at limit 50")) {
+                    var lines = new StringBuilder();
+                    while (rows.next()) {
+                        lines.append(rows.getString(1)).append('\n');
+                    }
+                    return lines.toString();
+                } finally {
+                    statement.execute("reset enable_seqscan");
+                }
+            }
+        });
+
+        assertThat(plan).contains("stock_release_requested");
     }
 
     @Test
