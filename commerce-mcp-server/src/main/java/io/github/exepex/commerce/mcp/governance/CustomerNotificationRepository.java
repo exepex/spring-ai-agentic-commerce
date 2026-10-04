@@ -12,4 +12,6 @@ interface CustomerNotificationRepository extends JpaRepository<CustomerNotificat
     Optional<CustomerNotification> findByIdempotencyKey(String idempotencyKey);
 
     List<CustomerNotification> findTop100ByOrderByCreatedAtDesc();
+
+    List<CustomerNotification> findTop100ByCustomerEmailOrderByCreatedAtDesc(String customerEmail);
 }

@@ -30,9 +30,10 @@ export class Shop {
 
   protected readonly products = signal<Product[]>([]);
   protected readonly orders = signal<Order[]>([]);
-  private readonly allNotifications = signal<CustomerNotification[]>([]);
+  private readonly notifications = signal<CustomerNotification[]>([]);
+  // The answer may still be for the customer picked before; show only the current customer's messages.
   protected readonly inbox = computed(() =>
-    this.allNotifications().filter((notification) => notification.customerEmail === this.session.customer()),
+    this.notifications().filter((notification) => notification.customerEmail === this.session.customer()),
   );
 
   protected readonly messages = signal<ChatMessage[]>([]);
@@ -138,7 +139,9 @@ export class Shop {
   private refresh(): void {
     this.api.products().subscribe((products) => this.products.set(products));
     this.api.orders(this.session.customer()).subscribe((orders) => this.orders.set(orders));
-    this.api.notifications().subscribe((notifications) => this.allNotifications.set(notifications));
+    this.api
+      .notificationsFor(this.session.customer())
+      .subscribe((notifications) => this.notifications.set(notifications));
   }
 
   private scrollToEnd(): void {

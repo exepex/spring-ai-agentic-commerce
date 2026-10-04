@@ -303,8 +303,9 @@ public class CaseService {
         AdvisoryLocks.lock(jdbc, CaseWording.PROBLEM_LOCK_KEY.formatted(orderId, type), 2);
     }
 
+    /** The oldest unresolved cases, for the operations console: a page bounded however many are open. */
     public List<SupportCase> unresolved() {
-        return cases.findByStatusInOrderByCreatedAt(UNRESOLVED);
+        return cases.findTop500ByStatusInOrderByCreatedAt(UNRESOLVED);
     }
 
     public List<SupportCase> recent() {

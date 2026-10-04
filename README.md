@@ -365,6 +365,20 @@ Integration tests run each service against real Postgres and Kafka (Testcontaine
 tested over real HTTP with WireMock. The MCP server is tested through a real MCP client, as the agents use it:
 authentication, permissions, customer scoping, the approval limit, idempotent retries and the audit trail.
 
+### Load test
+
+[load-tests/shop.js](load-tests/shop.js) drives the hot paths through nginx with [k6](https://k6.io): browsing the
+catalog (200 requests/s) and checkout (50 orders/s: reserve stock, charge, announce through the outbox), each order
+read back, for two minutes. It fails if more than 1% of requests fail, or the 95th percentile exceeds 300 ms for
+browsing or 1 s for checkout. Run it against the demo with simulated payments:
+
+```bash
+docker run --rm -i --network host -e INTERNAL_API_TOKEN=dev-internal-api-token grafana/k6 run - < load-tests/shop.js
+```
+
+`BROWSE_RATE`, `CHECKOUT_RATE` and `DURATION` change the load. It adds stock for two products first and places
+orders as the shop's MCP server does, with the services' token.
+
 ### Scenario suite
 
 The workflows are checked end to end by `agent-evals`: ten scenarios run against the whole running demo with the real

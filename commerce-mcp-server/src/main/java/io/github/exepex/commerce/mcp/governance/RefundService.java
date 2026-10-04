@@ -199,8 +199,9 @@ public class RefundService {
         });
     }
 
+    /** The oldest requests with the status, for the operations console: a page bounded however many there are. */
     public List<RefundRequest> withStatus(RefundRequest.Status status) {
-        return requests.findByStatusOrderByCreatedAt(status);
+        return requests.findTop500ByStatusOrderByCreatedAt(status);
     }
 
     public List<RefundRequest> recent() {
