@@ -5,4 +5,5 @@ RUN useradd --system --uid 1001 commerce
 WORKDIR /app
 COPY ${MODULE}/target/${MODULE}-0.1.0-SNAPSHOT.jar app.jar
 USER commerce
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "/app/app.jar"]
+# A JVM that ran out of memory exits, so the container is restarted instead of limping on.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-XX:+ExitOnOutOfMemoryError", "-jar", "/app/app.jar"]

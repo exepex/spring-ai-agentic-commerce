@@ -18,6 +18,7 @@ lost parcel, as a ServiceNow incident, and hands it to the right team when it ca
 - [Configuration](#configuration)
 - [ServiceNow incidents](#servicenow-incidents)
 - [Stop, restart and reset](#stop-restart-and-reset)
+- [Operate](#operate): probes, metrics, scaling, dead letters
 - [Develop](#develop): run services from your IDE, project layout
 - [Tests](#tests) and the [scenario suite](#scenario-suite)
 - [Troubleshooting](#troubleshooting)
@@ -287,6 +288,27 @@ docker compose --profile simulator --profile slack down -v   # remove the contai
 
 Name the profiles you started with, so their services are included. After `down -v` the next start creates the
 databases again with the seeded products and stock. To rebuild after a code change, run `./start-demo.sh` again.
+
+## Operate
+
+Every Java service gets the same operational behaviour from the shared `commerce-platform` module
+(`commerce-platform.properties`); a service's own `application.yml` or the environment can override any of it.
+
+| What | Where |
+|---|---|
+| Liveness and readiness probes | `/actuator/health/liveness`, `/actuator/health/readiness` on each service's port. Docker Compose waits for readiness. Readiness leaves out the database and Kafka on purpose, so a brief outage does not take every instance out of the load balancer at once; `/actuator/health` shows them. |
+| Metrics | `/actuator/prometheus`. Besides the JVM, HTTP, Kafka and connection pool metrics, `commerce_outbox_waiting` and `commerce_outbox_oldest_age_seconds` show events not yet on Kafka; alert when the age grows. |
+| Graceful shutdown | A stopping service finishes the requests it has (30 s; agent-service 3 min for a chat turn), and Compose waits that long before it kills a container. The outbox relay stops last. |
+| Database connections | Up to 20 per instance (`spring.datasource.hikari.maximum-pool-size`); a request waits at most 5 s for one. The compose Postgres allows 300. |
+| Failed events | Retried 4 times with growing pauses, then parked on `<topic>.DLT` with the original bytes and the failure in the headers. |
+| Out of memory | The JVM exits and the container is restarted. |
+
+nginx answers 404 for `/svc/<service>/actuator`, so probes and metrics are not reachable from the browser.
+
+**Several instances.** The services keep no state of their own outside Postgres and Kafka, with two exceptions: the
+shopping assistant's recent chat history (agent-service) and the payment simulator's switch (payment-service, demo
+only). Each topic has six partitions and each listener up to three consumers per instance; the outbox relay runs on one
+instance at a time per service, so an order's events keep their order.
 
 ## Develop
 
