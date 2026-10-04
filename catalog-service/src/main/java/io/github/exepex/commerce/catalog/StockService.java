@@ -108,7 +108,14 @@ public class StockService {
         return product;
     }
 
+    /**
+     * The newest orders whose units the stock no longer covers. Without a shortfall there are none, and the product's
+     * reservations are not read at all: dispatching runs under the product's lock, so it must not grow with them.
+     */
     private List<UUID> newestOrdersCovering(Product product) {
+        if (product.shortfall() <= 0) {
+            return List.of();
+        }
         var affectedOrderIds = new ArrayList<UUID>();
         var unitsCovered = 0;
         for (var reservation : reservations.findByProductIdAndStatusOrderByCreatedAtDesc(

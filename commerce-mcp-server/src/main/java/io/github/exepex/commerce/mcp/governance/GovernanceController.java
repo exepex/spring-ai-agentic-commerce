@@ -90,8 +90,12 @@ class GovernanceController {
     }
 
     @GetMapping(ApiPaths.NOTIFICATIONS)
-    List<CustomerNotification> notifications(@RequestParam(required = false) UUID orderId) {
-        return orderId == null ? notifications.recent() : notifications.forOrder(orderId);
+    List<CustomerNotification> notifications(@RequestParam(required = false) UUID orderId,
+            @RequestParam(required = false) String customerEmail) {
+        if (orderId != null) {
+            return notifications.forOrder(orderId);
+        }
+        return customerEmail == null ? notifications.recent() : notifications.forCustomer(customerEmail);
     }
 
     @GetMapping(GovernancePaths.AGENT_SWITCHES)

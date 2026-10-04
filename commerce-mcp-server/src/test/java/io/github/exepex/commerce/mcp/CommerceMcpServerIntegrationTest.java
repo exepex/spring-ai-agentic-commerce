@@ -120,6 +120,20 @@ class CommerceMcpServerIntegrationTest extends McpServerTestSupport {
     }
 
     @Test
+    void theShopReadsEachCustomersOwnMessagesOnly() {
+        String ada = "ada-" + UUID.randomUUID() + "@example.com";
+        UUID adasOrder = stubOrder(ada, "39.50");
+        UUID someoneElses = stubOrder("grace-" + UUID.randomUUID() + "@example.com", "12.00");
+        call(incidentAgent, "notify_customer", Map.of("orderId", adasOrder.toString(), "message", "For Ada."));
+        call(incidentAgent, "notify_customer", Map.of("orderId", someoneElses.toString(), "message", "For Grace."));
+
+        String inbox = rest().get().uri("/api/notifications?customerEmail={email}", ada).retrieve().body(String.class);
+
+        assertThat((List<String>) JsonPath.read(inbox, "$[*].message")).containsExactly("For Ada.");
+        assertThat((List<String>) JsonPath.read(inbox, "$[*].customerEmail")).containsOnly(ada);
+    }
+
+    @Test
     void anOrderLookupSaysSoWhenThePaymentServiceIsDownInsteadOfShowingNoPayment() {
         UUID orderId = stubOrder("ada@example.com", "39.50");
         SERVICES.stubFor(get("/api/payments/" + orderId).willReturn(aResponse().withStatus(503)));

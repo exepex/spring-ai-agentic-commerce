@@ -199,6 +199,10 @@ public class RefundService {
         });
     }
 
+    /**
+     * Every request with the status, oldest first, for the operations console. Requests awaiting approval are open work,
+     * so none is left out.
+     */
     public List<RefundRequest> withStatus(RefundRequest.Status status) {
         return requests.findByStatusOrderByCreatedAt(status);
     }

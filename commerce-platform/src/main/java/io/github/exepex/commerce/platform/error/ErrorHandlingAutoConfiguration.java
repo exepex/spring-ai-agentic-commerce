@@ -2,10 +2,13 @@ package io.github.exepex.commerce.platform.error;
 
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.webmvc.autoconfigure.WebMvcAutoConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 /** Answers every service's failures the same way, wherever a service switches problem details on. */
@@ -18,5 +21,15 @@ public class ErrorHandlingAutoConfiguration {
     @ConditionalOnMissingBean(ResponseEntityExceptionHandler.class)
     ProblemDetailsExceptionHandler problemDetailsExceptionHandler() {
         return new ProblemDetailsExceptionHandler();
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(CannotCreateTransactionException.class)
+    static class Database {
+
+        @Bean
+        DatabaseUnavailableExceptionHandler databaseUnavailableExceptionHandler() {
+            return new DatabaseUnavailableExceptionHandler();
+        }
     }
 }

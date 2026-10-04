@@ -56,6 +56,11 @@ public class NotificationService {
         return notifications.findByOrderIdOrderByCreatedAt(orderId);
     }
 
+    /** A customer's most recent messages, so the shop shows each customer only their own. */
+    public List<CustomerNotification> forCustomer(String customerEmail) {
+        return notifications.findTop100ByCustomerEmailOrderByCreatedAtDesc(customerEmail);
+    }
+
     public List<CustomerNotification> recent() {
         return notifications.findTop100ByOrderByCreatedAtDesc();
     }

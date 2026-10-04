@@ -43,6 +43,9 @@ class CaseIndexesMigrationTest {
             assertThat(planOf(jdbc,
                     "select * from governance.customer_notification order by created_at desc limit 100"))
                     .contains("customer_notification_recent");
+            assertThat(planOf(jdbc, "select * from governance.customer_notification"
+                    + " where customer_email = 'ana@example.com' order by created_at desc limit 100"))
+                    .contains("customer_notification_customer");
             dataSource.destroy();
         }
     }

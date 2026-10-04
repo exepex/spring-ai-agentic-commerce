@@ -303,6 +303,10 @@ public class CaseService {
         AdvisoryLocks.lock(jdbc, CaseWording.PROBLEM_LOCK_KEY.formatted(orderId, type), 2);
     }
 
+    /**
+     * Every unresolved case, for the operations console. It is the open work, not history, so none is left out: a case
+     * nobody can see is a case nobody works.
+     */
     public List<SupportCase> unresolved() {
         return cases.findByStatusInOrderByCreatedAt(UNRESOLVED);
     }

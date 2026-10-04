@@ -268,6 +268,13 @@ export class Api {
     return this.http.post<Proposal>(`${GOVERNANCE}/order-proposals/${proposalId}/confirm`, { paymentMethod });
   }
 
+  /** One customer's most recent messages. */
+  notificationsFor(customerEmail: string): Observable<CustomerNotification[]> {
+    return this.http.get<CustomerNotification[]>(
+      `${GOVERNANCE}/notifications?customerEmail=${encodeURIComponent(customerEmail)}`,
+    );
+  }
+
   notifications(orderId?: string): Observable<CustomerNotification[]> {
     return this.http.get<CustomerNotification[]>(`${GOVERNANCE}/notifications${orderId ? `?orderId=${orderId}` : ''}`);
   }
