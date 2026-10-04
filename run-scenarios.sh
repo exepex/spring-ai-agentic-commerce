@@ -39,4 +39,13 @@ for path in catalog/api/products "orders/api/orders?customerEmail=nobody@example
   done
 done
 
-mvn -B -pl agent-evals -Pevals test "${servicenow[@]}"
+# The evals place orders the way the shop's MCP server does, with the services' token: the shell's, else .env's.
+token="${AGENTIC_COMMERCE_INTERNAL_API_TOKEN:-}"
+if [ -z "$token" ] && [ -f .env ]; then
+  token="$(sed -n 's/^AGENTIC_COMMERCE_INTERNAL_API_TOKEN=//p' .env | tail -n 1)"
+  if [[ ${#token} -ge 2 && ( "$token" == \'*\' || "$token" == \"*\" ) ]]; then
+    token="${token:1:${#token}-2}"
+  fi
+fi
+
+mvn -B -pl agent-evals -Pevals test "${servicenow[@]}" "-Devals.internalApiToken=${token:-dev-internal-api-token}"

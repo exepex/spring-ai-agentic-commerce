@@ -38,9 +38,17 @@ final class Demo {
             .baseUrl(System.getProperty("evals.baseUrl", "http://localhost:8080/svc"))
             .requestFactory(httpOneOneWithTimeouts())
             // Orders are set up the way the shop's MCP server places them, so the evals present the service token.
-            .defaultHeader(HttpHeaders.AUTHORIZATION,
-                    "Bearer " + System.getProperty("evals.internalApiToken", "dev-internal-api-token"))
+            .defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + internalApiToken())
             .build();
+
+    /** The services' token: {@code -Devals.internalApiToken}, else the same variable the services read, else theirs. */
+    private static String internalApiToken() {
+        var token = System.getProperty("evals.internalApiToken");
+        if (token == null || token.isBlank()) {
+            token = System.getenv("AGENTIC_COMMERCE_INTERNAL_API_TOKEN");
+        }
+        return token == null || token.isBlank() ? "dev-internal-api-token" : token;
+    }
 
     String placeOrder(String customerEmail, String productId) {
         return api.post().uri("/orders/api/orders")
