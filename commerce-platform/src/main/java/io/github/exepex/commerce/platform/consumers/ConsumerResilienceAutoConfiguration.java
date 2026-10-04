@@ -1,11 +1,14 @@
 package io.github.exepex.commerce.platform.consumers;
 
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.CommonErrorHandler;
@@ -23,6 +26,28 @@ import org.springframework.kafka.support.ExponentialBackOffWithMaxRetries;
 @ConditionalOnBean(KafkaTemplate.class)
 @EnableConfigurationProperties(ConsumerProperties.class)
 public class ConsumerResilienceAutoConfiguration {
+
+    static final String CONSUMER_THREAD_PREFIX = "kafka-consumer-";
+
+    /**
+     * Kafka consumers poll on platform threads even when the service handles requests on virtual threads: the Kafka
+     * client polls inside {@code synchronized} code, which on Java 21 holds a virtual thread's carrier for the whole
+     * poll. A dozen long-polling consumers would hold every carrier, and the service would stop answering requests.
+     */
+    @Bean
+    static BeanPostProcessor kafkaConsumersOnPlatformThreads() {
+        return new BeanPostProcessor() {
+
+            @Override
+            public Object postProcessAfterInitialization(Object bean, String beanName) {
+                if (bean instanceof ConcurrentKafkaListenerContainerFactory<?, ?> factory) {
+                    factory.getContainerProperties().setListenerTaskExecutor(
+                            new SimpleAsyncTaskExecutor(CONSUMER_THREAD_PREFIX));
+                }
+                return bean;
+            }
+        };
+    }
 
     @Bean
     @ConditionalOnMissingBean
