@@ -48,7 +48,7 @@ class RefundReconciler {
             try {
                 var latest = gateway.refundStatus(refund.getProviderReference());
                 if (latest != refund.getStatus()) {
-                    record(refund, latest);
+                    settle(refund, latest);
                 }
             } catch (RuntimeException failure) {
                 log.warn("Could not check refund {} with the card processor; it will be retried", refund.getId(), failure);
@@ -57,7 +57,7 @@ class RefundReconciler {
     }
 
     /** Under the payment's lock, so it cannot interleave with a new refund's refundable check. */
-    private void record(Refund refund, PaymentGateway.RefundStatus latest) {
+    private void settle(Refund refund, PaymentGateway.RefundStatus latest) {
         transaction.executeWithoutResult(status -> {
             var payment = payments.findByIdForUpdate(refund.getPaymentId()).orElseThrow();
             var current = refunds.findById(refund.getId()).orElseThrow();
