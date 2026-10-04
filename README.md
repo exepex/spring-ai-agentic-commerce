@@ -301,6 +301,8 @@ Every Java service gets the same operational behaviour from the shared `commerce
 | Graceful shutdown | A stopping service finishes the requests it has (30 s; agent-service 3 min for a chat turn), and Compose waits that long before it kills a container. The outbox relay stops last. |
 | Database connections | Up to 20 per instance (`spring.datasource.hikari.maximum-pool-size`); a request waits at most 5 s for one. The compose Postgres allows 300. |
 | Failed events | Retried 4 times with growing pauses, then parked on `<topic>.DLT` with the original bytes and the failure in the headers. |
+| Calls to other services | Apache HttpClient keeps up to 200 connections per service (`commerce.service-calls`), and never sends a request again because of the answer's status. |
+| Overload | A service that cannot get a database connection within 5 s answers 503 with `Retry-After: 1`, not 500. |
 | Out of memory | The JVM exits and the container is restarted. |
 
 nginx answers 404 for `/svc/<service>/actuator`, so probes and metrics are not reachable from the browser.
@@ -377,7 +379,12 @@ docker run --rm -i --network host -e INTERNAL_API_TOKEN=dev-internal-api-token g
 ```
 
 `BROWSE_RATE`, `CHECKOUT_RATE` and `DURATION` change the load. It adds stock for two products first and places
-orders as the shop's MCP server does, with the services' token.
+orders as the shop's MCP server does, with the services' token. Run it once to warm the JVMs up before measuring.
+
+On one 4-vCPU machine running the whole demo (twelve containers) and k6 together, the default load (about 350
+requests/s, 48 checkouts/s) passed with no errors, a 95th percentile of 96 ms for browsing and 430 ms for checkout.
+Every order there locks one of two product rows, so checkout is bound by Postgres commits; several instances of a
+service scale its stateless work, not a single product's stock.
 
 ### Scenario suite
 

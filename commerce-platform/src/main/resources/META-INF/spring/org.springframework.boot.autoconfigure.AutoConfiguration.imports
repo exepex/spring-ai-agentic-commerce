@@ -4,3 +4,4 @@ io.github.exepex.commerce.platform.time.ClockAutoConfiguration
 io.github.exepex.commerce.platform.security.InternalApiAutoConfiguration
 io.github.exepex.commerce.platform.consumers.ConsumerResilienceAutoConfiguration
 io.github.exepex.commerce.platform.scheduling.SchedulerLockAutoConfiguration
+io.github.exepex.commerce.platform.remote.ServiceCallsAutoConfiguration
