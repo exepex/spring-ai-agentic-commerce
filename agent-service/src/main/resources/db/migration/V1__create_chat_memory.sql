@@ -11,5 +11,5 @@ create table spring_ai_chat_memory (
 
 create index spring_ai_chat_memory_conversation on spring_ai_chat_memory (conversation_id, sequence_id);
 
--- Every save rewrites a conversation's messages with the time of the save, so idle conversations are found by age.
+-- Idle conversations are found through their old messages.
 create index spring_ai_chat_memory_timestamp on spring_ai_chat_memory ("timestamp");

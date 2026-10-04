@@ -42,7 +42,7 @@ public class ShoppingAssistant {
         this.definition = definitions.get(AgentIds.SHOPPING_ASSISTANT);
         this.chatClient = ChatClient.builder(chatModel)
                 .defaultOptions(ClaudeOptions.forAgent(definition.model(), definition.effort()))
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(conversations.memory()).build())
+                .defaultAdvisors(MessageChatMemoryAdvisor.builder(conversations).build())
                 .build();
         this.toolboxes = toolboxes;
         this.switchboard = switchboard;
