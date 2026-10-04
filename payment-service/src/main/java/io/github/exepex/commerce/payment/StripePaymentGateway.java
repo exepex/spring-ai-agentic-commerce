@@ -11,6 +11,7 @@ import io.github.exepex.commerce.payment.constants.PaymentValues;
 import io.github.exepex.commerce.payment.exception.PaymentProviderUnavailableException;
 import io.github.exepex.commerce.payment.exception.RefundNotCompletedException;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.Locale;
 
 /** Charges and refunds through Stripe. Use a test-mode key: test cards such as {@code pm_card_visa} move no money. */
@@ -18,8 +19,12 @@ final class StripePaymentGateway implements PaymentGateway {
 
     private final StripeClient stripe;
 
-    StripePaymentGateway(String secretKey) {
-        this.stripe = new StripeClient(secretKey);
+    StripePaymentGateway(String secretKey, Duration connectTimeout, Duration readTimeout) {
+        this.stripe = StripeClient.builder()
+                .setApiKey(secretKey)
+                .setConnectTimeout((int) connectTimeout.toMillis())
+                .setReadTimeout((int) readTimeout.toMillis())
+                .build();
     }
 
     @Override

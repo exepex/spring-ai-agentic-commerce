@@ -18,7 +18,8 @@ class PaymentGatewayConfiguration {
                 throw new UnsupportedStripeKeyException();
             }
             log.info("Payments go to Stripe");
-            return new StripePaymentGateway(properties.stripeSecretKey());
+            return new StripePaymentGateway(properties.stripeSecretKey(), properties.stripeConnectTimeout(),
+                    properties.stripeReadTimeout());
         }
         log.info("No Stripe key configured: payments are simulated");
         return new SimulatedPaymentGateway();
