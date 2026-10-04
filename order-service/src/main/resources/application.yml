@@ -10,7 +10,7 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/commerce
     username: commerce
-    password: commerce
+    password: ${AGENTIC_COMMERCE_DATABASE_PASSWORD:commerce}
   jpa:
     open-in-view: false
     properties:
