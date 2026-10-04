@@ -24,9 +24,9 @@ class PaymentGatewayConfigurationTest {
             var properties = context.getBean(PaymentProperties.class);
 
             assertThat(context.getBean(PaymentGateway.class)).isInstanceOf(StripePaymentGateway.class);
-            assertThat(properties.stripeConnectTimeout()).isEqualTo(Duration.ofSeconds(2));
-            // order-service waits five seconds for this service.
-            assertThat(properties.stripeReadTimeout()).isLessThan(Duration.ofSeconds(5));
+            // order-service waits five seconds for this service: connecting and reading together must end before.
+            assertThat(properties.stripeConnectTimeout().plus(properties.stripeReadTimeout()))
+                    .isLessThan(Duration.ofSeconds(5));
         });
     }
 

@@ -36,8 +36,10 @@ export const options = {
   },
   thresholds: {
     'http_req_failed': ['rate<0.01'],
-    'http_req_duration{scenario:browse}': ['p(95)<300'],
-    'http_req_duration{scenario:checkout}': ['p(95)<1000'],
+    // An answer can be a success and still wrong (an order left PAYMENT_PENDING): the checks must pass too.
+    'checks': ['rate>0.99'],
+    'http_req_duration{name:products}': ['p(95)<300'],
+    'http_req_duration{name:place order}': ['p(95)<1000'],
   },
 };
 

@@ -371,8 +371,9 @@ authentication, permissions, customer scoping, the approval limit, idempotent re
 
 [load-tests/shop.js](load-tests/shop.js) drives the hot paths through nginx with [k6](https://k6.io): browsing the
 catalog (200 requests/s) and checkout (50 orders/s: reserve stock, charge, announce through the outbox), each order
-read back, for two minutes. It fails if more than 1% of requests fail, or the 95th percentile exceeds 300 ms for
-browsing or 1 s for checkout. Run it against the demo with simulated payments:
+read back, for two minutes. It fails if more than 1% of requests fail, more than 1% of its checks fail (an order not
+confirmed, for example), or the 95th percentile exceeds 300 ms for listing products or 1 s for placing an order. Run
+it against the demo with simulated payments:
 
 ```bash
 docker run --rm -i --network host -e INTERNAL_API_TOKEN=dev-internal-api-token grafana/k6 run - < load-tests/shop.js
