@@ -29,9 +29,10 @@ lost parcel, as a ServiceNow incident, and hands it to the right team when it ca
 
 A customer orders a headlamp through the shopping assistant; operations writes off the damaged stock; the incident
 agent works the stock-out as a ServiceNow incident (cancels the order, refunds it, tells the customer) and resolves it.
-Shown at double speed, recorded with the real model and the ServiceNow simulator.
+A caption at each step says what happens and why; the waits for the model are fast-forwarded. Recorded with the real
+model, the ServiceNow simulator and simulated payments by [record-demo.cjs](docs/demo/record-demo.cjs).
 
-[Watch the demo](https://github.com/user-attachments/assets/5c9297f2-6274-4166-9504-9167dcaa4c00)
+[Watch the demo (MP4, 2:40)](docs/demo/demo.mp4)
 
 
 

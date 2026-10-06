@@ -15,7 +15,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const BASE_URL = process.env.DEMO_URL ?? 'http://localhost:8080';
-const OUT_DIR = __dirname;
+const OUT_DIR = process.env.DEMO_OUT ?? __dirname;
 const WIDTH = 1440;
 const HEIGHT = 900;
 const FAST_FORWARD = 8;
@@ -388,20 +388,26 @@ async function main() {
     'The back office sees who did what',
     'The order is cancelled and refunded. Its timeline shows every step: by the shop itself, by people, ' +
       'and by each agent, with the tool it used.',
-    'left',
+    'right',
     6,
   );
   await page.locator('ol.audit-timeline').scrollIntoViewIfNeeded();
-  await page.mouse.wheel(0, 200);
+  const refundEntry = page.locator('ol.audit-timeline li', { hasText: 'Refund issued' }).first();
+  await refundEntry.scrollIntoViewIfNeeded();
+  await page.mouse.wheel(0, 250);
   await pause(1.5);
+  await refundEntry.locator('summary').click();
+  await pause(0.6);
+  await demo('spot', 'ol.audit-timeline li details[open]');
   await caption(
     'Step 8 · Linked to traces',
     'From the purchase to the refund',
     'Agent steps in purple, people in orange, the system in grey. Every entry links to its trace in Jaeger, ' +
       'so you can follow one step across all the services it touched.',
-    'left',
+    'right',
     9,
   );
+  await demo('unspot');
   await screenshot('3-order-timeline.png');
 
   // 9. The customer
@@ -476,11 +482,12 @@ function render(raw, fastSegments, workDir) {
     '-preset', 'slow', '-crf', '26', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: 'inherit' });
 
   const palette = path.join(workDir, 'palette.png');
-  const gifScale = 'fps=8,scale=960:-1:flags=lanczos';
-  execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', mp4, '-vf', `${gifScale},palettegen=max_colors=128:stats_mode=diff`,
+  // Smaller and a little faster than the MP4, so the README can show it inline.
+  const gifScale = 'setpts=PTS/1.25,fps=6,scale=800:-1:flags=lanczos';
+  execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', mp4, '-vf', `${gifScale},palettegen=max_colors=64:stats_mode=diff`,
     palette], { stdio: 'inherit' });
   execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', mp4, '-i', palette, '-lavfi',
-    `${gifScale}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle`,
+    `${gifScale}[x];[x][1:v]paletteuse=dither=none:diff_mode=rectangle`,
     path.join(OUT_DIR, 'demo.gif')], { stdio: 'inherit' });
   console.log('Wrote demo.mp4, demo.gif and the screenshots to', OUT_DIR);
 }
