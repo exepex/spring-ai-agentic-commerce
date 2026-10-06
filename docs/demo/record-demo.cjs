@@ -205,7 +205,7 @@ const OVERLAY = String.raw`
     serviceNow(incident) {
       const field = (label, value) => '<div><dt>' + label + '</dt><dd>' + esc(value || '—') + '</dd></div>';
       const notes = incident.notes.map((note) => '<div class="sn-note"><div class="by"><b>' + esc(note.kind) +
-        '</b> · ' + esc(note.by) + ' · ' + esc(note.at) + '</div><p>' + esc(note.text) + '</p></div>').join('');
+        '</b> · ' + esc(note.by) + (note.at ? ' · ' + esc(note.at) : '') + '</div><p>' + esc(note.text) + '</p></div>').join('');
       show(make('backdrop fade live-panel', ''));
       show(make('panel fade live-panel', '<div class="sn-head"><span class="sn-logo">servicen<span>o</span>w</span>' +
         '<span>Incident</span><span class="num">' + esc(incident.number) + '</span></div><div class="sn-body"><h4>' +
@@ -242,28 +242,28 @@ async function serviceNowGet(pathAndQuery) {
   return (await response.json()).result;
 }
 
-/** The incident as ServiceNow has it now: its fields, and its work notes and comments, oldest first. */
+/** The incident as ServiceNow has it now: its fields, its latest work notes and comments, and its resolution. */
 async function readIncident(number) {
   const [incident] = await serviceNowGet(
     `/api/now/table/incident?sysparm_query=number=${number}&sysparm_display_value=true&sysparm_limit=1` +
-      '&sysparm_fields=sys_id,number,short_description,state,assignment_group,correlation_id',
+      '&sysparm_fields=number,short_description,state,assignment_group,correlation_id,work_notes,comments,close_notes',
   );
-  const journal = await serviceNowGet(
-    `/api/now/table/sys_journal_field?sysparm_query=element_id=${incident.sys_id}^ORDERBYsys_created_on` +
-      '&sysparm_fields=element,value,sys_created_by,sys_created_on',
-  );
+  // Journal fields read as "<time> - <author> (Work notes)\n<text>" entries, newest first.
+  const entries = `${incident.work_notes}\n\n${incident.comments}`
+    .split(/\n(?=\d{4}-\d\d-\d\d \d\d:\d\d:\d\d - )/)
+    .map((entry) => /^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) - (.+?) \((.+?)\)\n([\s\S]*)$/.exec(entry.trim()))
+    .filter(Boolean)
+    .map(([, when, by, kind, text]) => ({ sortKey: when, at: when.slice(11, 16), by, kind, text: text.trim() }))
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  const notes = entries.slice(-2);
+  if (incident.close_notes) notes.push({ kind: 'Resolution notes', by: 'Trailhead Agent', at: '', text: incident.close_notes });
   return {
     number: incident.number,
     title: incident.short_description,
     state: incident.state,
     group: incident.assignment_group?.display_value ?? incident.assignment_group,
     order: String(incident.correlation_id ?? '').slice(0, 8),
-    notes: journal.slice(-3).map((entry) => ({
-      kind: entry.element === 'work_notes' ? 'Work note' : 'Comment',
-      by: entry.sys_created_by,
-      at: entry.sys_created_on.slice(11, 16),
-      text: entry.value,
-    })),
+    notes,
   };
 }
 
@@ -834,7 +834,7 @@ async function main() {
   render(raw, fastSegments);
 }
 
-/** Cuts the raw recording into normal and fast-forwarded parts and writes the MP4. */
+/** Cuts the raw recording into normal and fast-forwarded parts, encodes each on its own, and joins them into the MP4. */
 function render(raw, fastSegments) {
   const parts = [];
   let cursor = 0;
@@ -845,18 +845,28 @@ function render(raw, fastSegments) {
   }
   parts.push({ start: cursor, end: null, speed: 1 });
 
-  const filters = parts.map((part, i) => {
-    const trim = part.end === null ? `trim=start=${part.start}` : `trim=start=${part.start}:end=${part.end}`;
-    return `[0:v]${trim},setpts=(PTS-STARTPTS)/${part.speed}[p${i}]`;
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'demo-render-'));
+  const list = parts.map((part, i) => {
+    const file = path.join(workDir, `part-${String(i).padStart(2, '0')}.mp4`);
+    const range = ['-ss', String(part.start), ...(part.end === null ? [] : ['-to', String(part.end)])];
+    execFileSync('ffmpeg', ['-y', '-v', 'error', ...range, '-i', raw, '-vf', `setpts=PTS/${part.speed},fps=25`, '-an',
+      '-c:v', 'libx264', '-preset', 'slow', '-crf', '27', '-pix_fmt', 'yuv420p', file], { stdio: 'inherit' });
+    return `file '${file}'`;
   });
-  const graph = `${filters.join(';')};${parts.map((_, i) => `[p${i}]`).join('')}concat=n=${parts.length}:v=1:a=0,fps=25[v]`;
+  const listFile = path.join(workDir, 'parts.txt');
+  fs.writeFileSync(listFile, list.join('\n'));
   const mp4 = path.join(OUT_DIR, 'demo.mp4');
-  execFileSync('ffmpeg', ['-y', '-v', 'error', '-i', raw, '-filter_complex', graph, '-map', '[v]', '-c:v', 'libx264',
-    '-preset', 'slow', '-crf', '27', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: 'inherit' });
+  execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy',
+    '-movflags', '+faststart', mp4], { stdio: 'inherit' });
   console.log('Wrote', mp4);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+if (process.argv[2] === '--render') {
+  // Renders an earlier raw recording again: --render <raw.webm> '<fast-forwarded segments as JSON>'
+  render(process.argv[3], JSON.parse(process.argv[4]));
+} else {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

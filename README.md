@@ -27,14 +27,13 @@ lost parcel, as a ServiceNow incident, and hands it to the right team when it ca
 
 ## See it in action
 
-A customer orders a headlamp through the shopping assistant; operations writes off the damaged stock; the incident
-agent works the stock-out as a ServiceNow incident (cancels the order, refunds it, tells the customer) and resolves it.
-A caption at each step says what happens and why; the waits for the model are fast-forwarded. Recorded with the real
-model, the ServiceNow simulator and simulated payments by [record-demo.cjs](docs/demo/record-demo.cjs).
+Six scenarios, as a customer and the shop's back office live them: an order through chat, a declined card, a prompt
+injection, a stock-out the incident agent fixes end to end, a refund above the limit that a person approves, and the
+kill switch. The video shows each incident and Slack post as they are in ServiceNow and Slack, and a caption at each
+step says what happens and why; the waits for the model are fast-forwarded. Recorded with the real model, a ServiceNow
+developer instance, a Slack workspace and simulated payments.
 
-[Watch the demo (MP4, 2:40)](docs/demo/demo.mp4)
-
-
+[Watch the demo (MP4, about 6 minutes)](docs/demo/demo.mp4)
 
 ![The demo: order through chat, a stock-out worked by the incident agent, the order's timeline](docs/demo/demo.gif)
 
